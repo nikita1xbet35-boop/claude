@@ -230,7 +230,6 @@
 
   /* SKELETON LOADING */
   .skeleton{background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 50%,var(--bg3) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;}
-  @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 
   /* ACTIVE LEAD CARD - subtle accent border */
   .lead-card.active{border-color:var(--accent)50 !important;background:var(--accent-glow) !important;box-shadow:0 0 0 1px var(--accent)20,0 2px 12px rgba(0,0,0,.3);}
@@ -1599,13 +1598,14 @@
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;" id="ar-contacts"></div>
 
-          <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:10px;" id="ar-why-box" style="display:none;">
+          <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:10px;display:none;" id="ar-why-box">
             <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;"></div>
             <div style="font-size:13px;color:var(--text2);" id="ar-why">—</div>
           </div>
 
           <div style="background:var(--bg3);border-radius:8px;padding:12px;" id="ar-next-box">
-            
+            <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;">СЛЕДУЮЩИЙ ШАГ</div>
+            <div style="font-size:13px;color:var(--text2);" id="ar-next">—</div>
           </div>
         </div>
 
@@ -1935,7 +1935,7 @@
     </div>
 
     <!-- Run preset footer -->
-    <div id="preset-run-footer" style="display:none;padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;">
+    <div id="preset-run-footer" style="display:none;padding:12px 20px;border-top:1px solid var(--border);align-items:center;gap:10px;flex-shrink:0;">
       <span id="preset-run-label" style="font-size:12px;color:var(--text2);flex:1;"></span>
       <input id="preset-run-limit" type="number" min="1" max="10" value="3" placeholder="5"
         style="width:48px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;border-radius:6px;text-align:center;outline:none;padding:4px;">
@@ -2142,7 +2142,7 @@
           <div id="tg-progress-fill" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .3s;"></div>
         </div>
       </div>
-      <div id="tg-preset-running" style="display:none;margin-top:6px;font-size:10px;color:var(--text3);font-family:var(--font-mono);" id="tg-preset-key-label"></div>
+      <div id="tg-preset-running" style="display:none;margin-top:6px;font-size:10px;color:var(--text3);font-family:var(--font-mono);"></div>
     </div>
 
     <!-- RIGHT: results -->
@@ -2420,11 +2420,14 @@
 // ══════════════════════════════════════════
 //  КОНФИГ — вставь свои данные сюда
 // ══════════════════════════════════════════
-const SUPABASE_URL  = 'https://lxsyrserfuighwxuymgb.supabase.co';   // https://xxxx.supabase.co
-const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';      // eyJ...
+// ⚠️ БЕЗОПАСНОСТЬ: SUPABASE_KEY (anon) можно держать в клиенте — он защищён RLS.
+// GROQ_KEY и SERP_KEY — приватные ключи! Перенеси вызовы Groq в Supabase Edge Function,
+// а SERP_KEY убери из фронтенда. Пока не сделано — не публикуй сайт публично.
+const SUPABASE_URL  = 'https://lxsyrserfuighwxuymgb.supabase.co';
+const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
-const GROQ_KEY = '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';  // api.groq.com → API Keys
-const SERP_KEY = 'fc9415857ed0de965ce6e2eb7baacd91710cdb18b9a5333a352ecb1485c4244d'; // serpapi.com → API Key
+const GROQ_KEY = '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';  // ⚠️ перенести в edge function
+const SERP_KEY = 'fc9415857ed0de965ce6e2eb7baacd91710cdb18b9a5333a352ecb1485c4244d'; // ⚠️ перенести в edge function
 // ══════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════
@@ -2455,6 +2458,7 @@ async function loadLeads(){
   leads = data || [];
   renderLeads(curFilter);
   updateBadge();
+  populateGeoFilter();
   if(document.getElementById('page-dashboard')?.classList.contains('active')) _renderDashboard();
 }
 
@@ -2613,17 +2617,17 @@ async function generateLeadMessage(id){
 }
 
 function showMessageModal(en, ru, name){
-  // Remove existing modal
   const existing = document.getElementById('msg-modal');
   if(existing) existing.remove();
 
+  const safeName = String(name||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const modal = document.createElement('div');
   modal.id = 'msg-modal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.8);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;';
   modal.innerHTML = `
     <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;width:560px;max-width:92vw;max-height:85vh;display:flex;flex-direction:column;animation:fadeUp .2s cubic-bezier(.16,1,.3,1) both;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0;">
-        <div style="font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);">✦ Сообщение для ${name}</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);">✦ Сообщение для ${safeName}</div>
         <button onclick="document.getElementById('msg-modal').remove()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;">×</button>
       </div>
       <div style="overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:14px;">
@@ -2732,7 +2736,7 @@ function openLead(id){
       <div class="detail-section">
         <div class="dsec-title" style="display:flex;justify-content:space-between;align-items:center;">
           Редактировать
-          <button onclick="saveLead_('${l.id}')" style="font-size:11px;font-family:var(--font-mono);padding:3px 10px;border-radius:5px;border:1px solid var(--accent)40;background:var(--accent-glow);color:var(--accent2);cursor:pointer;">✓ Сохранить</button>
+          <button id="save-btn-${l.id}" onclick="saveLead_('${l.id}')" style="font-size:11px;font-family:var(--font-mono);padding:3px 10px;border-radius:5px;border:1px solid var(--accent)40;background:var(--accent-glow);color:var(--accent2);cursor:pointer;">✓ Сохранить</button>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
           <div>
@@ -2952,30 +2956,6 @@ function toggleMoreGeo(){
 function filterPipeline(){
   applyFilters();
 }
-function filterPipeline_unused(){
-  const q = (document.getElementById('pipeline-search').value || '').toLowerCase();
-  const base = curFilter ? leads.filter(l => l.stage === curFilter) : leads;
-  const data = q ? base.filter(l => (l.name+' '+l.url+' '+(l.geo||'')).toLowerCase().includes(q)) : base;
-  document.getElementById('leads-count-label').textContent = data.length + ' лидов';
-  const list = document.getElementById('leads-list');
-  if(data.length === 0){
-    list.innerHTML = '<div style="padding:40px 16px;text-align:center;color:var(--text3);font-size:12px;">Ничего не найдено</div>';
-    return;
-  }
-  list.innerHTML = data.map(l =>
-    '<div class="lead-card' + (activeId===l.id?' active':'') + '" onclick="openLead(\''+l.id+'\')" id="lc-'+l.id+'">' +
-    '<div style="min-width:0;">' +
-    '<div class="lead-name">'+(l.name||'—')+'</div>' +
-    '<div class="lead-url">'+(l.url||'')+'</div>' +
-    '<div class="lead-meta">' +
-    '<span class="chip chip-type">'+(l.type||'—')+'</span>' +
-    '<span class="chip chip-geo">'+(l.geo||'—')+'</span>' +
-    '<span class="chip '+(stageChip[l.stage]||'chip-new')+'">'+(stageRU[l.stage]||l.stage)+'</span>' +
-    '</div></div>' +
-    '<span class="score-badge '+sc(l.score||0)+'">'+(l.score||'—')+'</span>' +
-    '</div>'
-  ).join('');
-}
 
 async function saveLead_(id){
   const stageEl = document.getElementById('edit-stage-' + id);
@@ -3058,9 +3038,11 @@ function applyFilters(){
   const search  = (document.getElementById('pipeline-search')?.value || '').toLowerCase();
   curFilter = stage;
 
+  const geo = document.getElementById('filter-geo')?.value || '';
   let data = leads.filter(l => {
     if(stage   && l.stage !== stage) return false;
     if(prio    && l.priority !== prio) return false;
+    if(geo     && l.geo !== geo) return false;
     if(contact === 'email' && !l.email) return false;
     if(contact === 'tg'    && !l.tg) return false;
     if(contact === 'none'  && (l.email || l.tg)) return false;
@@ -3101,6 +3083,7 @@ function applyFilters(){
   document.getElementById('sn-res').textContent = cnt.researched;
   document.getElementById('sn-rdy').textContent = cnt.ready;
   document.getElementById('sn-wt').textContent  = cnt.waiting;
+  document.getElementById('sn-fu').textContent  = cnt.followup;
 }
 function statClick(v, el){
   document.querySelectorAll('.stat-item').forEach(s => s.classList.remove('active'));
@@ -3140,7 +3123,7 @@ function goTo(page, el){
        (page==='stats'     && txt==='Статистика') ||
        (page==='kb'        && txt==='База знаний') ||
        (page==='analytics' && txt==='Аналитика') ||
-       (page==='blacklist' && txt==='🚫 Блэклист') ||
+       (page==='blacklist' && txt==='Блэклист') ||
        (page==='tg'        && txt==='Telegram')) t.classList.add('active');
   });
   if(page === 'dashboard') renderDashboard();
@@ -3150,11 +3133,6 @@ function goTo(page, el){
   if(page === 'analyze') loadAnalyzeHistory();
   if(page === 'outreach') initOutreachDesk();
   if(page === 'stats') renderStats();
-  if(page === 'kb') initKB();
-  if(page === 'blacklist') initBlacklist();
-  if(page === 'yt') initYT();
-  if(page === 'tg') initTG();
-  if(page === 'analytics') initAnalytics();
   if(page === 'kb') initKB();
   if(page === 'blacklist') initBlacklist();
   if(page === 'yt') initYT();
@@ -3650,9 +3628,6 @@ function generateReport(){
   const colFTD    = findCol(['Новые аккаунты с депозитами (количество первых депозитов)','новыеаккаунты','количествопервых']);
   const colDeps   = findCol(['Сумма внесенныхдепозитов','суммавнесен','внесенных']);
   const colProfit = findCol(['Прибыль','прибыл']);
-
-  console.log('Keys:', allKeys);
-  console.log('Detected:', {colID, colRegs, colFTD, colDeps, colProfit});
 
   if(!colRegs && !colFTD){
     showError('Не найдены колонки. Убедитесь что скопировали вместе с заголовком.');
@@ -9039,22 +9014,6 @@ try {
     requestAnimationFrame(loop);
   })();
 
-  // ── Убираем стагер-анимации на карточках при рендере ─────────────
-  // Оригинальный код иногда добавляет animation-delay через inline style.
-  // Патчим renderLeads если доступен.
-  const _rl = window.renderLeads;
-  if (typeof _rl === 'function') {
-    window.renderLeads = function() {
-      const r = _rl.apply(this, arguments);
-      // Убираем все animation-delay с карточек после рендера
-      requestAnimationFrame(function() {
-        document.querySelectorAll('.lead-card').forEach(function(c) {
-          c.style.animationDelay = '0s';
-        });
-      });
-      return r;
-    };
-  }
 
 })();
 </script>
