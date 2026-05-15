@@ -9088,38 +9088,62 @@ try {
   // ── ВОРОНКА ──────────────────────────────────────────────────────
   window.buildFunnel = function(){
     if(typeof leads==='undefined'||!Array.isArray(leads)) return '';
-    var order  = ['new','researched','waiting','followup','ready'];
-    var labels = {new:'Новые',researched:'Изучены',waiting:'Ожидание',followup:'Follow-up',ready:'Не подходящий'};
-    var colors = {new:'#60a5fa',researched:'#c084fc',waiting:'#fbbf24',followup:'#34d399',ready:'#f87171'};
-    var counts = order.map(function(s){
+    var funnelOrder  = ['new','researched','waiting','followup'];
+    var labels = {new:'Новые',researched:'Изучены',waiting:'Ожидание',followup:'Follow-up'};
+    var colors = {new:'#60a5fa',researched:'#c084fc',waiting:'#fbbf24',followup:'#34d399'};
+    var rejected = leads.filter(function(l){return l.stage==='ready';}).length;
+    var counts = funnelOrder.map(function(s){
       return {s:s, n:leads.filter(function(l){return l.stage===s;}).length};
     });
     var top = counts[0].n || 1;
 
-    var html = '<div style="display:flex;flex-direction:column;gap:6px;">';
+    var html = '<div style="display:flex;flex-direction:column;gap:0;">';
     counts.forEach(function(c,i){
-      var isReject = c.s==='ready';
-      var pct = Math.min(Math.round(c.n/top*100),100);
       var clr = colors[c.s];
-      html += '<div onclick="goTo(\'pipeline\',null);setTimeout(function(){document.getElementById(\'filter-stage\').value=\''+c.s+'\';applyFilters();},60)" style="cursor:pointer;">'
-        // строка: точка + название + число + %
-        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">'
+      var pct = Math.min(Math.round(c.n/top*100),100);
+      var convRate = i===0 ? null : (counts[i-1].n>0 ? Math.round(c.n/counts[i-1].n*100) : 0);
+      // each bar centered, width proportional to pct of top stage
+      var marginPct = Math.round((100-pct)/2);
+      html += '<div onclick="goTo(\'pipeline\',null);setTimeout(function(){document.getElementById(\'filter-stage\').value=\''+c.s+'\';applyFilters();},60)" style="cursor:pointer;position:relative;">';
+      // conversion rate connector
+      if(i>0){
+        html += '<div style="display:flex;align-items:center;justify-content:center;height:20px;gap:6px;">'
+          +'<div style="width:1px;height:12px;background:var(--border2);"></div>'
+          +'<span style="font-size:9px;font-family:var(--font-mono);color:var(--text3);">'+convRate+'%</span>'
+          +'<div style="width:1px;height:12px;background:var(--border2);"></div>'
+          +'</div>';
+      }
+      // funnel bar
+      html += '<div style="margin-left:'+marginPct+'%;margin-right:'+marginPct+'%;position:relative;height:36px;border-radius:7px;overflow:hidden;transition:filter .15s;" onmouseover="this.style.filter=\'brightness(1.2)\'" onmouseout="this.style.filter=\'\'">'
+        // background
+        +'<div style="position:absolute;inset:0;background:'+clr+'18;"></div>'
+        // left accent bar
+        +'<div style="position:absolute;top:0;bottom:0;left:0;width:3px;background:'+clr+';opacity:0.9;"></div>'
+        // content
+        +'<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 10px 0 12px;">'
+          +'<span style="font-size:12px;font-weight:500;color:var(--text2);letter-spacing:-.1px;">'+labels[c.s]+'</span>'
           +'<div style="display:flex;align-items:center;gap:7px;">'
-            +'<div style="width:6px;height:6px;border-radius:50%;background:'+clr+';box-shadow:0 0 5px '+clr+'80;flex-shrink:0;"></div>'
-            +'<span style="font-size:12px;color:'+(isReject?'var(--text3)':'var(--text2)')+';">'+labels[c.s]+'</span>'
-            +(isReject?'<span style="font-size:9px;color:var(--text3);background:var(--bg3);padding:1px 5px;border-radius:3px;font-family:var(--font-mono);">отсев</span>':'')
+            +'<span style="font-size:14px;font-family:var(--font-mono);font-weight:700;color:'+clr+';text-shadow:0 0 12px '+clr+'60;">'+c.n+'</span>'
+            +(i===0?'<span style="font-size:9px;font-family:var(--font-mono);color:var(--text3);background:var(--bg3);padding:2px 5px;border-radius:4px;">100%</span>'
+              :'<span style="font-size:9px;font-family:var(--font-mono);color:var(--text3);background:var(--bg3);padding:2px 5px;border-radius:4px;">'+pct+'%</span>')
           +'</div>'
-          +'<div style="display:flex;align-items:center;gap:6px;">'
-            +'<span style="font-size:13px;font-family:var(--font-mono);font-weight:600;color:'+clr+';">'+c.n+'</span>'
-            +(isReject?'':'<span style="font-size:10px;font-family:var(--font-mono);color:var(--text3);min-width:26px;text-align:right;">'+pct+'%</span>')
-          +'</div>'
-        +'</div>'
-        // progress bar
-        +'<div style="height:4px;background:var(--bg4);border-radius:2px;overflow:hidden;">'
-          +'<div style="height:100%;width:'+pct+'%;background:'+clr+';border-radius:2px;opacity:'+(isReject?'0.3':'0.75')+';transition:width .4s ease;"></div>'
         +'</div>'
         +'</div>';
+      html += '</div>';
     });
+
+    // rejected block
+    if(rejected>0){
+      html += '<div style="margin-top:10px;padding:7px 12px;border-radius:7px;border:1px dashed rgba(248,113,113,0.25);background:rgba(248,113,113,0.05);display:flex;align-items:center;justify-content:space-between;cursor:pointer;" onclick="goTo(\'pipeline\',null);setTimeout(function(){document.getElementById(\'filter-stage\').value=\'ready\';applyFilters();},60)">'
+        +'<div style="display:flex;align-items:center;gap:6px;">'
+          +'<span style="font-size:12px;color:var(--red);opacity:.7;">↩</span>'
+          +'<span style="font-size:11px;color:var(--text3);">Не подходящий</span>'
+          +'<span style="font-size:9px;color:var(--red);background:var(--red-bg);padding:1px 5px;border-radius:3px;font-family:var(--font-mono);">отсев</span>'
+        +'</div>'
+        +'<span style="font-size:13px;font-family:var(--font-mono);font-weight:600;color:var(--red);">'+rejected+'</span>'
+        +'</div>';
+    }
+
     html += '</div>';
     return html;
   };
