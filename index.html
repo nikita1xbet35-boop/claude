@@ -2678,6 +2678,24 @@ const BRAND_PRESETS = {
 
 function getBrandCfg(){ return BRAND_CONFIG[currentBrand] || BRAND_CONFIG['1xbet']; }
 
+function brandPresenceBadges(l, compact = false){
+  const brands = [
+    { key: 'has_1xbet',     label: '1xBet',   color: '#7B61FF' },
+    { key: 'has_1xcasino',  label: 'Casino',  color: '#10b981' },
+    { key: 'has_luckypari', label: 'LuckyPari', color: '#f97316' },
+  ];
+  const pad = compact ? '1px 6px' : '2px 10px';
+  const sz  = compact ? '10px' : '11px';
+  return brands.map(b => {
+    const on = !!l[b.key];
+    const bg  = on ? `${b.color}22` : 'var(--bg3)';
+    const col = on ? b.color : 'var(--text3)';
+    const brd = on ? `${b.color}55` : 'var(--border)';
+    const ico = on ? '● ' : '○ ';
+    return `<span style="background:${bg};color:${col};border:1px solid ${brd};padding:${pad};border-radius:20px;font-size:${sz};font-family:var(--font-mono);">${ico}${b.label}</span>`;
+  }).join('');
+}
+
 const BS_HTML = (brand) => {
   const opts = [
     {b:'1xbet', c:'#7B61FF', l:'1XBET'},
@@ -3056,7 +3074,7 @@ function renderLeads(filter = ''){
             <span class="chip chip-type">${l.type || '—'}</span>
             <span class="chip chip-geo">${l.geo || '—'}</span>
             <span class="chip ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage}</span>
-            ${l.has_1xbet ? '<span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;padding:2px 6px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ 1xBet</span>' : ''}
+            ${brandPresenceBadges(l, true)}
           </div>
         </div>
         ${scoreRingHTML(l.score)}
@@ -3178,9 +3196,7 @@ function openLead(id){
         <span class="chip chip-type">${l.type || '—'}</span>
         <span class="chip chip-geo">${l.geo || '—'}</span>
         <span class="chip ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage}</span>
-        ${l.has_1xbet
-          ? '<span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;padding:2px 10px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ 1xBet уже есть</span>'
-          : '<span style="background:var(--green-bg);color:var(--green);border:1px solid var(--green)20;padding:2px 10px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">✓ 1xBet не найден</span>'}
+        ${brandPresenceBadges(l)}
         <span id="cross-brand-warn-${l.id}"></span>
         <span class="score-badge ${sc(l.score || 0)}" style="margin-left:auto;">${l.score || '—'} / 100</span>
       </div>
@@ -4798,7 +4814,7 @@ function renderTopLeads(container){
         <div style="display:flex;gap:4px;flex-wrap:wrap;">
           <span class="chip chip-geo">${l.geo||'—'}</span>
           <span class="chip chip-type" style="font-size:11px;">${(l.type||'—').split(' ')[0]}</span>
-          ${l.has_1xbet?'<span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;padding:1px 6px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ 1xBet</span>':''}
+          ${brandPresenceBadges(l, true)}
         </div>
       </div>`).join('')}
   </div>`;
