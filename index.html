@@ -56,10 +56,17 @@
   .badge-count{background:var(--accent-glow);border:1px solid var(--accent)30;color:var(--accent2);font-size:11px;font-family:var(--font-mono);padding:3px 8px;border-radius:20px;}
   .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)80;}
   /* BRAND SWITCHER */
-  #brand-switcher{display:flex;align-items:center;gap:2px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:3px 3px;flex-shrink:0;}
-  .brand-btn{padding:4px 9px;background:transparent;border:1px solid transparent;border-radius:5px;color:var(--text3);font-size:10px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;}
-  .brand-btn:hover{color:var(--text2);background:var(--bg4);}
-  .brand-btn-active{color:var(--btn-clr,var(--accent))!important;border-color:color-mix(in srgb,var(--btn-clr,var(--accent)) 40%,transparent)!important;background:color-mix(in srgb,var(--btn-clr,var(--accent)) 12%,transparent)!important;}
+  #brand-switcher{position:relative;flex-shrink:0;}
+  #brand-drop-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--accent2);font-size:11px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+  #brand-drop-btn:hover{border-color:var(--border3);background:var(--bg4);}
+  #brand-drop-btn svg{transition:transform .15s;}
+  #brand-drop-btn.open svg{transform:rotate(180deg);}
+  #brand-dropdown{display:none;position:absolute;top:calc(100% + 6px);left:0;background:var(--bg3);border:1px solid var(--border2);border-radius:9px;padding:4px;min-width:140px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.4);}
+  #brand-dropdown.open{display:block;}
+  .brand-opt{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--text2);transition:background .1s;}
+  .brand-opt:hover{background:var(--bg4);}
+  .brand-opt.active{color:var(--btn-clr,var(--accent));}
+  .brand-opt-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
 
   /* PIPELINE LAYOUT */
   .pipeline-layout{display:grid;grid-template-columns:272px 1fr 356px;flex:1;overflow:hidden;}
@@ -970,9 +977,21 @@
       Affiliate<span>OS</span>
     </div>
     <div id="brand-switcher">
-      <button class="brand-btn brand-btn-active" data-brand="1xbet" onclick="setBrand('1xbet')">1XBET</button>
-      <button class="brand-btn" data-brand="1xcasino" onclick="setBrand('1xcasino')">1XCASINO</button>
-      <button class="brand-btn" data-brand="luckypari" onclick="setBrand('luckypari')">LUCKYPARI</button>
+      <button id="brand-drop-btn" onclick="toggleBrandDropdown(event)">
+        <span id="brand-drop-label">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div id="brand-dropdown">
+        <div class="brand-opt active" data-brand="1xbet" onclick="setBrandOpt('1xbet')" style="--btn-clr:#7B61FF">
+          <div class="brand-opt-dot" style="background:#7B61FF"></div>1XBET
+        </div>
+        <div class="brand-opt" data-brand="1xcasino" onclick="setBrandOpt('1xcasino')" style="--btn-clr:#10b981">
+          <div class="brand-opt-dot" style="background:#10b981"></div>1XCASINO
+        </div>
+        <div class="brand-opt" data-brand="luckypari" onclick="setBrandOpt('luckypari')" style="--btn-clr:#f97316">
+          <div class="brand-opt-dot" style="background:#f97316"></div>LUCKYPARI
+        </div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab active" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -2552,11 +2571,32 @@ function applyBrandTheme(brand){
   r.setProperty('--accent-grad', cfg.accentGrad);
   const glowEl = document.getElementById('brand-glow-style');
   if(glowEl) glowEl.textContent = `body::before{background:${cfg.bgGlow}!important;}`;
-  document.querySelectorAll('.brand-btn').forEach(b => {
-    const active = b.dataset.brand === brand;
-    b.classList.toggle('brand-btn-active', active);
-    b.style.setProperty('--btn-clr', active ? cfg.accent : '');
+  // update dropdown label & active state
+  const lbl = document.getElementById('brand-drop-label');
+  if(lbl){ lbl.textContent = cfg.label; lbl.style.color = cfg.accent; }
+  const btn = document.getElementById('brand-drop-btn');
+  if(btn) btn.style.borderColor = cfg.accent + '50';
+  document.querySelectorAll('.brand-opt').forEach(o => {
+    o.classList.toggle('active', o.dataset.brand === brand);
   });
+}
+
+function toggleBrandDropdown(e){
+  e.stopPropagation();
+  const dd = document.getElementById('brand-dropdown');
+  const btn = document.getElementById('brand-drop-btn');
+  const open = dd.classList.toggle('open');
+  btn.classList.toggle('open', open);
+  if(open){
+    const close = () => { dd.classList.remove('open'); btn.classList.remove('open'); document.removeEventListener('click', close); };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
+}
+
+function setBrandOpt(brand){
+  document.getElementById('brand-dropdown').classList.remove('open');
+  document.getElementById('brand-drop-btn').classList.remove('open');
+  setBrand(brand);
 }
 
 function setBrand(brand){
