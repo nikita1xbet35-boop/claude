@@ -56,12 +56,12 @@
   .badge-count{background:var(--accent-glow);border:1px solid var(--accent)30;color:var(--accent2);font-size:11px;font-family:var(--font-mono);padding:3px 8px;border-radius:20px;}
   .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)80;}
   /* BRAND SWITCHER — fixed position, always on top */
-  #brand-switcher-fixed{position:fixed;top:14px;left:148px;z-index:99999;}
+  #brand-switcher-fixed{position:fixed;bottom:60px;right:18px;z-index:99999;}
   .bs-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;background:oklch(0.115 0.008 280);border:1px solid var(--border2);border-radius:7px;font-size:11px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;color:var(--accent2);}
   .bs-btn:hover{border-color:var(--border3);}
   .bs-btn svg{transition:transform .15s;flex-shrink:0;}
   .bs-btn.open svg{transform:rotate(180deg);}
-  .bs-dd{display:none;position:absolute;top:calc(100% + 6px);left:0;background:oklch(0.13 0.008 280);border:1px solid var(--border2);border-radius:9px;padding:4px;min-width:144px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.6);}
+  .bs-dd{display:none;position:absolute;bottom:calc(100% + 6px);right:0;background:oklch(0.13 0.008 280);border:1px solid var(--border2);border-radius:9px;padding:4px;min-width:144px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.6);}
   .bs-dd.open{display:block;}
   .bs-opt{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--text2);transition:background .1s;}
   .bs-opt:hover{background:var(--bg4);}
