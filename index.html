@@ -2791,6 +2791,12 @@ async function saveLead(leadData){
   if(data && !data.contact_email && !data.contact_telegram){
     setTimeout(() => runContactExtraction(data.id), 800);
   }
+  // cross-brand duplicate warning
+  checkCrossBrandDuplicate(leadData.url).then(dups => {
+    if(!dups.length) return;
+    const brandNames = [...new Set(dups.map(d => (BRAND_CONFIG[d.brand]||{}).display || d.brand))].join(', ');
+    toast('⚠ Этот сайт уже есть в ' + brandNames);
+  });
   return data;
 }
 
@@ -2934,8 +2940,42 @@ function renderContactSection(leadId){
     ${l.contact_source_url ? `<div class="kv-row"><span class="kv-key">📄 Источник</span><span class="kv-val" style="font-size:10px;color:var(--text3);font-family:var(--font-mono);word-break:break-all;">${l.contact_source_url.replace(/^https?:\/\//,'')}</span></div>` : ''}
     ${notFound ? `<div style="font-size:11px;color:var(--text3);padding:4px 0;">Контакты не найдены — нужна ручная проверка</div>` : ''}
     ${neverRun ? `<div style="font-size:11px;color:var(--text3);padding:4px 0;">Контакты не искались</div>` : ''}
-    <button onclick="runContactExtraction('${leadId}')" style="margin-top:6px;font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">🔄 ${neverRun?'Найти контакты':'Повторить поиск'}</button>
+    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+      <button onclick="runContactExtraction('${leadId}')" style="font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">🔄 ${neverRun?'Найти контакты':'Повторить поиск'}</button>
+      ${(l.contact_email||l.email) ? `<button onclick="openGmailDraft('${leadId}')" style="font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid rgba(59,130,246,.3);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;">✉ Gmail черновик</button>` : ''}
+    </div>
   `;
+}
+
+function openGmailDraft(leadId){
+  const l = leads.find(x => x.id === leadId);
+  if(!l) return;
+  const email = l.contact_email || l.email || '';
+  if(!email){ alert('Нет email для этого лида'); return; }
+  const cfg = getBrandCfg();
+  const outreachEl = document.getElementById('outreach-text-' + leadId);
+  const outreachText = (outreachEl ? outreachEl.innerText : '').trim();
+  const hasOutreach = outreachText && !outreachText.startsWith('Нажми');
+  const subject = encodeURIComponent('Partnership with ' + cfg.partnerBrand + ' — ' + cfg.partnerProgram);
+  const body = hasOutreach
+    ? encodeURIComponent(outreachText)
+    : encodeURIComponent('Hi,\n\nI\'d love to discuss a partnership opportunity with ' + cfg.partnerBrand + '.\n\nOur affiliate program ' + cfg.partnerProgram + ' offers ' + cfg.revshare + ' revenue share.\n\nBest regards,\n' + cfg.signature);
+  window.open('https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(email) + '&su=' + subject + '&body=' + body, '_blank');
+}
+
+async function checkCrossBrandDuplicate(url){
+  if(!url) return [];
+  let domain;
+  try { domain = new URL(url.startsWith('http') ? url : 'https://'+url).hostname.replace(/^www\./, ''); }
+  catch(e){ return []; }
+  const {data} = await sb.from('leads').select('id,name,brand,stage,url').neq('brand', currentBrand);
+  if(!data) return [];
+  return data.filter(l => {
+    try {
+      const d = new URL((l.url||'').startsWith('http') ? (l.url||'') : 'https://'+(l.url||'')).hostname.replace(/^www\./, '');
+      return d === domain;
+    } catch(e){ return false; }
+  });
 }
 
 // ══════════════════════════════════════════
@@ -3141,6 +3181,7 @@ function openLead(id){
         ${l.has_1xbet
           ? '<span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;padding:2px 10px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ 1xBet уже есть</span>'
           : '<span style="background:var(--green-bg);color:var(--green);border:1px solid var(--green)20;padding:2px 10px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">✓ 1xBet не найден</span>'}
+        <span id="cross-brand-warn-${l.id}"></span>
         <span class="score-badge ${sc(l.score || 0)}" style="margin-left:auto;">${l.score || '—'} / 100</span>
       </div>
       <div class="detail-actions">
@@ -3248,6 +3289,13 @@ function openLead(id){
     </div>`;
   // render contact section after DOM is set
   setTimeout(() => renderContactSection(l.id), 0);
+  // cross-brand duplicate badge
+  checkCrossBrandDuplicate(l.url).then(dups => {
+    const warnEl = document.getElementById('cross-brand-warn-' + l.id);
+    if(!warnEl || !dups.length) return;
+    const brandNames = [...new Set(dups.map(d => (BRAND_CONFIG[d.brand]||{}).display || d.brand))].join(', ');
+    warnEl.innerHTML = '<span style="background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.25);padding:2px 10px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ Уже в ' + brandNames + '</span>';
+  });
 }
 
 function cpContact(id){
@@ -4681,6 +4729,9 @@ function _renderDashboard(){
       </div>
     </div>
 
+    <!-- DAILY DIGEST -->
+    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;margin-bottom:14px;" id="dash-digest"></div>
+
     <!-- TOP NEW LEADS -->
     <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;" id="dash-top-leads-wrap">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
@@ -4708,6 +4759,7 @@ function _renderDashboard(){
   });
 
   renderTopLeads(document.getElementById('dash-top-leads'));
+  renderDailyDigest();
 
   // typing effect for greeting
   setTimeout(() => typeText(document.getElementById('dash-greeting'), greeting + ', Nick 👋', 35), 100);
@@ -4750,6 +4802,81 @@ function renderTopLeads(container){
         </div>
       </div>`).join('')}
   </div>`;
+}
+
+function renderDailyDigest(){
+  const el = document.getElementById('dash-digest');
+  if(!el) return;
+  const now = new Date();
+  const today = new Date(now); today.setHours(0,0,0,0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
+  const cfg = getBrandCfg();
+  const todayLeads = leads.filter(l => { const d=new Date(l.created_at); return d>=today && d<tomorrow; });
+  const overdue = leads.filter(l => l.stage==='followup' && l.followup_due_at && new Date(l.followup_due_at) < now);
+  const dueSoon = leads.filter(l => l.stage==='followup' && l.followup_due_at && new Date(l.followup_due_at)>=now && new Date(l.followup_due_at)<new Date(now.getTime()+86400000*3));
+  const stageNames = {new:'Новые',researched:'Изучены',ready:'Не подх.',waiting:'Ожидание',followup:'Follow-up'};
+  const stageColors = {new:'var(--blue)',researched:'var(--purple)',ready:'var(--text3)',waiting:'var(--amber)',followup:'var(--green)'};
+  const dateStr = now.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div>
+        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;">Дейли дайджест</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px;">${dateStr} · ${cfg.display}</div>
+      </div>
+      <button onclick="copyDailyDigest()" style="font-size:11px;font-family:var(--font-mono);padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">📋 Скопировать</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;">
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center;">
+        <div style="font-size:26px;font-weight:500;font-family:var(--font-mono);color:var(--blue);">${todayLeads.length}</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px;">добавлено сегодня</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center;">
+        <div style="font-size:26px;font-weight:500;font-family:var(--font-mono);color:${overdue.length?'var(--red)':'var(--green)'};">${overdue.length}</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px;">просроченных FU</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center;">
+        <div style="font-size:26px;font-weight:500;font-family:var(--font-mono);color:var(--amber);">${dueSoon.length}</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px;">дедлайн ≤3 дней</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:${overdue.length?'12px':'0'};">
+      ${Object.entries(stageNames).map(([s,n]) => `
+        <div style="display:flex;align-items:center;gap:5px;background:var(--bg3);border-radius:6px;padding:5px 10px;">
+          <div style="width:6px;height:6px;border-radius:50%;background:${stageColors[s]};flex-shrink:0;"></div>
+          <span style="font-size:11px;color:var(--text2);font-family:var(--font-mono);">${n}</span>
+          <span style="font-size:12px;font-weight:600;color:${stageColors[s]};font-family:var(--font-mono);">${leads.filter(l=>l.stage===s).length}</span>
+        </div>`).join('')}
+    </div>
+    ${overdue.length ? `<div style="background:var(--red-bg);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px 12px;margin-top:12px;">
+      <div style="font-size:11px;color:var(--red);font-family:var(--font-mono);margin-bottom:6px;">⚠ Просроченные follow-ups (${overdue.length})</div>
+      ${overdue.slice(0,4).map(l=>`<div onclick="goTo('pipeline',null);setTimeout(()=>openLead('${l.id}'),60)" style="font-size:12px;color:var(--text);padding:3px 0;cursor:pointer;display:flex;gap:8px;">${l.name||l.url||'—'}<span style="color:var(--text3);font-family:var(--font-mono);font-size:11px;">${new Date(l.followup_due_at).toLocaleDateString('ru-RU')}</span></div>`).join('')}
+      ${overdue.length>4?`<div style="font-size:10px;color:var(--text3);margin-top:4px;">+ ещё ${overdue.length-4}</div>`:''}
+    </div>` : ''}
+  `;
+}
+
+function copyDailyDigest(){
+  const now = new Date();
+  const cfg = getBrandCfg();
+  const today = new Date(now); today.setHours(0,0,0,0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
+  const todayLeads = leads.filter(l => { const d=new Date(l.created_at); return d>=today && d<tomorrow; });
+  const overdue = leads.filter(l => l.stage==='followup' && l.followup_due_at && new Date(l.followup_due_at) < now);
+  const stageNames = {new:'Новые',researched:'Изучены',ready:'Не подходящие',waiting:'Ожидание',followup:'Follow-up'};
+  const stageLine = Object.entries(stageNames).map(([s,n]) => n + ': ' + leads.filter(l=>l.stage===s).length).join(' | ');
+  const lines = [
+    '📊 Дейли дайджест ' + cfg.display + ' — ' + now.toLocaleDateString('ru-RU',{day:'numeric',month:'long'}),
+    '',
+    '📥 Добавлено сегодня: ' + todayLeads.length,
+    '📋 Pipeline: ' + stageLine,
+    '⚠ Просроченных FU: ' + overdue.length,
+  ];
+  if(overdue.length){
+    lines.push('');
+    lines.push('Просроченные:');
+    overdue.slice(0,5).forEach(l => lines.push('• ' + (l.name||l.url||'—') + ' (' + new Date(l.followup_due_at).toLocaleDateString('ru-RU') + ')'));
+  }
+  navigator.clipboard.writeText(lines.join('\n')).then(() => toast('Скопировано!')).catch(()=>{});
 }
 
 // ══════════════════════════════════════════
