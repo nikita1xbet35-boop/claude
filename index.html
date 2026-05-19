@@ -55,6 +55,11 @@
   .topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
   .badge-count{background:var(--accent-glow);border:1px solid var(--accent)30;color:var(--accent2);font-size:11px;font-family:var(--font-mono);padding:3px 8px;border-radius:20px;}
   .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)80;}
+  /* BRAND SWITCHER */
+  #brand-switcher{display:flex;align-items:center;gap:2px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:3px 3px;flex-shrink:0;}
+  .brand-btn{padding:4px 9px;background:transparent;border:1px solid transparent;border-radius:5px;color:var(--text3);font-size:10px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+  .brand-btn:hover{color:var(--text2);background:var(--bg4);}
+  .brand-btn-active{color:var(--btn-clr,var(--accent))!important;border-color:color-mix(in srgb,var(--btn-clr,var(--accent)) 40%,transparent)!important;background:color-mix(in srgb,var(--btn-clr,var(--accent)) 12%,transparent)!important;}
 
   /* PIPELINE LAYOUT */
   .pipeline-layout{display:grid;grid-template-columns:272px 1fr 356px;flex:1;overflow:hidden;}
@@ -978,11 +983,17 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
     </nav>
+    <div id="brand-switcher">
+      <button class="brand-btn brand-btn-active" data-brand="1xbet" onclick="setBrand('1xbet')">1XBET</button>
+      <button class="brand-btn" data-brand="1xcasino" onclick="setBrand('1xcasino')">1XCASINO</button>
+      <button class="brand-btn" data-brand="luckypari" onclick="setBrand('luckypari')">LUCKYPARI</button>
+    </div>
     <div class="topbar-right">
       <span class="badge-count" id="dash-badge">0 лидов</span>
       <div class="status-dot"></div>
     </div>
   </header>
+  <style id="brand-glow-style"></style>
   <div id="dashboard-content" style="flex:1;overflow-y:auto;padding:24px 28px;background:transparent;"></div>
 </div>
 
@@ -2448,11 +2459,124 @@ function sc(s){return s>=80?'score-high':s>=60?'score-mid':'score-low';}
 function sigC(t){return t==='positive'?'sig-green':t==='negative'?'sig-red':'sig-amber';}
 
 // ══════════════════════════════════════════
+//  MULTI-BRAND CONFIG
+// ══════════════════════════════════════════
+let currentBrand = localStorage.getItem('affiliateos_brand') || '1xbet';
+
+const BRAND_CONFIG = {
+  '1xbet': {
+    label:'1XBET', display:'1xBet',
+    accent:'#7B61FF', accent2:'#a78bfa',
+    accentGlow:'rgba(123,97,255,0.18)',
+    accentGrad:'linear-gradient(135deg,#7B61FF,#a78bfa)',
+    bgGlow:'radial-gradient(ellipse 80% 50% at 50% -10%,rgba(123,97,255,0.12) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(123,97,255,0.06) 0%,transparent 60%)',
+    managerName:'Nick', managerTg:'@aff_manager_xbet',
+    signature:'Nick, 1xPartners',
+    partnerBrand:'1xBet', partnerProgram:'1xPartners',
+    revshare:'25–35%',
+  },
+  '1xcasino': {
+    label:'1XCASINO', display:'1xCasino',
+    accent:'#10b981', accent2:'#34d399',
+    accentGlow:'rgba(16,185,129,0.18)',
+    accentGrad:'linear-gradient(135deg,#10b981,#34d399)',
+    bgGlow:'radial-gradient(ellipse 80% 50% at 50% -10%,rgba(16,185,129,0.10) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(16,185,129,0.05) 0%,transparent 60%)',
+    managerName:'Nick', managerTg:'@aff_manager_xbet',
+    signature:'Nick, 1xCasino Partners',
+    partnerBrand:'1xCasino', partnerProgram:'1xCasino Partners',
+    revshare:'до 55%',
+  },
+  'luckypari': {
+    label:'LUCKYPARI', display:'Lucky Pari',
+    accent:'#f97316', accent2:'#fb923c',
+    accentGlow:'rgba(249,115,22,0.18)',
+    accentGrad:'linear-gradient(135deg,#f97316,#fb923c)',
+    bgGlow:'radial-gradient(ellipse 80% 50% at 50% -10%,rgba(249,115,22,0.10) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(249,115,22,0.05) 0%,transparent 60%)',
+    managerName:'[MANAGER]', managerTg:'@[LP_HANDLE]',
+    signature:'[MANAGER], Lucky Pari Partners',
+    partnerBrand:'Lucky Pari', partnerProgram:'Lucky Pari Partners',
+    revshare:'25–40%',
+  }
+};
+
+const BRAND_PRESETS = {
+  '1xbet': [
+    {id:'1xb-franco-seo',name:'Francophone Africa — SEO/Review',geo:'Africa FR',is_default:true,
+     keywords:["meilleur site de paris sportifs","meilleurs bookmakers en ligne","comparatif paris sportifs","avis bookmaker","pronostics football Afrique","site de paris Sénégal","site de paris Côte d'Ivoire","site de paris Cameroun"]},
+    {id:'1xb-franco-tips',name:'Francophone Africa — Tipsters',geo:'Africa FR',is_default:true,
+     keywords:["pronostics foot telegram","canal telegram paris sportifs","tipster football français","pronostiqueur telegram"]},
+    {id:'1xb-bd-seo',name:'Bangladesh — SEO/Review',geo:'BD',is_default:true,
+     keywords:["best betting site Bangladesh","cricket betting review bd","online betting bangladesh","best bookmaker bangladesh"]},
+    {id:'1xb-bd-tips',name:'Bangladesh — Tipsters',geo:'BD',is_default:true,
+     keywords:["cricket prediction telegram","bpl prediction","ipl tips bangladesh","cricket betting tips bd"]},
+    {id:'1xb-uz-ru',name:'Uzbekistan — RU speaking',geo:'UZ',is_default:true,
+     keywords:["ставки на спорт Узбекистан","прогнозы на футбол Ташкент","капперы Узбекистан","беттинг обзор Узбекистан"]},
+    {id:'1xb-ng',name:'Nigeria — Sports Betting',geo:'NG',is_default:true,
+     keywords:["best betting sites Nigeria","football prediction Nigeria","sports tipster Nigeria","bookmakers review Nigeria"]},
+    {id:'1xb-ke',name:'Kenya — Sports Betting',geo:'KE',is_default:true,
+     keywords:["best betting sites Kenya","football prediction Kenya","betting review Kenya","sports tips Kenya"]}
+  ],
+  '1xcasino': [
+    {id:'1xc-global',name:'Casino — Global English',geo:'Global',is_default:true,
+     keywords:["best online casino review","casino bonus site","slot review blog","aviator prediction site","crash game tips","live casino review"]},
+    {id:'1xc-aviator',name:'Aviator / Crash Games',geo:'Global',is_default:true,
+     keywords:["aviator game signals","aviator prediction telegram","jetx tips","lucky jet signals","crash game review site"]},
+    {id:'1xc-ng',name:'Nigeria — Casino',geo:'NG',is_default:true,
+     keywords:["best casino Nigeria","online casino Nigeria","aviator Nigeria","casino bonus Nigeria"]},
+    {id:'1xc-cis-ru',name:'CIS — Casino Russian',geo:'CIS',is_default:true,
+     keywords:["лучшие онлайн казино","обзор казино","авиатор прогнозы","казино бонусы без депозита"]},
+    {id:'1xc-tr',name:'Turkey — Casino',geo:'TR',is_default:true,
+     keywords:["en iyi casino siteleri","online casino inceleme","aviator tahmin","casino bonusu"]}
+  ],
+  'luckypari': [
+    {id:'lp-new-bet',name:'New Betting Sites — Global',geo:'Global',is_default:true,
+     keywords:["new betting sites 2025","new bookmaker review","alternative betting sites","best new sportsbook"]},
+    {id:'lp-new-casino',name:'New Casino — Global',geo:'Global',is_default:true,
+     keywords:["new casino 2025","best new online casino","new casino bonus","casino comparison new"]},
+    {id:'lp-franco',name:'Francophone Africa — New Brand',geo:'Africa FR',is_default:true,
+     keywords:["nouveau site de paris","nouveau bookmaker","nouveau casino en ligne"]},
+    {id:'lp-ru',name:'CIS — Новые бренды',geo:'CIS',is_default:true,
+     keywords:["новые букмекеры","новые казино","рейтинг букмекеров новые"]}
+  ]
+};
+
+function getBrandCfg(){ return BRAND_CONFIG[currentBrand] || BRAND_CONFIG['1xbet']; }
+
+function applyBrandTheme(brand){
+  const cfg = BRAND_CONFIG[brand];
+  if(!cfg) return;
+  const r = document.documentElement.style;
+  r.setProperty('--accent', cfg.accent);
+  r.setProperty('--accent2', cfg.accent2);
+  r.setProperty('--accent-glow', cfg.accentGlow);
+  r.setProperty('--accent-grad', cfg.accentGrad);
+  const glowEl = document.getElementById('brand-glow-style');
+  if(glowEl) glowEl.textContent = `body::before{background:${cfg.bgGlow}!important;}`;
+  document.querySelectorAll('.brand-btn').forEach(b => {
+    const active = b.dataset.brand === brand;
+    b.classList.toggle('brand-btn-active', active);
+    b.style.setProperty('--btn-clr', active ? cfg.accent : '');
+  });
+}
+
+function setBrand(brand){
+  if(!BRAND_CONFIG[brand]) return;
+  currentBrand = brand;
+  localStorage.setItem('affiliateos_brand', brand);
+  applyBrandTheme(brand);
+  loadLeads();
+}
+
+// SQL migration needed in Supabase:
+// ALTER TABLE leads ADD COLUMN IF NOT EXISTS brand TEXT NOT NULL DEFAULT '1xbet';
+// ALTER TABLE partners ADD COLUMN IF NOT EXISTS brand TEXT NOT NULL DEFAULT '1xbet';
+
+// ══════════════════════════════════════════
 //  SUPABASE: ЧТЕНИЕ
 // ══════════════════════════════════════════
 async function loadLeads(){
   showGlobalLoading(true);
-  const {data, error} = await sb.from('leads').select('*').order('created_at', {ascending: false});
+  const {data, error} = await sb.from('leads').select('*').eq('brand', currentBrand).order('created_at', {ascending: false});
   showGlobalLoading(false);
   if(error){ showError('Ошибка загрузки: ' + error.message); return; }
   leads = data || [];
@@ -2480,7 +2604,7 @@ async function nextStage(id){
 //  SUPABASE: СОХРАНИТЬ ОДИН ЛИД ВРУЧНУЮ
 // ══════════════════════════════════════════
 async function saveLead(leadData){
-  const {data, error} = await sb.from('leads').insert([leadData]).select().single();
+  const {data, error} = await sb.from('leads').insert([{...leadData, brand: currentBrand}]).select().single();
   if(error){ showError('Не удалось сохранить лид: ' + error.message); return null; }
   leads.unshift(data);
   renderLeads(curFilter);
@@ -3243,7 +3367,7 @@ async function runSearch(){
         'apikey': SUPABASE_KEY,
         'Authorization': 'Bearer ' + SUPABASE_KEY
       },
-      body: JSON.stringify({ query: q, limit: parseInt(document.getElementById('leads-limit').value) || 5 })
+      body: JSON.stringify({ query: q, limit: parseInt(document.getElementById('leads-limit').value) || 5, brand: currentBrand })
     });
 
     clearInterval(fakeProgress);
@@ -3312,7 +3436,8 @@ async function generateOutreach(id){
   btn.textContent = '⏳ Генерирую...';
   box.textContent = 'Генерирую сообщение...';
 
-  const prompt = `Ты affiliate менеджер компании 1xBet (betting/iGaming). Тебя зовут Nick.
+  const _bc = getBrandCfg();
+  const prompt = `Ты affiliate менеджер компании ${_bc.partnerBrand} (betting/iGaming). Тебя зовут ${_bc.managerName}.
 Напиши короткое первое сообщение для потенциального партнёра на ${langMap[lang]} языке.
 
 Данные партнёра:
@@ -3330,7 +3455,7 @@ async function generateOutreach(id){
 - Упомяни их сайт чтобы показать что изучил
 - Предложи обсудить партнёрство по RevShare модели
 - Не упоминай конкретные цифры и проценты
-- Подпись: Nick, 1xPartners
+- Подпись: ${_bc.signature}
 - Только текст сообщения, без subject line и без лишних пояснений`;
 
   try {
@@ -3432,7 +3557,7 @@ async function runAnalyze(){
         'apikey': SUPABASE_KEY,
         'Authorization': 'Bearer ' + SUPABASE_KEY
       },
-      body: JSON.stringify({ url })
+      body: JSON.stringify({ url, brand: currentBrand })
     });
 
     clearInterval(timer);
@@ -3514,7 +3639,7 @@ async function saveAnalyzedLead(){
 
   const {data: dup} = await sb.from('leads').select('id').eq('url', analyzedLead.url).maybeSingle();
   if(dup){ showError('Этот сайт уже есть в базе'); btn.textContent = '✓ Добавить в Pipeline'; btn.disabled = false; return; }
-  const {data, error} = await sb.from('leads').insert([analyzedLead]).select().single();
+  const {data, error} = await sb.from('leads').insert([{...analyzedLead, brand: currentBrand}]).select().single();
   if(error){
     showError('Ошибка: ' + error.message);
     btn.textContent = '✓ Добавить в Pipeline';
@@ -4425,7 +4550,8 @@ async function owGenerate(){
   owIsTranslated = false;
   owOriginalText = '';
 
-  const prompt = `Ты — Nick, affiliate manager компании 1xBet / 1xPartners в vertical betting / iGaming.
+  const _owbc = getBrandCfg();
+  const prompt = `Ты — ${_owbc.managerName}, affiliate manager компании ${_owbc.partnerBrand} / ${_owbc.partnerProgram} в vertical betting / iGaming.
 
 Твоя задача — написать первое outreach сообщение потенциальному партнёру.
 
@@ -4451,7 +4577,7 @@ async function owGenerate(){
 ЛОГИКА:
 1. Коротко и естественно зацепись за их сайт / проект / формат / аудиторию.
 2. Покажи почему их площадка релевантна для нашей вертикали.
-3. Представься как Nick from 1xPartners / 1xBet.
+3. Представься как ${_owbc.managerName} from ${_owbc.partnerProgram} / ${_owbc.partnerBrand}.
 4. Предложи обсудить сотрудничество.
 5. Добавь 1-2 value points: direct communication, custom promo materials, personal promo codes, flexible working approach, long-term partnership potential, strong global brand.
 6. Заверши спокойным уверенным CTA без давления.
@@ -4471,7 +4597,7 @@ async function owGenerate(){
 - Язык сообщения: ${langMap[owLang]}
 - Длина каждого варианта: 4-6 предложений
 - Упомяни их сайт так чтобы было видно что реально изучен
-- Подпись: Nick, 1xPartners
+- Подпись: ${_owbc.signature}
 - Не добавляй subject line
 - Не добавляй пояснения
 
@@ -4960,7 +5086,7 @@ async function generateWeeklyReport(){
   const topGeo = Object.entries(geoBreakdown).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([g,c])=>g+': '+c).join(', ');
 
   const promptLines = [
-    'Ты - аналитик affiliate программы 1xBet. Напиши краткий еженедельный отчет на русском языке.',
+    'Ты - аналитик affiliate программы ' + getBrandCfg().partnerBrand + '. Напиши краткий еженедельный отчет на русском языке.',
     'Данные за последние 7 дней:',
     '- Новых лидов: ' + weekly.length,
     '- Отправлено сообщений: ' + sent,
@@ -5153,7 +5279,7 @@ async function tgAnalyzeResult(item){
         model: 'llama-3.3-70b-versatile',
         messages: [{
           role: 'system',
-          content: 'Ты affiliate analyst для 1xBet. Оцени Telegram канал как потенциального партнёра. Отвечай ТОЛЬКО JSON без markdown: {"score":0-100,"priority":"High|Medium|Low","summary":"резюме на русском 1-2 предложения","has_1xbet":false,"signals":["сигнал"],"type":"tipster|review|news|community|other"}. Правила: если канал не постил >30 дней или выглядит заброшенным - score максимум 20. Если мало подписчиков (<500) и нет признаков активности - score максимум 30. Если 1xBet уже заливает - score 0.'
+          content: `Ты affiliate analyst для ${getBrandCfg().partnerBrand}. Оцени Telegram канал как потенциального партнёра. Отвечай ТОЛЬКО JSON без markdown: {"score":0-100,"priority":"High|Medium|Low","summary":"резюме на русском 1-2 предложения","has_1xbet":false,"signals":["сигнал"],"type":"tipster|review|news|community|other"}. Правила: если канал не постил >30 дней или выглядит заброшенным - score максимум 20. Если мало подписчиков (<500) и нет признаков активности - score максимум 30. Если ${getBrandCfg().partnerBrand} уже заливает - score 0.`
         },{
           role: 'user',
           content: 'Канал: ' + name + '\nURL: ' + channelUrl + '\nОписание: ' + description
@@ -5459,7 +5585,8 @@ async function tgSaveChannel(ch){
     why: ch.summary,
     next_action: 'Написать в Telegram',
     status: 'complete',
-    source: 'telegram'
+    source: 'telegram',
+    brand: currentBrand
   };
 
   const {data: exists} = await sb.from('leads').select('id').eq('url', lead.url).maybeSingle();
@@ -5547,7 +5674,7 @@ async function runAutoSearch(){
       const res = await fetch(FUNCTIONS_URL + '/auto-search', {
         method: 'POST',
         headers: {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},
-        body: JSON.stringify({ geos: [geo], max_total: perGeo, limit_per_key: limitKey })
+        body: JSON.stringify({ geos: [geo], max_total: perGeo, limit_per_key: limitKey, brand: currentBrand })
       });
       const data = await res.json();
       if(data.success){
@@ -5815,7 +5942,8 @@ async function ytSaveToLeads(ch){
     why: ch.why_relevant || '—',
     next_action: 'Написать на YouTube',
     status: 'complete',
-    source: 'youtube'
+    source: 'youtube',
+    brand: currentBrand
   };
   const {data: exists} = await sb.from('leads').select('id').eq('url', lead.url).maybeSingle();
   if(exists){ showError('Уже в базе: ' + ch.name); return; }
@@ -6498,28 +6626,7 @@ async function markLeadEvent(id, field){
 // ══════════════════════════════════════════
 //  ПРЕСЕТЫ ЗАПРОСОВ
 // ══════════════════════════════════════════
-const DEFAULT_PRESETS = [
-  {
-    id: 'franco-seo', name: 'Francophone Africa — SEO/Review', geo: 'Africa FR', is_default: true,
-    keywords: ['meilleur site de paris sportifs','meilleurs bookmakers en ligne','comparatif paris sportifs','avis bookmaker','pronostics football Afrique','site de paris Sénégal','site de paris Côte d\'Ivoire','site de paris Cameroun']
-  },
-  {
-    id: 'franco-tips', name: 'Francophone Africa — Tipsters', geo: 'Africa FR', is_default: true,
-    keywords: ['pronostics foot telegram','canal telegram paris sportifs','tipster football français','pronostiqueur telegram']
-  },
-  {
-    id: 'bd-seo', name: 'Bangladesh — SEO/Review', geo: 'BD', is_default: true,
-    keywords: ['best betting site Bangladesh','cricket betting review bd','online betting bangladesh','best bookmaker bangladesh']
-  },
-  {
-    id: 'bd-tips', name: 'Bangladesh — Tipsters', geo: 'BD', is_default: true,
-    keywords: ['cricket prediction telegram','bpl prediction','ipl tips bangladesh','cricket betting tips bd']
-  },
-  {
-    id: 'uz-ru', name: 'Uzbekistan — RU speaking', geo: 'UZ', is_default: true,
-    keywords: ['ставки на спорт Узбекистан','прогнозы на футбол Ташкент','капперы Узбекистан','беттинг обзор Узбекистан']
-  }
-];
+function getDefaultPresets(){ return BRAND_PRESETS[currentBrand] || BRAND_PRESETS['1xbet']; }
 
 let customPresets = [];
 let selectedPreset = null;
@@ -6547,7 +6654,7 @@ function closePresetsModal(){
 function renderDefaultPresets(){
   const el = document.getElementById('default-presets-list');
   if(!el) return;
-  el.innerHTML = DEFAULT_PRESETS.map(p => `
+  el.innerHTML = getDefaultPresets().map(p => `
     <div onclick="selectPreset('${p.id}', true)"
       style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .15s;"
       onmouseover="this.style.borderColor='var(--border2)'" onmouseout="this.style.borderColor='var(--border)'">
@@ -6579,7 +6686,7 @@ function renderCustomPresets(){
 
 function selectPreset(id, isDefault){
   const p = isDefault
-    ? DEFAULT_PRESETS.find(x => x.id === id)
+    ? getDefaultPresets().find(x => x.id === id)
     : customPresets.find(x => x.id === id);
   if(!p) return;
   selectedPreset = p;
@@ -6704,7 +6811,8 @@ async function submitAddLead(){
     note:        document.getElementById('alm-note').value.trim() || null,
     has_1xbet:   false,
     status:      'complete',
-    signals:     []
+    signals:     [],
+    brand:       currentBrand
   };
 
   const {data, error} = await sb.from('leads').insert([lead]).select().single();
@@ -6875,6 +6983,9 @@ function animateCounter(el, target, duration = 800){
 try {
   initSplash();
 } catch(e) { console.error('splash:', e); }
+try {
+  applyBrandTheme(currentBrand);
+} catch(e) { console.error('brandTheme:', e); }
 try {
   // Restore last page
   const lastPage = localStorage.getItem('lastPage');
