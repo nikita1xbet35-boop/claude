@@ -55,6 +55,20 @@
   .topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
   .badge-count{background:var(--accent-glow);border:1px solid var(--accent)30;color:var(--accent2);font-size:11px;font-family:var(--font-mono);padding:3px 8px;border-radius:20px;}
   .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)80;}
+  /* BRAND SWITCHER — fixed position, always on top */
+  #brand-switcher-fixed{position:fixed;bottom:60px;right:18px;z-index:99999;}
+  .bs-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;background:oklch(0.115 0.008 280);border:1px solid var(--border2);border-radius:7px;font-size:11px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;color:var(--accent2);}
+  .bs-btn:hover{border-color:var(--border3);}
+  .bs-btn svg{transition:transform .15s;flex-shrink:0;}
+  .bs-btn.open svg{transform:rotate(180deg);}
+  .bs-dd{display:none;position:absolute;bottom:calc(100% + 6px);right:0;background:oklch(0.13 0.008 280);border:1px solid var(--border2);border-radius:9px;padding:4px;min-width:144px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.6);}
+  .bs-dd.open{display:block;}
+  .bs-opt{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--text2);transition:background .1s;}
+  .bs-opt:hover{background:var(--bg4);}
+  .bs-opt.active{color:var(--bs-clr,var(--accent));}
+  .bs-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  /* hide the inline copies inside topbars */
+  .bs-wrap{display:none!important;}
 
   /* PIPELINE LAYOUT */
   .pipeline-layout{display:grid;grid-template-columns:272px 1fr 356px;flex:1;overflow:hidden;}
@@ -230,7 +244,6 @@
 
   /* SKELETON LOADING */
   .skeleton{background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 50%,var(--bg3) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;}
-  @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 
   /* ACTIVE LEAD CARD - subtle accent border */
   .lead-card.active{border-color:var(--accent)50 !important;background:var(--accent-glow) !important;box-shadow:0 0 0 1px var(--accent)20,0 2px 12px rgba(0,0,0,.3);}
@@ -965,6 +978,17 @@
       </svg>
       Affiliate<span>OS</span>
     </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
+    </div>
     <nav class="nav-tabs">
       <button class="nav-tab active" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
@@ -984,6 +1008,7 @@
       <div class="status-dot"></div>
     </div>
   </header>
+  <style id="brand-glow-style"></style>
   <div id="dashboard-content" style="flex:1;overflow-y:auto;padding:24px 28px;background:transparent;"></div>
 </div>
 
@@ -998,6 +1023,17 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
+    </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -1206,6 +1242,17 @@
       </svg>
       Affiliate<span>OS</span>
     </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
+    </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
@@ -1293,6 +1340,17 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
+    </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -1407,6 +1465,17 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
+    </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -1523,6 +1592,17 @@
       </svg>
       Affiliate<span>OS</span>
     </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
+    </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
@@ -1599,13 +1679,14 @@
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;" id="ar-contacts"></div>
 
-          <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:10px;" id="ar-why-box" style="display:none;">
+          <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:10px;display:none;" id="ar-why-box">
             <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;"></div>
             <div style="font-size:13px;color:var(--text2);" id="ar-why">—</div>
           </div>
 
           <div style="background:var(--bg3);border-radius:8px;padding:12px;" id="ar-next-box">
-            
+            <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;">СЛЕДУЮЩИЙ ШАГ</div>
+            <div style="font-size:13px;color:var(--text2);" id="ar-next">—</div>
           </div>
         </div>
 
@@ -1631,6 +1712,17 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
+    </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -1664,6 +1756,17 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
+    </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -1935,7 +2038,7 @@
     </div>
 
     <!-- Run preset footer -->
-    <div id="preset-run-footer" style="display:none;padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;">
+    <div id="preset-run-footer" style="display:none;padding:12px 20px;border-top:1px solid var(--border);align-items:center;gap:10px;flex-shrink:0;">
       <span id="preset-run-label" style="font-size:12px;color:var(--text2);flex:1;"></span>
       <input id="preset-run-limit" type="number" min="1" max="10" value="3" placeholder="5"
         style="width:48px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;border-radius:6px;text-align:center;outline:none;padding:4px;">
@@ -1956,6 +2059,17 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
+    </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -2033,6 +2147,17 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
+    </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -2142,7 +2267,7 @@
           <div id="tg-progress-fill" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .3s;"></div>
         </div>
       </div>
-      <div id="tg-preset-running" style="display:none;margin-top:6px;font-size:10px;color:var(--text3);font-family:var(--font-mono);" id="tg-preset-key-label"></div>
+      <div id="tg-preset-running" style="display:none;margin-top:6px;font-size:10px;color:var(--text3);font-family:var(--font-mono);"></div>
     </div>
 
     <!-- RIGHT: results -->
@@ -2211,6 +2336,17 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
+    </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -2304,6 +2440,17 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
+    </div>
+    <div class="bs-wrap">
+      <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+        <span class="bs-lbl">1XBET</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="bs-dd">
+        <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+        <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+        <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -2420,11 +2567,14 @@
 // ══════════════════════════════════════════
 //  КОНФИГ — вставь свои данные сюда
 // ══════════════════════════════════════════
-const SUPABASE_URL  = 'https://lxsyrserfuighwxuymgb.supabase.co';   // https://xxxx.supabase.co
-const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';      // eyJ...
+// ⚠️ БЕЗОПАСНОСТЬ: SUPABASE_KEY (anon) можно держать в клиенте — он защищён RLS.
+// GROQ_KEY и SERP_KEY — приватные ключи! Перенеси вызовы Groq в Supabase Edge Function,
+// а SERP_KEY убери из фронтенда. Пока не сделано — не публикуй сайт публично.
+const SUPABASE_URL  = 'https://lxsyrserfuighwxuymgb.supabase.co';
+const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
-const GROQ_KEY = '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';  // api.groq.com → API Keys
-const SERP_KEY = 'fc9415857ed0de965ce6e2eb7baacd91710cdb18b9a5333a352ecb1485c4244d'; // serpapi.com → API Key
+const GROQ_KEY = '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';  // ⚠️ перенести в edge function
+const SERP_KEY = 'fc9415857ed0de965ce6e2eb7baacd91710cdb18b9a5333a352ecb1485c4244d'; // ⚠️ перенести в edge function
 // ══════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════
@@ -2445,16 +2595,172 @@ function sc(s){return s>=80?'score-high':s>=60?'score-mid':'score-low';}
 function sigC(t){return t==='positive'?'sig-green':t==='negative'?'sig-red':'sig-amber';}
 
 // ══════════════════════════════════════════
+//  MULTI-BRAND CONFIG
+// ══════════════════════════════════════════
+let currentBrand = localStorage.getItem('affiliateos_brand') || '1xbet';
+
+const BRAND_CONFIG = {
+  '1xbet': {
+    label:'1XBET', display:'1xBet',
+    accent:'#7B61FF', accent2:'#a78bfa',
+    accentGlow:'rgba(123,97,255,0.18)',
+    accentGrad:'linear-gradient(135deg,#7B61FF,#a78bfa)',
+    bgGlow:'radial-gradient(ellipse 80% 50% at 50% -10%,rgba(123,97,255,0.12) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(123,97,255,0.06) 0%,transparent 60%)',
+    managerName:'Nick', managerTg:'@aff_manager_xbet',
+    signature:'Nick, 1xPartners',
+    partnerBrand:'1xBet', partnerProgram:'1xPartners',
+    revshare:'25–35%',
+  },
+  '1xcasino': {
+    label:'1XCASINO', display:'1xCasino',
+    accent:'#10b981', accent2:'#34d399',
+    accentGlow:'rgba(16,185,129,0.18)',
+    accentGrad:'linear-gradient(135deg,#10b981,#34d399)',
+    bgGlow:'radial-gradient(ellipse 80% 50% at 50% -10%,rgba(16,185,129,0.10) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(16,185,129,0.05) 0%,transparent 60%)',
+    managerName:'Nick', managerTg:'@aff_manager_xbet',
+    signature:'Nick, 1xCasino Partners',
+    partnerBrand:'1xCasino', partnerProgram:'1xCasino Partners',
+    revshare:'до 55%',
+  },
+  'luckypari': {
+    label:'LUCKYPARI', display:'Lucky Pari',
+    accent:'#f97316', accent2:'#fb923c',
+    accentGlow:'rgba(249,115,22,0.18)',
+    accentGrad:'linear-gradient(135deg,#f97316,#fb923c)',
+    bgGlow:'radial-gradient(ellipse 80% 50% at 50% -10%,rgba(249,115,22,0.10) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(249,115,22,0.05) 0%,transparent 60%)',
+    managerName:'[MANAGER]', managerTg:'@[LP_HANDLE]',
+    signature:'[MANAGER], Lucky Pari Partners',
+    partnerBrand:'Lucky Pari', partnerProgram:'Lucky Pari Partners',
+    revshare:'25–40%',
+  }
+};
+
+const BRAND_PRESETS = {
+  '1xbet': [
+    {id:'1xb-franco-seo',name:'Francophone Africa — SEO/Review',geo:'Africa FR',is_default:true,
+     keywords:["meilleur site de paris sportifs","meilleurs bookmakers en ligne","comparatif paris sportifs","avis bookmaker","pronostics football Afrique","site de paris Sénégal","site de paris Côte d'Ivoire","site de paris Cameroun"]},
+    {id:'1xb-franco-tips',name:'Francophone Africa — Tipsters',geo:'Africa FR',is_default:true,
+     keywords:["pronostics foot telegram","canal telegram paris sportifs","tipster football français","pronostiqueur telegram"]},
+    {id:'1xb-bd-seo',name:'Bangladesh — SEO/Review',geo:'BD',is_default:true,
+     keywords:["best betting site Bangladesh","cricket betting review bd","online betting bangladesh","best bookmaker bangladesh"]},
+    {id:'1xb-bd-tips',name:'Bangladesh — Tipsters',geo:'BD',is_default:true,
+     keywords:["cricket prediction telegram","bpl prediction","ipl tips bangladesh","cricket betting tips bd"]},
+    {id:'1xb-uz-ru',name:'Uzbekistan — RU speaking',geo:'UZ',is_default:true,
+     keywords:["ставки на спорт Узбекистан","прогнозы на футбол Ташкент","капперы Узбекистан","беттинг обзор Узбекистан"]},
+    {id:'1xb-ng',name:'Nigeria — Sports Betting',geo:'NG',is_default:true,
+     keywords:["best betting sites Nigeria","football prediction Nigeria","sports tipster Nigeria","bookmakers review Nigeria"]},
+    {id:'1xb-ke',name:'Kenya — Sports Betting',geo:'KE',is_default:true,
+     keywords:["best betting sites Kenya","football prediction Kenya","betting review Kenya","sports tips Kenya"]}
+  ],
+  '1xcasino': [
+    {id:'1xc-global',name:'Casino — Global English',geo:'Global',is_default:true,
+     keywords:["best online casino review","casino bonus site","slot review blog","aviator prediction site","crash game tips","live casino review"]},
+    {id:'1xc-aviator',name:'Aviator / Crash Games',geo:'Global',is_default:true,
+     keywords:["aviator game signals","aviator prediction telegram","jetx tips","lucky jet signals","crash game review site"]},
+    {id:'1xc-ng',name:'Nigeria — Casino',geo:'NG',is_default:true,
+     keywords:["best casino Nigeria","online casino Nigeria","aviator Nigeria","casino bonus Nigeria"]},
+    {id:'1xc-cis-ru',name:'CIS — Casino Russian',geo:'CIS',is_default:true,
+     keywords:["лучшие онлайн казино","обзор казино","авиатор прогнозы","казино бонусы без депозита"]},
+    {id:'1xc-tr',name:'Turkey — Casino',geo:'TR',is_default:true,
+     keywords:["en iyi casino siteleri","online casino inceleme","aviator tahmin","casino bonusu"]}
+  ],
+  'luckypari': [
+    {id:'lp-new-bet',name:'New Betting Sites — Global',geo:'Global',is_default:true,
+     keywords:["new betting sites 2025","new bookmaker review","alternative betting sites","best new sportsbook"]},
+    {id:'lp-new-casino',name:'New Casino — Global',geo:'Global',is_default:true,
+     keywords:["new casino 2025","best new online casino","new casino bonus","casino comparison new"]},
+    {id:'lp-franco',name:'Francophone Africa — New Brand',geo:'Africa FR',is_default:true,
+     keywords:["nouveau site de paris","nouveau bookmaker","nouveau casino en ligne"]},
+    {id:'lp-ru',name:'CIS — Новые бренды',geo:'CIS',is_default:true,
+     keywords:["новые букмекеры","новые казино","рейтинг букмекеров новые"]}
+  ]
+};
+
+function getBrandCfg(){ return BRAND_CONFIG[currentBrand] || BRAND_CONFIG['1xbet']; }
+
+const BS_HTML = (brand) => {
+  const opts = [
+    {b:'1xbet', c:'#7B61FF', l:'1XBET'},
+    {b:'1xcasino', c:'#10b981', l:'1XCASINO'},
+    {b:'luckypari', c:'#f97316', l:'LUCKYPARI'}
+  ];
+  const cfg = BRAND_CONFIG[brand];
+  return `<div class="bs-wrap">
+    <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+      <span class="bs-lbl" style="color:${cfg.accent}">${cfg.label}</span>
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="bs-dd">
+      ${opts.map(o=>`<div class="bs-opt${o.b===brand?' active':''}" data-brand="${o.b}" style="--bs-clr:${o.c}" onclick="setBrandOpt('${o.b}')">
+        <div class="bs-dot" style="background:${o.c}"></div>${o.l}
+      </div>`).join('')}
+    </div>
+  </div>`;
+};
+
+
+function applyBrandTheme(brand){
+  const cfg = BRAND_CONFIG[brand];
+  if(!cfg) return;
+  const r = document.documentElement.style;
+  r.setProperty('--accent', cfg.accent);
+  r.setProperty('--accent2', cfg.accent2);
+  r.setProperty('--accent-glow', cfg.accentGlow);
+  r.setProperty('--accent-grad', cfg.accentGrad);
+  const glowEl = document.getElementById('brand-glow-style');
+  if(glowEl) glowEl.textContent = `body::before{background:${cfg.bgGlow}!important;}`;
+  const bsFixed = document.getElementById('brand-switcher-fixed');
+  if(bsFixed){
+    const lbl = bsFixed.querySelector('.bs-lbl');
+    if(lbl){ lbl.textContent = cfg.label; lbl.style.color = cfg.accent; }
+    const btn = bsFixed.querySelector('.bs-btn');
+    if(btn) btn.style.borderColor = cfg.accent + '50';
+    bsFixed.querySelectorAll('.bs-opt').forEach(o => o.classList.toggle('active', o.dataset.brand === brand));
+  }
+}
+
+function toggleBrandDropdown(e, btn){
+  e.stopPropagation();
+  const dd = btn.nextElementSibling;
+  const isOpen = dd.classList.toggle('open');
+  btn.classList.toggle('open', isOpen);
+  // close all other dropdowns
+  document.querySelectorAll('.bs-dd.open').forEach(d => { if(d !== dd){ d.classList.remove('open'); d.previousElementSibling.classList.remove('open'); } });
+  if(isOpen){
+    const close = () => { dd.classList.remove('open'); btn.classList.remove('open'); document.removeEventListener('click', close); };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
+}
+
+function setBrandOpt(brand){
+  document.querySelectorAll('.bs-dd').forEach(d => { d.classList.remove('open'); d.previousElementSibling?.classList.remove('open'); });
+  setBrand(brand);
+}
+
+function setBrand(brand){
+  if(!BRAND_CONFIG[brand]) return;
+  currentBrand = brand;
+  localStorage.setItem('affiliateos_brand', brand);
+  applyBrandTheme(brand);
+  loadLeads();
+}
+
+// SQL migration needed in Supabase:
+// ALTER TABLE leads ADD COLUMN IF NOT EXISTS brand TEXT NOT NULL DEFAULT '1xbet';
+// ALTER TABLE partners ADD COLUMN IF NOT EXISTS brand TEXT NOT NULL DEFAULT '1xbet';
+
+// ══════════════════════════════════════════
 //  SUPABASE: ЧТЕНИЕ
 // ══════════════════════════════════════════
 async function loadLeads(){
   showGlobalLoading(true);
-  const {data, error} = await sb.from('leads').select('*').order('created_at', {ascending: false});
+  const {data, error} = await sb.from('leads').select('*').eq('brand', currentBrand).order('created_at', {ascending: false});
   showGlobalLoading(false);
   if(error){ showError('Ошибка загрузки: ' + error.message); return; }
   leads = data || [];
   renderLeads(curFilter);
   updateBadge();
+  populateGeoFilter();
   if(document.getElementById('page-dashboard')?.classList.contains('active')) _renderDashboard();
 }
 
@@ -2476,7 +2782,7 @@ async function nextStage(id){
 //  SUPABASE: СОХРАНИТЬ ОДИН ЛИД ВРУЧНУЮ
 // ══════════════════════════════════════════
 async function saveLead(leadData){
-  const {data, error} = await sb.from('leads').insert([leadData]).select().single();
+  const {data, error} = await sb.from('leads').insert([{...leadData, brand: currentBrand}]).select().single();
   if(error){ showError('Не удалось сохранить лид: ' + error.message); return null; }
   leads.unshift(data);
   renderLeads(curFilter);
@@ -2613,17 +2919,17 @@ async function generateLeadMessage(id){
 }
 
 function showMessageModal(en, ru, name){
-  // Remove existing modal
   const existing = document.getElementById('msg-modal');
   if(existing) existing.remove();
 
+  const safeName = String(name||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const modal = document.createElement('div');
   modal.id = 'msg-modal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.8);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;';
   modal.innerHTML = `
     <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;width:560px;max-width:92vw;max-height:85vh;display:flex;flex-direction:column;animation:fadeUp .2s cubic-bezier(.16,1,.3,1) both;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0;">
-        <div style="font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);">✦ Сообщение для ${name}</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-head);">✦ Сообщение для ${safeName}</div>
         <button onclick="document.getElementById('msg-modal').remove()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;">×</button>
       </div>
       <div style="overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:14px;">
@@ -2732,7 +3038,7 @@ function openLead(id){
       <div class="detail-section">
         <div class="dsec-title" style="display:flex;justify-content:space-between;align-items:center;">
           Редактировать
-          <button onclick="saveLead_('${l.id}')" style="font-size:11px;font-family:var(--font-mono);padding:3px 10px;border-radius:5px;border:1px solid var(--accent)40;background:var(--accent-glow);color:var(--accent2);cursor:pointer;">✓ Сохранить</button>
+          <button id="save-btn-${l.id}" onclick="saveLead_('${l.id}')" style="font-size:11px;font-family:var(--font-mono);padding:3px 10px;border-radius:5px;border:1px solid var(--accent)40;background:var(--accent-glow);color:var(--accent2);cursor:pointer;">✓ Сохранить</button>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
           <div>
@@ -2952,30 +3258,6 @@ function toggleMoreGeo(){
 function filterPipeline(){
   applyFilters();
 }
-function filterPipeline_unused(){
-  const q = (document.getElementById('pipeline-search').value || '').toLowerCase();
-  const base = curFilter ? leads.filter(l => l.stage === curFilter) : leads;
-  const data = q ? base.filter(l => (l.name+' '+l.url+' '+(l.geo||'')).toLowerCase().includes(q)) : base;
-  document.getElementById('leads-count-label').textContent = data.length + ' лидов';
-  const list = document.getElementById('leads-list');
-  if(data.length === 0){
-    list.innerHTML = '<div style="padding:40px 16px;text-align:center;color:var(--text3);font-size:12px;">Ничего не найдено</div>';
-    return;
-  }
-  list.innerHTML = data.map(l =>
-    '<div class="lead-card' + (activeId===l.id?' active':'') + '" onclick="openLead(\''+l.id+'\')" id="lc-'+l.id+'">' +
-    '<div style="min-width:0;">' +
-    '<div class="lead-name">'+(l.name||'—')+'</div>' +
-    '<div class="lead-url">'+(l.url||'')+'</div>' +
-    '<div class="lead-meta">' +
-    '<span class="chip chip-type">'+(l.type||'—')+'</span>' +
-    '<span class="chip chip-geo">'+(l.geo||'—')+'</span>' +
-    '<span class="chip '+(stageChip[l.stage]||'chip-new')+'">'+(stageRU[l.stage]||l.stage)+'</span>' +
-    '</div></div>' +
-    '<span class="score-badge '+sc(l.score||0)+'">'+(l.score||'—')+'</span>' +
-    '</div>'
-  ).join('');
-}
 
 async function saveLead_(id){
   const stageEl = document.getElementById('edit-stage-' + id);
@@ -3058,9 +3340,11 @@ function applyFilters(){
   const search  = (document.getElementById('pipeline-search')?.value || '').toLowerCase();
   curFilter = stage;
 
+  const geo = document.getElementById('filter-geo')?.value || '';
   let data = leads.filter(l => {
     if(stage   && l.stage !== stage) return false;
     if(prio    && l.priority !== prio) return false;
+    if(geo     && l.geo !== geo) return false;
     if(contact === 'email' && !l.email) return false;
     if(contact === 'tg'    && !l.tg) return false;
     if(contact === 'none'  && (l.email || l.tg)) return false;
@@ -3101,6 +3385,7 @@ function applyFilters(){
   document.getElementById('sn-res').textContent = cnt.researched;
   document.getElementById('sn-rdy').textContent = cnt.ready;
   document.getElementById('sn-wt').textContent  = cnt.waiting;
+  document.getElementById('sn-fu').textContent  = cnt.followup;
 }
 function statClick(v, el){
   document.querySelectorAll('.stat-item').forEach(s => s.classList.remove('active'));
@@ -3140,7 +3425,7 @@ function goTo(page, el){
        (page==='stats'     && txt==='Статистика') ||
        (page==='kb'        && txt==='База знаний') ||
        (page==='analytics' && txt==='Аналитика') ||
-       (page==='blacklist' && txt==='🚫 Блэклист') ||
+       (page==='blacklist' && txt==='Блэклист') ||
        (page==='tg'        && txt==='Telegram')) t.classList.add('active');
   });
   if(page === 'dashboard') renderDashboard();
@@ -3150,11 +3435,6 @@ function goTo(page, el){
   if(page === 'analyze') loadAnalyzeHistory();
   if(page === 'outreach') initOutreachDesk();
   if(page === 'stats') renderStats();
-  if(page === 'kb') initKB();
-  if(page === 'blacklist') initBlacklist();
-  if(page === 'yt') initYT();
-  if(page === 'tg') initTG();
-  if(page === 'analytics') initAnalytics();
   if(page === 'kb') initKB();
   if(page === 'blacklist') initBlacklist();
   if(page === 'yt') initYT();
@@ -3265,7 +3545,7 @@ async function runSearch(){
         'apikey': SUPABASE_KEY,
         'Authorization': 'Bearer ' + SUPABASE_KEY
       },
-      body: JSON.stringify({ query: q, limit: parseInt(document.getElementById('leads-limit').value) || 5 })
+      body: JSON.stringify({ query: q, limit: parseInt(document.getElementById('leads-limit').value) || 5, brand: currentBrand })
     });
 
     clearInterval(fakeProgress);
@@ -3334,7 +3614,8 @@ async function generateOutreach(id){
   btn.textContent = '⏳ Генерирую...';
   box.textContent = 'Генерирую сообщение...';
 
-  const prompt = `Ты affiliate менеджер компании 1xBet (betting/iGaming). Тебя зовут Nick.
+  const _bc = getBrandCfg();
+  const prompt = `Ты affiliate менеджер компании ${_bc.partnerBrand} (betting/iGaming). Тебя зовут ${_bc.managerName}.
 Напиши короткое первое сообщение для потенциального партнёра на ${langMap[lang]} языке.
 
 Данные партнёра:
@@ -3352,7 +3633,7 @@ async function generateOutreach(id){
 - Упомяни их сайт чтобы показать что изучил
 - Предложи обсудить партнёрство по RevShare модели
 - Не упоминай конкретные цифры и проценты
-- Подпись: Nick, 1xPartners
+- Подпись: ${_bc.signature}
 - Только текст сообщения, без subject line и без лишних пояснений`;
 
   try {
@@ -3454,7 +3735,7 @@ async function runAnalyze(){
         'apikey': SUPABASE_KEY,
         'Authorization': 'Bearer ' + SUPABASE_KEY
       },
-      body: JSON.stringify({ url })
+      body: JSON.stringify({ url, brand: currentBrand })
     });
 
     clearInterval(timer);
@@ -3536,7 +3817,7 @@ async function saveAnalyzedLead(){
 
   const {data: dup} = await sb.from('leads').select('id').eq('url', analyzedLead.url).maybeSingle();
   if(dup){ showError('Этот сайт уже есть в базе'); btn.textContent = '✓ Добавить в Pipeline'; btn.disabled = false; return; }
-  const {data, error} = await sb.from('leads').insert([analyzedLead]).select().single();
+  const {data, error} = await sb.from('leads').insert([{...analyzedLead, brand: currentBrand}]).select().single();
   if(error){
     showError('Ошибка: ' + error.message);
     btn.textContent = '✓ Добавить в Pipeline';
@@ -3650,9 +3931,6 @@ function generateReport(){
   const colFTD    = findCol(['Новые аккаунты с депозитами (количество первых депозитов)','новыеаккаунты','количествопервых']);
   const colDeps   = findCol(['Сумма внесенныхдепозитов','суммавнесен','внесенных']);
   const colProfit = findCol(['Прибыль','прибыл']);
-
-  console.log('Keys:', allKeys);
-  console.log('Detected:', {colID, colRegs, colFTD, colDeps, colProfit});
 
   if(!colRegs && !colFTD){
     showError('Не найдены колонки. Убедитесь что скопировали вместе с заголовком.');
@@ -4450,7 +4728,8 @@ async function owGenerate(){
   owIsTranslated = false;
   owOriginalText = '';
 
-  const prompt = `Ты — Nick, affiliate manager компании 1xBet / 1xPartners в vertical betting / iGaming.
+  const _owbc = getBrandCfg();
+  const prompt = `Ты — ${_owbc.managerName}, affiliate manager компании ${_owbc.partnerBrand} / ${_owbc.partnerProgram} в vertical betting / iGaming.
 
 Твоя задача — написать первое outreach сообщение потенциальному партнёру.
 
@@ -4476,7 +4755,7 @@ async function owGenerate(){
 ЛОГИКА:
 1. Коротко и естественно зацепись за их сайт / проект / формат / аудиторию.
 2. Покажи почему их площадка релевантна для нашей вертикали.
-3. Представься как Nick from 1xPartners / 1xBet.
+3. Представься как ${_owbc.managerName} from ${_owbc.partnerProgram} / ${_owbc.partnerBrand}.
 4. Предложи обсудить сотрудничество.
 5. Добавь 1-2 value points: direct communication, custom promo materials, personal promo codes, flexible working approach, long-term partnership potential, strong global brand.
 6. Заверши спокойным уверенным CTA без давления.
@@ -4496,7 +4775,7 @@ async function owGenerate(){
 - Язык сообщения: ${langMap[owLang]}
 - Длина каждого варианта: 4-6 предложений
 - Упомяни их сайт так чтобы было видно что реально изучен
-- Подпись: Nick, 1xPartners
+- Подпись: ${_owbc.signature}
 - Не добавляй subject line
 - Не добавляй пояснения
 
@@ -4985,7 +5264,7 @@ async function generateWeeklyReport(){
   const topGeo = Object.entries(geoBreakdown).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([g,c])=>g+': '+c).join(', ');
 
   const promptLines = [
-    'Ты - аналитик affiliate программы 1xBet. Напиши краткий еженедельный отчет на русском языке.',
+    'Ты - аналитик affiliate программы ' + getBrandCfg().partnerBrand + '. Напиши краткий еженедельный отчет на русском языке.',
     'Данные за последние 7 дней:',
     '- Новых лидов: ' + weekly.length,
     '- Отправлено сообщений: ' + sent,
@@ -5178,7 +5457,7 @@ async function tgAnalyzeResult(item){
         model: 'llama-3.3-70b-versatile',
         messages: [{
           role: 'system',
-          content: 'Ты affiliate analyst для 1xBet. Оцени Telegram канал как потенциального партнёра. Отвечай ТОЛЬКО JSON без markdown: {"score":0-100,"priority":"High|Medium|Low","summary":"резюме на русском 1-2 предложения","has_1xbet":false,"signals":["сигнал"],"type":"tipster|review|news|community|other"}. Правила: если канал не постил >30 дней или выглядит заброшенным - score максимум 20. Если мало подписчиков (<500) и нет признаков активности - score максимум 30. Если 1xBet уже заливает - score 0.'
+          content: `Ты affiliate analyst для ${getBrandCfg().partnerBrand}. Оцени Telegram канал как потенциального партнёра. Отвечай ТОЛЬКО JSON без markdown: {"score":0-100,"priority":"High|Medium|Low","summary":"резюме на русском 1-2 предложения","has_1xbet":false,"signals":["сигнал"],"type":"tipster|review|news|community|other"}. Правила: если канал не постил >30 дней или выглядит заброшенным - score максимум 20. Если мало подписчиков (<500) и нет признаков активности - score максимум 30. Если ${getBrandCfg().partnerBrand} уже заливает - score 0.`
         },{
           role: 'user',
           content: 'Канал: ' + name + '\nURL: ' + channelUrl + '\nОписание: ' + description
@@ -5484,7 +5763,8 @@ async function tgSaveChannel(ch){
     why: ch.summary,
     next_action: 'Написать в Telegram',
     status: 'complete',
-    source: 'telegram'
+    source: 'telegram',
+    brand: currentBrand
   };
 
   const {data: exists} = await sb.from('leads').select('id').eq('url', lead.url).maybeSingle();
@@ -5572,7 +5852,7 @@ async function runAutoSearch(){
       const res = await fetch(FUNCTIONS_URL + '/auto-search', {
         method: 'POST',
         headers: {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},
-        body: JSON.stringify({ geos: [geo], max_total: perGeo, limit_per_key: limitKey })
+        body: JSON.stringify({ geos: [geo], max_total: perGeo, limit_per_key: limitKey, brand: currentBrand })
       });
       const data = await res.json();
       if(data.success){
@@ -5840,7 +6120,8 @@ async function ytSaveToLeads(ch){
     why: ch.why_relevant || '—',
     next_action: 'Написать на YouTube',
     status: 'complete',
-    source: 'youtube'
+    source: 'youtube',
+    brand: currentBrand
   };
   const {data: exists} = await sb.from('leads').select('id').eq('url', lead.url).maybeSingle();
   if(exists){ showError('Уже в базе: ' + ch.name); return; }
@@ -6523,28 +6804,7 @@ async function markLeadEvent(id, field){
 // ══════════════════════════════════════════
 //  ПРЕСЕТЫ ЗАПРОСОВ
 // ══════════════════════════════════════════
-const DEFAULT_PRESETS = [
-  {
-    id: 'franco-seo', name: 'Francophone Africa — SEO/Review', geo: 'Africa FR', is_default: true,
-    keywords: ['meilleur site de paris sportifs','meilleurs bookmakers en ligne','comparatif paris sportifs','avis bookmaker','pronostics football Afrique','site de paris Sénégal','site de paris Côte d\'Ivoire','site de paris Cameroun']
-  },
-  {
-    id: 'franco-tips', name: 'Francophone Africa — Tipsters', geo: 'Africa FR', is_default: true,
-    keywords: ['pronostics foot telegram','canal telegram paris sportifs','tipster football français','pronostiqueur telegram']
-  },
-  {
-    id: 'bd-seo', name: 'Bangladesh — SEO/Review', geo: 'BD', is_default: true,
-    keywords: ['best betting site Bangladesh','cricket betting review bd','online betting bangladesh','best bookmaker bangladesh']
-  },
-  {
-    id: 'bd-tips', name: 'Bangladesh — Tipsters', geo: 'BD', is_default: true,
-    keywords: ['cricket prediction telegram','bpl prediction','ipl tips bangladesh','cricket betting tips bd']
-  },
-  {
-    id: 'uz-ru', name: 'Uzbekistan — RU speaking', geo: 'UZ', is_default: true,
-    keywords: ['ставки на спорт Узбекистан','прогнозы на футбол Ташкент','капперы Узбекистан','беттинг обзор Узбекистан']
-  }
-];
+function getDefaultPresets(){ return BRAND_PRESETS[currentBrand] || BRAND_PRESETS['1xbet']; }
 
 let customPresets = [];
 let selectedPreset = null;
@@ -6572,7 +6832,7 @@ function closePresetsModal(){
 function renderDefaultPresets(){
   const el = document.getElementById('default-presets-list');
   if(!el) return;
-  el.innerHTML = DEFAULT_PRESETS.map(p => `
+  el.innerHTML = getDefaultPresets().map(p => `
     <div onclick="selectPreset('${p.id}', true)"
       style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .15s;"
       onmouseover="this.style.borderColor='var(--border2)'" onmouseout="this.style.borderColor='var(--border)'">
@@ -6604,7 +6864,7 @@ function renderCustomPresets(){
 
 function selectPreset(id, isDefault){
   const p = isDefault
-    ? DEFAULT_PRESETS.find(x => x.id === id)
+    ? getDefaultPresets().find(x => x.id === id)
     : customPresets.find(x => x.id === id);
   if(!p) return;
   selectedPreset = p;
@@ -6729,7 +6989,8 @@ async function submitAddLead(){
     note:        document.getElementById('alm-note').value.trim() || null,
     has_1xbet:   false,
     status:      'complete',
-    signals:     []
+    signals:     [],
+    brand:       currentBrand
   };
 
   const {data, error} = await sb.from('leads').insert([lead]).select().single();
@@ -6900,6 +7161,9 @@ function animateCounter(el, target, duration = 800){
 try {
   initSplash();
 } catch(e) { console.error('splash:', e); }
+try {
+  applyBrandTheme(currentBrand);
+} catch(e) { console.error('brandTheme:', e); }
 try {
   // Restore last page
   const lastPage = localStorage.getItem('lastPage');
@@ -9039,22 +9303,6 @@ try {
     requestAnimationFrame(loop);
   })();
 
-  // ── Убираем стагер-анимации на карточках при рендере ─────────────
-  // Оригинальный код иногда добавляет animation-delay через inline style.
-  // Патчим renderLeads если доступен.
-  const _rl = window.renderLeads;
-  if (typeof _rl === 'function') {
-    window.renderLeads = function() {
-      const r = _rl.apply(this, arguments);
-      // Убираем все animation-delay с карточек после рендера
-      requestAnimationFrame(function() {
-        document.querySelectorAll('.lead-card').forEach(function(c) {
-          c.style.animationDelay = '0s';
-        });
-      });
-      return r;
-    };
-  }
 
 })();
 </script>
@@ -9129,38 +9377,62 @@ try {
   // ── ВОРОНКА ──────────────────────────────────────────────────────
   window.buildFunnel = function(){
     if(typeof leads==='undefined'||!Array.isArray(leads)) return '';
-    var order  = ['new','researched','waiting','followup','ready'];
-    var labels = {new:'Новые',researched:'Изучены',waiting:'Ожидание',followup:'Follow-up',ready:'Не подходящий'};
-    var colors = {new:'#60a5fa',researched:'#c084fc',waiting:'#fbbf24',followup:'#34d399',ready:'#f87171'};
-    var counts = order.map(function(s){
+    var funnelOrder  = ['new','researched','waiting','followup'];
+    var labels = {new:'Новые',researched:'Изучены',waiting:'Ожидание',followup:'Follow-up'};
+    var colors = {new:'#60a5fa',researched:'#c084fc',waiting:'#fbbf24',followup:'#34d399'};
+    var rejected = leads.filter(function(l){return l.stage==='ready';}).length;
+    var counts = funnelOrder.map(function(s){
       return {s:s, n:leads.filter(function(l){return l.stage===s;}).length};
     });
     var top = counts[0].n || 1;
 
-    var html = '<div style="display:flex;flex-direction:column;gap:6px;">';
+    var html = '<div style="display:flex;flex-direction:column;gap:0;">';
     counts.forEach(function(c,i){
-      var isReject = c.s==='ready';
-      var pct = Math.min(Math.round(c.n/top*100),100);
       var clr = colors[c.s];
-      html += '<div onclick="goTo(\'pipeline\',null);setTimeout(function(){document.getElementById(\'filter-stage\').value=\''+c.s+'\';applyFilters();},60)" style="cursor:pointer;">'
-        // строка: точка + название + число + %
-        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">'
+      var pct = Math.min(Math.round(c.n/top*100),100);
+      var convRate = i===0 ? null : (counts[i-1].n>0 ? Math.round(c.n/counts[i-1].n*100) : 0);
+      // each bar centered, width proportional to pct of top stage
+      var marginPct = Math.round((100-pct)/2);
+      html += '<div onclick="goTo(\'pipeline\',null);setTimeout(function(){document.getElementById(\'filter-stage\').value=\''+c.s+'\';applyFilters();},60)" style="cursor:pointer;position:relative;">';
+      // conversion rate connector
+      if(i>0){
+        html += '<div style="display:flex;align-items:center;justify-content:center;height:20px;gap:6px;">'
+          +'<div style="width:1px;height:12px;background:var(--border2);"></div>'
+          +'<span style="font-size:9px;font-family:var(--font-mono);color:var(--text3);">'+convRate+'%</span>'
+          +'<div style="width:1px;height:12px;background:var(--border2);"></div>'
+          +'</div>';
+      }
+      // funnel bar
+      html += '<div style="margin-left:'+marginPct+'%;margin-right:'+marginPct+'%;position:relative;height:36px;border-radius:7px;overflow:hidden;transition:filter .15s;" onmouseover="this.style.filter=\'brightness(1.2)\'" onmouseout="this.style.filter=\'\'">'
+        // background
+        +'<div style="position:absolute;inset:0;background:'+clr+'18;"></div>'
+        // left accent bar
+        +'<div style="position:absolute;top:0;bottom:0;left:0;width:3px;background:'+clr+';opacity:0.9;"></div>'
+        // content
+        +'<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 10px 0 12px;">'
+          +'<span style="font-size:12px;font-weight:500;color:var(--text2);letter-spacing:-.1px;">'+labels[c.s]+'</span>'
           +'<div style="display:flex;align-items:center;gap:7px;">'
-            +'<div style="width:6px;height:6px;border-radius:50%;background:'+clr+';box-shadow:0 0 5px '+clr+'80;flex-shrink:0;"></div>'
-            +'<span style="font-size:12px;color:'+(isReject?'var(--text3)':'var(--text2)')+';">'+labels[c.s]+'</span>'
-            +(isReject?'<span style="font-size:9px;color:var(--text3);background:var(--bg3);padding:1px 5px;border-radius:3px;font-family:var(--font-mono);">отсев</span>':'')
+            +'<span style="font-size:14px;font-family:var(--font-mono);font-weight:700;color:'+clr+';text-shadow:0 0 12px '+clr+'60;">'+c.n+'</span>'
+            +(i===0?'<span style="font-size:9px;font-family:var(--font-mono);color:var(--text3);background:var(--bg3);padding:2px 5px;border-radius:4px;">100%</span>'
+              :'<span style="font-size:9px;font-family:var(--font-mono);color:var(--text3);background:var(--bg3);padding:2px 5px;border-radius:4px;">'+pct+'%</span>')
           +'</div>'
-          +'<div style="display:flex;align-items:center;gap:6px;">'
-            +'<span style="font-size:13px;font-family:var(--font-mono);font-weight:600;color:'+clr+';">'+c.n+'</span>'
-            +(isReject?'':'<span style="font-size:10px;font-family:var(--font-mono);color:var(--text3);min-width:26px;text-align:right;">'+pct+'%</span>')
-          +'</div>'
-        +'</div>'
-        // progress bar
-        +'<div style="height:4px;background:var(--bg4);border-radius:2px;overflow:hidden;">'
-          +'<div style="height:100%;width:'+pct+'%;background:'+clr+';border-radius:2px;opacity:'+(isReject?'0.3':'0.75')+';transition:width .4s ease;"></div>'
         +'</div>'
         +'</div>';
+      html += '</div>';
     });
+
+    // rejected block
+    if(rejected>0){
+      html += '<div style="margin-top:10px;padding:7px 12px;border-radius:7px;border:1px dashed rgba(248,113,113,0.25);background:rgba(248,113,113,0.05);display:flex;align-items:center;justify-content:space-between;cursor:pointer;" onclick="goTo(\'pipeline\',null);setTimeout(function(){document.getElementById(\'filter-stage\').value=\'ready\';applyFilters();},60)">'
+        +'<div style="display:flex;align-items:center;gap:6px;">'
+          +'<span style="font-size:12px;color:var(--red);opacity:.7;">↩</span>'
+          +'<span style="font-size:11px;color:var(--text3);">Не подходящий</span>'
+          +'<span style="font-size:9px;color:var(--red);background:var(--red-bg);padding:1px 5px;border-radius:3px;font-family:var(--font-mono);">отсев</span>'
+        +'</div>'
+        +'<span style="font-size:13px;font-family:var(--font-mono);font-weight:600;color:var(--red);">'+rejected+'</span>'
+        +'</div>';
+    }
+
     html += '</div>';
     return html;
   };
@@ -9187,5 +9459,16 @@ try {
 
 })();
 </script>
+<div id="brand-switcher-fixed">
+  <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+    <span class="bs-lbl">1XBET</span>
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <div class="bs-dd">
+    <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+    <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+    <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+  </div>
+</div>
 </body>
 </html>
