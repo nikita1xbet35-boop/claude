@@ -56,17 +56,17 @@
   .badge-count{background:var(--accent-glow);border:1px solid var(--accent)30;color:var(--accent2);font-size:11px;font-family:var(--font-mono);padding:3px 8px;border-radius:20px;}
   .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)80;}
   /* BRAND SWITCHER */
-  #brand-switcher{position:relative;flex-shrink:0;}
-  #brand-drop-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--accent2);font-size:11px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;}
-  #brand-drop-btn:hover{border-color:var(--border3);background:var(--bg4);}
-  #brand-drop-btn svg{transition:transform .15s;}
-  #brand-drop-btn.open svg{transform:rotate(180deg);}
-  #brand-dropdown{display:none;position:absolute;top:calc(100% + 6px);left:0;background:var(--bg3);border:1px solid var(--border2);border-radius:9px;padding:4px;min-width:140px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.4);}
-  #brand-dropdown.open{display:block;}
-  .brand-opt{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--text2);transition:background .1s;}
-  .brand-opt:hover{background:var(--bg4);}
-  .brand-opt.active{color:var(--btn-clr,var(--accent));}
-  .brand-opt-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  .bs-wrap{position:relative;flex-shrink:0;}
+  .bs-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;font-size:11px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;color:var(--accent2);}
+  .bs-btn:hover{border-color:var(--border3);background:var(--bg4);}
+  .bs-btn svg{transition:transform .15s;flex-shrink:0;}
+  .bs-btn.open svg{transform:rotate(180deg);}
+  .bs-dd{display:none;position:absolute;top:calc(100% + 6px);left:0;background:var(--bg3);border:1px solid var(--border2);border-radius:9px;padding:4px;min-width:144px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.5);}
+  .bs-dd.open{display:block;}
+  .bs-opt{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--text2);transition:background .1s;}
+  .bs-opt:hover{background:var(--bg4);}
+  .bs-opt.active{color:var(--bs-clr,var(--accent));}
+  .bs-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
 
   /* PIPELINE LAYOUT */
   .pipeline-layout{display:grid;grid-template-columns:272px 1fr 356px;flex:1;overflow:hidden;}
@@ -975,23 +975,6 @@
         <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
       </svg>
       Affiliate<span>OS</span>
-    </div>
-    <div id="brand-switcher">
-      <button id="brand-drop-btn" onclick="toggleBrandDropdown(event)">
-        <span id="brand-drop-label">1XBET</span>
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-      <div id="brand-dropdown">
-        <div class="brand-opt active" data-brand="1xbet" onclick="setBrandOpt('1xbet')" style="--btn-clr:#7B61FF">
-          <div class="brand-opt-dot" style="background:#7B61FF"></div>1XBET
-        </div>
-        <div class="brand-opt" data-brand="1xcasino" onclick="setBrandOpt('1xcasino')" style="--btn-clr:#10b981">
-          <div class="brand-opt-dot" style="background:#10b981"></div>1XCASINO
-        </div>
-        <div class="brand-opt" data-brand="luckypari" onclick="setBrandOpt('luckypari')" style="--btn-clr:#f97316">
-          <div class="brand-opt-dot" style="background:#f97316"></div>LUCKYPARI
-        </div>
-      </div>
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab active" onclick="goTo('dashboard',this)">Дашборд</button>
@@ -2561,6 +2544,37 @@ const BRAND_PRESETS = {
 
 function getBrandCfg(){ return BRAND_CONFIG[currentBrand] || BRAND_CONFIG['1xbet']; }
 
+const BS_HTML = (brand) => {
+  const opts = [
+    {b:'1xbet', c:'#7B61FF', l:'1XBET'},
+    {b:'1xcasino', c:'#10b981', l:'1XCASINO'},
+    {b:'luckypari', c:'#f97316', l:'LUCKYPARI'}
+  ];
+  const cfg = BRAND_CONFIG[brand];
+  return `<div class="bs-wrap">
+    <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+      <span class="bs-lbl" style="color:${cfg.accent}">${cfg.label}</span>
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="bs-dd">
+      ${opts.map(o=>`<div class="bs-opt${o.b===brand?' active':''}" data-brand="${o.b}" style="--bs-clr:${o.c}" onclick="setBrandOpt('${o.b}')">
+        <div class="bs-dot" style="background:${o.c}"></div>${o.l}
+      </div>`).join('')}
+    </div>
+  </div>`;
+};
+
+function injectBrandSwitchers(){
+  document.querySelectorAll('.topbar').forEach(tb => {
+    if(tb.querySelector('.bs-wrap')) return;
+    const logo = tb.querySelector('.logo');
+    if(!logo) return;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = BS_HTML(currentBrand);
+    logo.insertAdjacentElement('afterend', tmp.firstElementChild);
+  });
+}
+
 function applyBrandTheme(brand){
   const cfg = BRAND_CONFIG[brand];
   if(!cfg) return;
@@ -2571,31 +2585,26 @@ function applyBrandTheme(brand){
   r.setProperty('--accent-grad', cfg.accentGrad);
   const glowEl = document.getElementById('brand-glow-style');
   if(glowEl) glowEl.textContent = `body::before{background:${cfg.bgGlow}!important;}`;
-  // update dropdown label & active state
-  const lbl = document.getElementById('brand-drop-label');
-  if(lbl){ lbl.textContent = cfg.label; lbl.style.color = cfg.accent; }
-  const btn = document.getElementById('brand-drop-btn');
-  if(btn) btn.style.borderColor = cfg.accent + '50';
-  document.querySelectorAll('.brand-opt').forEach(o => {
-    o.classList.toggle('active', o.dataset.brand === brand);
-  });
+  document.querySelectorAll('.bs-lbl').forEach(el => { el.textContent = cfg.label; el.style.color = cfg.accent; });
+  document.querySelectorAll('.bs-btn').forEach(el => { el.style.borderColor = cfg.accent + '50'; });
+  document.querySelectorAll('.bs-opt').forEach(o => { o.classList.toggle('active', o.dataset.brand === brand); });
 }
 
-function toggleBrandDropdown(e){
+function toggleBrandDropdown(e, btn){
   e.stopPropagation();
-  const dd = document.getElementById('brand-dropdown');
-  const btn = document.getElementById('brand-drop-btn');
-  const open = dd.classList.toggle('open');
-  btn.classList.toggle('open', open);
-  if(open){
+  const dd = btn.nextElementSibling;
+  const isOpen = dd.classList.toggle('open');
+  btn.classList.toggle('open', isOpen);
+  // close all other dropdowns
+  document.querySelectorAll('.bs-dd.open').forEach(d => { if(d !== dd){ d.classList.remove('open'); d.previousElementSibling.classList.remove('open'); } });
+  if(isOpen){
     const close = () => { dd.classList.remove('open'); btn.classList.remove('open'); document.removeEventListener('click', close); };
     setTimeout(() => document.addEventListener('click', close), 0);
   }
 }
 
 function setBrandOpt(brand){
-  document.getElementById('brand-dropdown').classList.remove('open');
-  document.getElementById('brand-drop-btn').classList.remove('open');
+  document.querySelectorAll('.bs-dd').forEach(d => { d.classList.remove('open'); d.previousElementSibling?.classList.remove('open'); });
   setBrand(brand);
 }
 
@@ -2603,6 +2612,7 @@ function setBrand(brand){
   if(!BRAND_CONFIG[brand]) return;
   currentBrand = brand;
   localStorage.setItem('affiliateos_brand', brand);
+  injectBrandSwitchers();
   applyBrandTheme(brand);
   loadLeads();
 }
@@ -7024,6 +7034,7 @@ try {
   initSplash();
 } catch(e) { console.error('splash:', e); }
 try {
+  injectBrandSwitchers();
   applyBrandTheme(currentBrand);
 } catch(e) { console.error('brandTheme:', e); }
 try {
