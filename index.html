@@ -55,18 +55,20 @@
   .topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
   .badge-count{background:var(--accent-glow);border:1px solid var(--accent)30;color:var(--accent2);font-size:11px;font-family:var(--font-mono);padding:3px 8px;border-radius:20px;}
   .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)80;}
-  /* BRAND SWITCHER */
-  .bs-wrap{position:relative;flex-shrink:0;}
-  .bs-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;font-size:11px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;color:var(--accent2);}
-  .bs-btn:hover{border-color:var(--border3);background:var(--bg4);}
+  /* BRAND SWITCHER — fixed position, always on top */
+  #brand-switcher-fixed{position:fixed;top:14px;left:148px;z-index:99999;}
+  .bs-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;background:oklch(0.115 0.008 280);border:1px solid var(--border2);border-radius:7px;font-size:11px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;color:var(--accent2);}
+  .bs-btn:hover{border-color:var(--border3);}
   .bs-btn svg{transition:transform .15s;flex-shrink:0;}
   .bs-btn.open svg{transform:rotate(180deg);}
-  .bs-dd{display:none;position:absolute;top:calc(100% + 6px);left:0;background:var(--bg3);border:1px solid var(--border2);border-radius:9px;padding:4px;min-width:144px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.5);}
+  .bs-dd{display:none;position:absolute;top:calc(100% + 6px);left:0;background:oklch(0.13 0.008 280);border:1px solid var(--border2);border-radius:9px;padding:4px;min-width:144px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.6);}
   .bs-dd.open{display:block;}
   .bs-opt{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--text2);transition:background .1s;}
   .bs-opt:hover{background:var(--bg4);}
   .bs-opt.active{color:var(--bs-clr,var(--accent));}
   .bs-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  /* hide the inline copies inside topbars */
+  .bs-wrap{display:none!important;}
 
   /* PIPELINE LAYOUT */
   .pipeline-layout{display:grid;grid-template-columns:272px 1fr 356px;flex:1;overflow:hidden;}
@@ -2707,9 +2709,14 @@ function applyBrandTheme(brand){
   r.setProperty('--accent-grad', cfg.accentGrad);
   const glowEl = document.getElementById('brand-glow-style');
   if(glowEl) glowEl.textContent = `body::before{background:${cfg.bgGlow}!important;}`;
-  document.querySelectorAll('.bs-lbl').forEach(el => { el.textContent = cfg.label; el.style.color = cfg.accent; });
-  document.querySelectorAll('.bs-btn').forEach(el => { el.style.borderColor = cfg.accent + '50'; });
-  document.querySelectorAll('.bs-opt').forEach(o => { o.classList.toggle('active', o.dataset.brand === brand); });
+  const bsFixed = document.getElementById('brand-switcher-fixed');
+  if(bsFixed){
+    const lbl = bsFixed.querySelector('.bs-lbl');
+    if(lbl){ lbl.textContent = cfg.label; lbl.style.color = cfg.accent; }
+    const btn = bsFixed.querySelector('.bs-btn');
+    if(btn) btn.style.borderColor = cfg.accent + '50';
+    bsFixed.querySelectorAll('.bs-opt').forEach(o => o.classList.toggle('active', o.dataset.brand === brand));
+  }
 }
 
 function toggleBrandDropdown(e, btn){
@@ -9452,5 +9459,16 @@ try {
 
 })();
 </script>
+<div id="brand-switcher-fixed">
+  <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
+    <span class="bs-lbl">1XBET</span>
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <div class="bs-dd">
+    <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
+    <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
+    <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
+  </div>
+</div>
 </body>
 </html>
