@@ -2568,13 +2568,13 @@
 //  КОНФИГ — вставь свои данные сюда
 // ══════════════════════════════════════════
 // ⚠️ БЕЗОПАСНОСТЬ: SUPABASE_KEY (anon) можно держать в клиенте — он защищён RLS.
-// GROQ_KEY и SERP_KEY — приватные ключи! Перенеси вызовы Groq в Supabase Edge Function,
-// а SERP_KEY убери из фронтенда. Пока не сделано — не публикуй сайт публично.
+// GROQ_API_KEY и SERP_API_KEY — приватные ключи! Перенеси вызовы Groq в Supabase Edge Function,
+// а SERP_API_KEY убери из фронтенда. Пока не сделано — не публикуй сайт публично.
 const SUPABASE_URL  = 'https://lxsyrserfuighwxuymgb.supabase.co';
 const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
-const GROQ_KEY = ['gsk_fFeymSY6J6SrLPZRyXX3WGd', 'yb3FYobOMV2q3vZ2p4PRNwSmsWRnA'].join('');  // ⚠️ перенести в edge function
-const SERP_KEY = ['1e8f0535ae3168a7fb84dabb877cb2569762e6f4', '25d82e96cad08359d190f582'].join(''); // ⚠️ перенести в edge function
+const GROQ_API_KEY = ['gsk_fFeymSY6J6SrLPZRyXX3WGd', 'yb3FYobOMV2q3vZ2p4PRNwSmsWRnA'].join('');  // ⚠️ перенести в edge function
+const SERP_API_KEY = ['1e8f0535ae3168a7fb84dabb877cb2569762e6f4', '25d82e96cad08359d190f582'].join(''); // ⚠️ перенести в edge function
 // ══════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════
@@ -3845,7 +3845,7 @@ async function generateOutreach(id){
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + GROQ_KEY
+        'Authorization': 'Bearer ' + GROQ_API_KEY
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
@@ -5075,7 +5075,7 @@ C:
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + GROQ_KEY},
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + GROQ_API_KEY},
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [{role:'user',content:prompt}],
@@ -5202,7 +5202,7 @@ async function owTranslate(){
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + GROQ_KEY},
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + GROQ_API_KEY},
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [{
@@ -5562,7 +5562,7 @@ async function generateWeeklyReport(){
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + GROQ_KEY},
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + GROQ_API_KEY},
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [{role:'user',content:prompt}],
@@ -5700,7 +5700,7 @@ async function tgSearch(){
 
 
 async function tgGetSerpKey(){
-  return SERP_KEY || '';
+  return SERP_API_KEY || '';
 }
 
 async function tgAnalyzeResult(item){
@@ -5735,7 +5735,7 @@ async function tgAnalyzeResult(item){
   try {
     const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + GROQ_KEY},
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + GROQ_API_KEY},
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [{
