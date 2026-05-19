@@ -2787,7 +2787,155 @@ async function saveLead(leadData){
   leads.unshift(data);
   renderLeads(curFilter);
   updateBadge();
+  // auto-extract contacts if none present
+  if(data && !data.contact_email && !data.contact_telegram){
+    setTimeout(() => runContactExtraction(data.id), 800);
+  }
   return data;
+}
+
+// ══════════════════════════════════════════
+//  PHASE 2: CONTACT EXTRACTION
+// ══════════════════════════════════════════
+// SQL migration (run once in Supabase SQL Editor):
+// ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_email TEXT;
+// ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_email_type TEXT;
+// ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_telegram TEXT;
+// ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_whatsapp TEXT;
+// ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_phone TEXT;
+// ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_source_url TEXT;
+
+const CONTACT_PATHS = ['/advertise','/advertise-with-us','/advertising','/partnerships','/partner','/sponsors','/contact','/contact-us','/about','/about-us'];
+const EMAIL_REGEX = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+const EMAIL_IGNORE = ['noreply','no-reply','unsubscribe','privacy','legal','abuse','example','sentry','wpcf7'];
+const EMAIL_AD = ['advertis','ads@','partner','sponsor','commercial','business','collab','media@','marketing'];
+const EMAIL_GEN = ['contact','info@','hello@','hi@','enquir','support'];
+
+function emailPriority(e){
+  const l = e.toLowerCase();
+  if(EMAIL_AD.some(k=>l.includes(k))) return 1;
+  if(EMAIL_GEN.some(k=>l.includes(k))) return 2;
+  return 3;
+}
+function emailType(e){
+  const l = e.toLowerCase();
+  if(EMAIL_AD.some(k=>l.includes(k))) return 'advertising';
+  if(EMAIL_GEN.some(k=>l.includes(k))) return 'general';
+  return 'admin';
+}
+
+async function fetchViaProxy(url){
+  try {
+    const r = await Promise.race([
+      fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url)),
+      new Promise((_,rej) => setTimeout(()=>rej(new Error('timeout')), 10000))
+    ]);
+    if(!r.ok) return null;
+    return await r.text();
+  } catch(e){ return null; }
+}
+
+function normalizeBase(url){
+  try {
+    const u = new URL(url.startsWith('http') ? url : 'https://' + url);
+    return u.origin;
+  } catch(e){ return null; }
+}
+
+async function extractContactsFromUrl(siteUrl){
+  const base = normalizeBase(siteUrl);
+  if(!base) return null;
+
+  let bestEmail = null, bestPrio = 99, bestType = null, sourceUrl = null;
+  let tg = null, wa = null, phone = null;
+
+  // Try homepage first for quick links, then contact paths
+  const pages = [siteUrl, ...CONTACT_PATHS.map(p => base + p)];
+
+  for(let i = 0; i < pages.length; i++){
+    if(i > 0) await new Promise(r => setTimeout(r, 400)); // rate limit
+    const html = await fetchViaProxy(pages[i]);
+    if(!html || html.length < 100) continue;
+
+    // emails
+    const found = [...new Set((html.match(EMAIL_REGEX)||[]).filter(e => {
+      const l = e.toLowerCase();
+      return !EMAIL_IGNORE.some(ig => l.includes(ig)) && e.includes('.');
+    }))];
+    for(const e of found){
+      const p = emailPriority(e);
+      if(p < bestPrio){ bestPrio = p; bestEmail = e; bestType = emailType(e); sourceUrl = pages[i]; }
+    }
+
+    // telegram
+    if(!tg){
+      const m = html.match(/t\.me\/([a-zA-Z][a-zA-Z0-9_]{4,})/);
+      if(m && !['share','msg','joinchat'].includes(m[1])) tg = '@' + m[1];
+    }
+    // whatsapp
+    if(!wa){
+      const m = html.match(/wa\.me\/([\d]{7,})/);
+      if(m) wa = '+' + m[1];
+    }
+    // phone
+    if(!phone){
+      const m = html.match(/\+[\d][\d\s\-().]{8,17}[\d]/);
+      if(m) phone = m[0].replace(/\s+/g,' ').trim();
+    }
+
+    if(bestPrio === 1) break; // found advertising email — best possible
+  }
+
+  if(!bestEmail && !tg && !wa) return null;
+  return { contact_email: bestEmail, contact_email_type: bestType, contact_telegram: tg, contact_whatsapp: wa, contact_phone: phone, contact_source_url: sourceUrl };
+}
+
+async function runContactExtraction(leadId){
+  const l = leads.find(x => x.id === leadId);
+  if(!l) return;
+
+  // update UI to show "searching"
+  const statusEl = document.getElementById('contact-status-' + leadId);
+  if(statusEl) statusEl.innerHTML = '<span style="color:var(--text3);font-size:11px;">🔍 Ищу контакты...</span>';
+
+  const result = await extractContactsFromUrl(l.url || l.website);
+  if(!result){
+    const updates = { contact_email: null, contact_email_type: 'not_found', contact_source_url: null };
+    await sb.from('leads').update(updates).eq('id', leadId);
+    Object.assign(l, updates);
+    if(statusEl) renderContactSection(leadId);
+    return;
+  }
+
+  const {error} = await sb.from('leads').update(result).eq('id', leadId);
+  if(!error){
+    Object.assign(l, result);
+    if(document.getElementById('contact-status-' + leadId)) renderContactSection(leadId);
+  }
+}
+
+function renderContactSection(leadId){
+  const l = leads.find(x => x.id === leadId);
+  const el = document.getElementById('contact-status-' + leadId);
+  if(!l || !el) return;
+
+  const notFound = !l.contact_email && !l.contact_telegram && !l.contact_whatsapp && l.contact_email_type === 'not_found';
+  const neverRun = !l.contact_email && !l.contact_telegram && !l.contact_whatsapp && !l.contact_email_type;
+
+  const typeLabel = {advertising:'реклама',general:'общий',admin:'admin'}[l.contact_email_type] || '';
+  const typeBadge = typeLabel ? `<span style="font-size:9px;font-family:var(--font-mono);color:var(--green);background:var(--green-bg);padding:1px 5px;border-radius:3px;">${typeLabel}</span>` : '';
+
+  el.innerHTML = `
+    ${l.contact_email ? `<div class="kv-row"><span class="kv-key">📧 Email</span><span class="kv-val" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <a href="mailto:${l.contact_email}" style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">${l.contact_email}</a>${typeBadge}
+    </span></div>` : ''}
+    ${l.contact_telegram ? `<div class="kv-row"><span class="kv-key">✈ Telegram</span><span class="kv-val" style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">${l.contact_telegram}</span></div>` : ''}
+    ${l.contact_whatsapp ? `<div class="kv-row"><span class="kv-key">📱 WhatsApp</span><span class="kv-val" style="color:var(--green);font-family:var(--font-mono);font-size:11px;">${l.contact_whatsapp}</span></div>` : ''}
+    ${l.contact_source_url ? `<div class="kv-row"><span class="kv-key">📄 Источник</span><span class="kv-val" style="font-size:10px;color:var(--text3);font-family:var(--font-mono);word-break:break-all;">${l.contact_source_url.replace(/^https?:\/\//,'')}</span></div>` : ''}
+    ${notFound ? `<div style="font-size:11px;color:var(--text3);padding:4px 0;">Контакты не найдены — нужна ручная проверка</div>` : ''}
+    ${neverRun ? `<div style="font-size:11px;color:var(--text3);padding:4px 0;">Контакты не искались</div>` : ''}
+    <button onclick="runContactExtraction('${leadId}')" style="margin-top:6px;font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">🔄 ${neverRun?'Найти контакты':'Повторить поиск'}</button>
+  `;
 }
 
 // ══════════════════════════════════════════
@@ -3017,12 +3165,18 @@ function openLead(id){
         ${sigs.map(s=>`<div class="signal-row"><span class="signal-dot ${sigC(s.t)}"></span><span style="color:var(--text2)">${s.text}</span></div>`).join('')}
       </div>` : ''}
       <div class="detail-section">
-        <div class="dsec-title">Контактные данные</div>
-        <div class="kv-row"><span class="kv-key">Email</span><span class="kv-val cval">${l.email || '—'}</span></div>
-        <div class="kv-row"><span class="kv-key">Telegram</span><span class="kv-val cval">${l.tg || '—'}</span></div>
+        <div class="dsec-title" style="display:flex;justify-content:space-between;align-items:center;">
+          Контактные данные
+        </div>
+        <div class="kv-row"><span class="kv-key">Email (ручной)</span><span class="kv-val cval">${l.email || '—'}</span></div>
+        <div class="kv-row"><span class="kv-key">TG (ручной)</span><span class="kv-val cval">${l.tg || '—'}</span></div>
         <div class="kv-row"><span class="kv-key">Язык</span><span class="kv-val">${l.lang || '—'}</span></div>
         <div class="kv-row"><span class="kv-key">Приоритет</span><span class="kv-val">${prioRU[l.priority] || l.priority || '—'}</span></div>
         <div class="kv-row"><span class="kv-key">Добавлен</span><span class="kv-val">${l.created_at ? new Date(l.created_at).toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}) : '—'}</span></div>
+      </div>
+      <div class="detail-section">
+        <div class="dsec-title">🔍 Auto-контакты</div>
+        <div id="contact-status-${l.id}"></div>
       </div>
       ${l.why ? `<div class="detail-section">
         <div class="dsec-title">Почему релевантен</div>
@@ -3092,6 +3246,8 @@ function openLead(id){
         </div>
       </div>
     </div>`;
+  // render contact section after DOM is set
+  setTimeout(() => renderContactSection(l.id), 0);
 }
 
 function cpContact(id){
@@ -5775,6 +5931,7 @@ async function tgSaveChannel(ch){
   leads.unshift(data);
   updateBadge();
   toast();
+  if(data) setTimeout(() => runContactExtraction(data.id), 1200);
 }
 
 // ══════════════════════════════════════════
@@ -6130,6 +6287,7 @@ async function ytSaveToLeads(ch){
   leads.unshift(data);
   updateBadge();
   toast();
+  if(data) setTimeout(() => runContactExtraction(data.id), 1200);
 }
 
 // ══════════════════════════════════════════
