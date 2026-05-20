@@ -2680,19 +2680,20 @@ function getBrandCfg(){ return BRAND_CONFIG[currentBrand] || BRAND_CONFIG['1xbet
 
 function brandPresenceBadges(l, compact = false){
   const brands = [
-    { key: 'has_1xbet',     label: '1xBet',   color: '#7B61FF' },
-    { key: 'has_1xcasino',  label: 'Casino',  color: '#10b981' },
+    { key: 'has_1xbet',     label: '1xBet',    color: '#7B61FF' },
+    { key: 'has_1xcasino',  label: 'Casino',   color: '#10b981' },
     { key: 'has_luckypari', label: 'LuckyPari', color: '#f97316' },
   ];
   const pad = compact ? '1px 6px' : '2px 10px';
   const sz  = compact ? '10px' : '11px';
   return brands.map(b => {
-    const on = !!l[b.key];
-    const bg  = on ? `${b.color}22` : 'var(--bg3)';
-    const col = on ? b.color : 'var(--text3)';
-    const brd = on ? `${b.color}55` : 'var(--border)';
-    const ico = on ? '● ' : '○ ';
-    return `<span style="background:${bg};color:${col};border:1px solid ${brd};padding:${pad};border-radius:20px;font-size:${sz};font-family:var(--font-mono);">${ico}${b.label}</span>`;
+    const detected = !!l[b.key];
+    // Подсвечиваем бренд которого НЕТ на сайте — это потенциальный партнёр
+    const bg  = !detected ? `${b.color}22` : 'var(--bg3)';
+    const col = !detected ? b.color : 'var(--text3)';
+    const brd = !detected ? `${b.color}55` : 'var(--border)';
+    const ico = detected ? '✓ ' : '○ ';
+    return `<span style="background:${bg};color:${col};border:1px solid ${brd};padding:${pad};border-radius:20px;font-size:${sz};font-family:var(--font-mono);" title="${detected ? 'Уже есть на сайте' : 'Нет на сайте — потенциальный партнёр'}">${ico}${b.label}</span>`;
   }).join('');
 }
 
@@ -3197,7 +3198,6 @@ function openLead(id){
         <span class="chip chip-geo">${l.geo || '—'}</span>
         <span class="chip ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage}</span>
         ${brandPresenceBadges(l)}
-        <span id="cross-brand-warn-${l.id}"></span>
         <span class="score-badge ${sc(l.score || 0)}" style="margin-left:auto;">${l.score || '—'} / 100</span>
       </div>
       <div class="detail-actions">
@@ -3305,13 +3305,6 @@ function openLead(id){
     </div>`;
   // render contact section after DOM is set
   setTimeout(() => renderContactSection(l.id), 0);
-  // cross-brand duplicate badge
-  checkCrossBrandDuplicate(l.url).then(dups => {
-    const warnEl = document.getElementById('cross-brand-warn-' + l.id);
-    if(!warnEl || !dups.length) return;
-    const brandNames = [...new Set(dups.map(d => (BRAND_CONFIG[d.brand]||{}).display || d.brand))].join(', ');
-    warnEl.innerHTML = '<span style="background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.25);padding:2px 10px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ Уже в ' + brandNames + '</span>';
-  });
 }
 
 function cpContact(id){
