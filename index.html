@@ -2947,6 +2947,13 @@ function renderContactSection(leadId){
   const notFound = !l.contact_email && !l.contact_telegram && !l.contact_whatsapp && l.contact_email_type === 'not_found';
   const neverRun = !l.contact_email && !l.contact_telegram && !l.contact_whatsapp && !l.contact_email_type;
 
+  // Если никогда не запускалось — запускаем автоматом
+  if(neverRun){
+    el.innerHTML = '<span style="color:var(--text3);font-size:11px;">🔍 Ищу контакты...</span>';
+    runContactExtraction(leadId);
+    return;
+  }
+
   const typeLabel = {advertising:'реклама',general:'общий',admin:'admin'}[l.contact_email_type] || '';
   const typeBadge = typeLabel ? `<span style="font-size:9px;font-family:var(--font-mono);color:var(--green);background:var(--green-bg);padding:1px 5px;border-radius:3px;">${typeLabel}</span>` : '';
 
@@ -2957,10 +2964,9 @@ function renderContactSection(leadId){
     ${l.contact_telegram ? `<div class="kv-row"><span class="kv-key">✈ Telegram</span><span class="kv-val" style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">${l.contact_telegram}</span></div>` : ''}
     ${l.contact_whatsapp ? `<div class="kv-row"><span class="kv-key">📱 WhatsApp</span><span class="kv-val" style="color:var(--green);font-family:var(--font-mono);font-size:11px;">${l.contact_whatsapp}</span></div>` : ''}
     ${l.contact_source_url ? `<div class="kv-row"><span class="kv-key">📄 Источник</span><span class="kv-val" style="font-size:10px;color:var(--text3);font-family:var(--font-mono);word-break:break-all;">${l.contact_source_url.replace(/^https?:\/\//,'')}</span></div>` : ''}
-    ${notFound ? `<div style="font-size:11px;color:var(--text3);padding:4px 0;">Контакты не найдены — нужна ручная проверка</div>` : ''}
-    ${neverRun ? `<div style="font-size:11px;color:var(--text3);padding:4px 0;">Контакты не искались</div>` : ''}
+    ${notFound ? `<div style="font-size:11px;color:var(--text3);padding:4px 0;">Контакты не найдены</div>` : ''}
     <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
-      <button onclick="runContactExtraction('${leadId}')" style="font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">🔄 ${neverRun?'Найти контакты':'Повторить поиск'}</button>
+      ${notFound ? `<button onclick="runContactExtraction('${leadId}')" style="font-size:10px;font-family:var(--font-mono);padding:3px 8px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text3);cursor:pointer;">🔄 Повторить</button>` : ''}
       ${(l.contact_email||l.email) ? `<button onclick="openGmailDraft('${leadId}')" style="font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid rgba(59,130,246,.3);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;">✉ Gmail черновик</button>` : ''}
     </div>
   `;
