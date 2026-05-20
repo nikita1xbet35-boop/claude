@@ -2640,8 +2640,8 @@ const BRAND_CONFIG = {
     accentGlow:'rgba(249,115,22,0.18)',
     accentGrad:'linear-gradient(135deg,#f97316,#fb923c)',
     bgGlow:'radial-gradient(ellipse 80% 50% at 50% -10%,rgba(249,115,22,0.10) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(249,115,22,0.05) 0%,transparent 60%)',
-    managerName:'[MANAGER]', managerTg:'@[LP_HANDLE]',
-    signature:'[MANAGER], Lucky Pari Partners',
+    managerName:'Andreas', managerTg:'@af_luckypari',
+    signature:'Andreas, Lucky Pari Partners',
     partnerBrand:'Lucky Pari', partnerProgram:'Lucky Pari Partners',
     revshare:'25–40%',
   }
@@ -2793,6 +2793,7 @@ async function loadLeads(){
   updateBadge();
   populateGeoFilter();
   if(document.getElementById('page-dashboard')?.classList.contains('active')) _renderDashboard();
+  if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
 }
 
 // ══════════════════════════════════════════
@@ -4911,40 +4912,38 @@ function copyDailyDigest(){
 // ══════════════════════════════════════════
 //  GMAIL OUTREACH
 // ══════════════════════════════════════════
-const GMAIL_TEMPLATE_DEFAULT = `Hi,
+const GMAIL_TEMPLATE_DEFAULT = `Hi [сайт] team,
 
-My name is [менеджер], I work at [бренд] ([программа]).
+[менеджер] from [бренд] here.
 
-I came across [сайт] and I think there's a great opportunity for us to collaborate. [бренд] is one of the most trusted betting platforms in [страна], with high conversion rates and competitive payouts.
+Came across [сайт] while reviewing top platforms in [страна] — the kind of project we look to partner with directly in this market.
 
-What we offer:
-— Revenue share: [revshare]
-— Personal manager support
-— Fast payouts, no holds
-— Creatives and promo materials ready to use
+[бренд] is one of the leading brands in [страна], and a direct partnership would mean clean RevShare on traffic you already have, no admin fee, no hidden commissions, individual terms calibrated to your scale.
 
-Would love to discuss the details. Let me know if you're interested!
+Worth a quick chat?
 
-Best regards,
-[менеджер]
-[программа]`;
+— [менеджер]
+[бренд] Partners
+Telegram: [tg]`;
 
 function gmailGetTemplate(){
   return {
-    subject: localStorage.getItem('gmail_subject_' + currentBrand) || 'Partnership with [бренд] — [сайт]',
+    subject: localStorage.getItem('gmail_subject_' + currentBrand) || '[бренд] × [сайт] — partnership',
     body: localStorage.getItem('gmail_template_' + currentBrand) || GMAIL_TEMPLATE_DEFAULT
   };
 }
 
 function gmailFillVars(text, lead){
   const cfg = getBrandCfg();
+  const mgr = localStorage.getItem('gmail_manager') || cfg.managerName;
   return text
     .replace(/\[сайт\]/g, lead.name || getDomain(lead.url || ''))
     .replace(/\[страна\]/g, lead.geo || '—')
     .replace(/\[бренд\]/g, cfg.display || cfg.partnerBrand)
     .replace(/\[программа\]/g, cfg.partnerProgram)
-    .replace(/\[менеджер\]/g, cfg.managerName)
-    .replace(/\[revshare\]/g, cfg.revshare);
+    .replace(/\[менеджер\]/g, mgr)
+    .replace(/\[revshare\]/g, cfg.revshare)
+    .replace(/\[tg\]/g, cfg.managerTg || '');
 }
 
 function gmailAccountIndex(){
@@ -5020,17 +5019,24 @@ function initGmailOutreach(){
   if(emailMain) emailMain.value = localStorage.getItem('gmail_email_main') || '';
   if(emailLp)   emailLp.value   = localStorage.getItem('gmail_email_lp')   || '';
 
+  const mgrSel = document.getElementById('gmail-manager-select');
+  if(mgrSel) mgrSel.value = localStorage.getItem('gmail_manager') || getBrandCfg().managerName;
+
+  const clientIdEl = document.getElementById('gmail-client-id');
+  if(clientIdEl) clientIdEl.value = localStorage.getItem('gmail_client_id') || '';
+
   gmailSelected.clear();
   gmailOpened.clear();
   setGmailActiveAccount(gmailActiveAccount);
-  renderGmailLeads();
+  updateGmailAuthStatus();
+  loadLeads();
 }
 
 function renderGmailLeads(){
   const container = document.getElementById('gmail-leads-list');
   if(!container) return;
 
-  const eligible = leads.filter(l => l.stage === 'new' && (l.contact_email || l.email));
+  const eligible = leads.filter(l => l.stage === 'new' && (l.contact_email || l.email) && (!l.brand || l.brand === currentBrand));
   const badge = document.getElementById('gmail-badge');
   if(badge) badge.textContent = eligible.length + ' лидов';
 
@@ -5133,6 +5139,113 @@ async function gmailMoveToWaiting(){
     renderGmailLeads();
     updateBadge();
   }
+}
+
+function gmailSetManager(mgr){
+  localStorage.setItem('gmail_manager', mgr);
+}
+
+function updateGmailAuthStatus(){
+  const token   = localStorage.getItem('gmail_oauth_token');
+  const expiry  = parseInt(localStorage.getItem('gmail_oauth_expiry') || '0');
+  const valid   = token && Date.now() < expiry;
+  const statusEl = document.getElementById('gmail-auth-status');
+  const sendBtn  = document.getElementById('gmail-send-direct-btn');
+  if(statusEl){
+    if(valid){
+      const mins = Math.round((expiry - Date.now()) / 60000);
+      statusEl.innerHTML = `<span style="color:var(--green);">● Подключено</span> <span style="color:var(--text3);font-size:10px;">(токен действует ещё ~${mins} мин)</span>`;
+    } else if(token) {
+      statusEl.innerHTML = `<span style="color:var(--amber);">● Токен истёк — переподключи</span>`;
+    } else {
+      statusEl.innerHTML = `<span style="color:var(--text3);">● Не подключено</span>`;
+    }
+  }
+  if(sendBtn) sendBtn.style.display = valid ? '' : 'none';
+}
+
+function gmailConnectOAuth(){
+  const clientId = document.getElementById('gmail-client-id')?.value?.trim();
+  if(!clientId){ toast('Введи Google Client ID'); return; }
+  localStorage.setItem('gmail_client_id', clientId);
+  const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
+  const scope = encodeURIComponent('https://www.googleapis.com/auth/gmail.send');
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=token&scope=${scope}&prompt=select_account`;
+  const popup = window.open(authUrl, 'gmail_oauth', 'width=520,height=640,top=100,left=200');
+  if(!popup){ toast('Разреши всплывающие окна для этого сайта'); return; }
+  const handler = (e) => {
+    if(e.data?.type === 'gmail_oauth_token'){
+      window.removeEventListener('message', handler);
+      localStorage.setItem('gmail_oauth_token', e.data.token);
+      localStorage.setItem('gmail_oauth_expiry', String(e.data.expiry));
+      updateGmailAuthStatus();
+      toast('Gmail подключён! ✓');
+    }
+  };
+  window.addEventListener('message', handler);
+}
+
+function gmailDisconnect(){
+  localStorage.removeItem('gmail_oauth_token');
+  localStorage.removeItem('gmail_oauth_expiry');
+  updateGmailAuthStatus();
+  toast('Gmail отключён');
+}
+
+function _buildEmailRaw(to, subject, body){
+  const encodeB64 = str => {
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    bytes.forEach(b => bin += String.fromCharCode(b));
+    return btoa(bin);
+  };
+  const msg = [
+    'To: ' + to,
+    'Subject: =?utf-8?B?' + encodeB64(subject) + '?=',
+    'Content-Type: text/plain; charset=utf-8',
+    'MIME-Version: 1.0',
+    '',
+    body
+  ].join('\r\n');
+  const bytes = new TextEncoder().encode(msg);
+  let bin = '';
+  bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function gmailSendDirectOne(leadId){
+  const token  = localStorage.getItem('gmail_oauth_token');
+  const expiry = parseInt(localStorage.getItem('gmail_oauth_expiry') || '0');
+  if(!token || Date.now() > expiry){ toast('Токен истёк — переподключи Gmail'); return false; }
+  const l = leads.find(x => x.id === leadId);
+  if(!l) return false;
+  const email = l.contact_email || l.email;
+  const {subject, body} = gmailGetTemplate();
+  const raw = _buildEmailRaw(email, gmailFillVars(subject, l), gmailFillVars(body, l));
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw })
+  });
+  if(!res.ok){
+    const err = await res.json().catch(() => ({}));
+    toast('Ошибка Gmail API: ' + (err.error?.message || res.status));
+    if(res.status === 401){ localStorage.removeItem('gmail_oauth_token'); updateGmailAuthStatus(); }
+    return false;
+  }
+  return true;
+}
+
+async function gmailSendDirectSelected(){
+  if(!gmailSelected.size){ toast('Выбери лиды'); return; }
+  const ids = [...gmailSelected];
+  let sent = 0;
+  for(const id of ids){
+    const ok = await gmailSendDirectOne(id);
+    if(ok) sent++;
+    await new Promise(r => setTimeout(r, 400));
+  }
+  if(sent){ toast(sent + ' писем отправлено через Gmail API'); }
 }
 
 // ══════════════════════════════════════════
@@ -7697,6 +7810,28 @@ function animateCounter(el, target, duration = 800){
 }
 
 // ══════════════════════════════════════════
+//  GMAIL OAUTH CALLBACK HANDLER
+// ══════════════════════════════════════════
+try {
+  if(window.location.hash.includes('access_token=')){
+    const hp = new URLSearchParams(window.location.hash.substring(1));
+    const token = hp.get('access_token');
+    const expiresIn = parseInt(hp.get('expires_in') || '3600');
+    if(token){
+      const expiry = Date.now() + expiresIn * 1000;
+      if(window.opener){
+        window.opener.postMessage({ type:'gmail_oauth_token', token, expiry }, '*');
+        window.close();
+      } else {
+        localStorage.setItem('gmail_oauth_token', token);
+        localStorage.setItem('gmail_oauth_expiry', String(expiry));
+        history.replaceState(null, '', window.location.pathname);
+      }
+    }
+  }
+} catch(e){ console.error('oauth callback:', e); }
+
+// ══════════════════════════════════════════
 //  СТАРТ
 // ══════════════════════════════════════════
 try {
@@ -10037,8 +10172,15 @@ try {
       <!-- template card -->
       <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:12px;">Шаблон письма</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">МЕНЕДЖЕР:</span>
+          <select id="gmail-manager-select" onchange="gmailSetManager(this.value)" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:5px;outline:none;cursor:pointer;">
+            <option value="Nick">Nick</option>
+            <option value="Andreas">Andreas</option>
+          </select>
+        </div>
         <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px;line-height:1.6;">
-          Переменные: <span style="color:var(--accent2);">[сайт]</span> <span style="color:var(--accent2);">[страна]</span> <span style="color:var(--accent2);">[бренд]</span> <span style="color:var(--accent2);">[программа]</span> <span style="color:var(--accent2);">[менеджер]</span> <span style="color:var(--accent2);">[revshare]</span>
+          Переменные: <span style="color:var(--accent2);">[сайт]</span> <span style="color:var(--accent2);">[страна]</span> <span style="color:var(--accent2);">[бренд]</span> <span style="color:var(--accent2);">[менеджер]</span> <span style="color:var(--accent2);">[tg]</span>
         </div>
         <div style="margin-bottom:10px;">
           <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;">ТЕМА ПИСЬМА</div>
@@ -10089,6 +10231,18 @@ try {
         </div>
         <button onclick="saveGmailConfig()" style="width:100%;font-size:11px;font-family:var(--font-mono);padding:7px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">💾 Сохранить аккаунты</button>
       </div>
+      <!-- gmail api oauth card -->
+      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
+        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">Gmail API (авто-отправка)</div>
+        <div id="gmail-auth-status" style="font-size:11px;font-family:var(--font-mono);margin-bottom:12px;"><span style="color:var(--text3);">● Не подключено</span></div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;line-height:1.5;">Google Client ID (из Google Cloud Console → Credentials → OAuth 2.0):</div>
+        <input id="gmail-client-id" type="text" placeholder="1234567890-xxxx.apps.googleusercontent.com" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:10px;padding:6px 8px;border-radius:5px;outline:none;margin-bottom:8px;">
+        <div style="display:flex;gap:8px;">
+          <button onclick="gmailConnectOAuth()" style="flex:1;font-size:11px;font-family:var(--font-mono);padding:7px;border-radius:6px;border:1px solid rgba(59,130,246,.4);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;">🔑 Авторизоваться</button>
+          <button onclick="gmailDisconnect()" style="font-size:11px;font-family:var(--font-mono);padding:7px 10px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text3);cursor:pointer;">✕</button>
+        </div>
+        <div style="font-size:9px;color:var(--text3);margin-top:10px;line-height:1.5;">Для работы нужно в Google Cloud Console:<br>1. Включить Gmail API<br>2. Создать OAuth 2.0 (Web app)<br>3. В Authorized JS origins и redirect URIs добавить URL этого сайта</div>
+      </div>
     </div>
     <!-- right: leads list -->
     <div style="flex:1;min-width:0;">
@@ -10098,7 +10252,8 @@ try {
           <div style="display:flex;gap:8px;align-items:center;">
             <button onclick="gmailSelectAll()" style="font-size:10px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">Все</button>
             <button onclick="gmailSelectNone()" style="font-size:10px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">Сбросить</button>
-            <button onclick="gmailSendSelected()" style="font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(59,130,246,.35);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;">✉ Открыть черновики (<span id="gmail-sel-count">0</span>)</button>
+            <button onclick="gmailSendSelected()" style="font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(59,130,246,.35);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;">✉ Черновики (<span id="gmail-sel-count">0</span>)</button>
+            <button id="gmail-send-direct-btn" onclick="gmailSendDirectSelected()" style="display:none;font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(123,97,255,.4);background:rgba(123,97,255,.12);color:var(--accent2);cursor:pointer;">📤 Отправить напрямую</button>
             <button onclick="gmailMoveToWaiting()" style="font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(16,185,129,.35);background:rgba(16,185,129,.1);color:var(--green);cursor:pointer;">✓ В Ожидание (<span id="gmail-wait-count">0</span>)</button>
           </div>
         </div>
