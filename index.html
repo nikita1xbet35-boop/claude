@@ -4958,7 +4958,7 @@ function saveGmailTemplate(){
   const tmpl = document.getElementById('gmail-template')?.value || '';
   localStorage.setItem('gmail_subject_' + currentBrand, subj);
   localStorage.setItem('gmail_template_' + currentBrand, tmpl);
-  toast('Шаблон сохранён');
+  gmailToast('Шаблон сохранён');
 }
 
 function saveGmailConfig(){
@@ -4966,7 +4966,7 @@ function saveGmailConfig(){
   localStorage.setItem('gmail_idx_lp',     document.getElementById('gmail-idx-lp')?.value     || '1');
   localStorage.setItem('gmail_email_main', document.getElementById('gmail-email-main')?.value || '');
   localStorage.setItem('gmail_email_lp',   document.getElementById('gmail-email-lp')?.value   || '');
-  toast('Аккаунты сохранены');
+  gmailToast('Аккаунты сохранены');
 }
 
 function previewGmailTemplate(){
@@ -5106,7 +5106,7 @@ function gmailOpenOne(leadId){
 }
 
 async function gmailSendSelected(){
-  if(!gmailSelected.size){ toast('Выбери лиды'); return; }
+  if(!gmailSelected.size){ gmailToast('Выбери лиды', true); return; }
   const ids = [...gmailSelected];
   for(const id of ids){
     gmailOpenOne(id);
@@ -5116,7 +5116,7 @@ async function gmailSendSelected(){
 
 async function gmailMoveToWaiting(){
   const ids = gmailOpened.size > 0 ? [...gmailOpened] : [...gmailSelected];
-  if(!ids.length){ toast('Сначала открой черновики или выбери лиды'); return; }
+  if(!ids.length){ gmailToast('Сначала открой черновики или выбери лиды', true); return; }
   const now = new Date().toISOString();
   let moved = 0;
   for(const id of ids){
@@ -5131,7 +5131,7 @@ async function gmailMoveToWaiting(){
     }
   }
   if(moved){
-    toast(moved + ' лидов переведено в Ожидание');
+    gmailToast(moved + ' лидов переведено в Ожидание');
     renderGmailLeads();
     updateBadge();
   }
@@ -5139,6 +5139,11 @@ async function gmailMoveToWaiting(){
 
 function gmailSetManager(mgr){
   localStorage.setItem('gmail_manager', mgr);
+}
+
+function gmailToast(msg, err = false){
+  if(window.toastify) window.toastify({ type: err ? 'err' : 'ok', title: err ? 'Ошибка' : '✓', msg });
+  else alert(msg);
 }
 
 function updateGmailAuthStatus(){
@@ -5160,14 +5165,14 @@ async function gmailSendDirectOne(leadId){
     }
   });
   if(error || data?.error){
-    toast('Ошибка отправки: ' + (data?.error || error?.message || 'неизвестно'));
+    gmailToast('Ошибка отправки: ' + (data?.error || error?.message || 'неизвестно'), true);
     return false;
   }
   return true;
 }
 
 async function gmailSendDirectSelected(){
-  if(!gmailSelected.size){ toast('Выбери лиды'); return; }
+  if(!gmailSelected.size){ gmailToast('Выбери лиды', true); return; }
   const ids = [...gmailSelected];
   let sent = 0;
   for(const id of ids){
@@ -5175,7 +5180,7 @@ async function gmailSendDirectSelected(){
     if(ok) sent++;
     await new Promise(r => setTimeout(r, 400));
   }
-  if(sent){ toast(sent + ' писем отправлено через Gmail API'); }
+  if(sent){ gmailToast(sent + ' писем отправлено'); }
 }
 
 // ══════════════════════════════════════════
