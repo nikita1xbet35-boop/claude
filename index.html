@@ -5169,8 +5169,14 @@ async function gmailSendDirectOne(leadId){
       account: gmailActiveAccount
     }
   });
-  if(error || data?.error){
-    gmailToast('Ошибка отправки: ' + (data?.error || error?.message || 'неизвестно'), true);
+  if(error){
+    let detail = error.message || 'неизвестно';
+    try { const b = await error.context?.json?.(); if(b?.error) detail = b.error; } catch(_){}
+    gmailToast('Ошибка: ' + detail, true);
+    return false;
+  }
+  if(data?.error){
+    gmailToast('Ошибка: ' + data.error, true);
     return false;
   }
   return true;
