@@ -5022,9 +5022,6 @@ function initGmailOutreach(){
   const mgrSel = document.getElementById('gmail-manager-select');
   if(mgrSel) mgrSel.value = localStorage.getItem('gmail_manager') || getBrandCfg().managerName;
 
-  const clientIdEl = document.getElementById('gmail-client-id');
-  if(clientIdEl) clientIdEl.value = localStorage.getItem('gmail_client_id') || '';
-
   gmailSelected.clear();
   gmailOpened.clear();
   setGmailActiveAccount(gmailActiveAccount);
@@ -5145,91 +5142,25 @@ function gmailSetManager(mgr){
 }
 
 function updateGmailAuthStatus(){
-  const token   = localStorage.getItem('gmail_oauth_token');
-  const expiry  = parseInt(localStorage.getItem('gmail_oauth_expiry') || '0');
-  const valid   = token && Date.now() < expiry;
   const statusEl = document.getElementById('gmail-auth-status');
-  const sendBtn  = document.getElementById('gmail-send-direct-btn');
-  if(statusEl){
-    if(valid){
-      const mins = Math.round((expiry - Date.now()) / 60000);
-      statusEl.innerHTML = `<span style="color:var(--green);">● Подключено</span> <span style="color:var(--text3);font-size:10px;">(токен действует ещё ~${mins} мин)</span>`;
-    } else if(token) {
-      statusEl.innerHTML = `<span style="color:var(--amber);">● Токен истёк — переподключи</span>`;
-    } else {
-      statusEl.innerHTML = `<span style="color:var(--text3);">● Не подключено</span>`;
-    }
-  }
-  if(sendBtn) sendBtn.style.display = valid ? '' : 'none';
-}
-
-function gmailConnectOAuth(){
-  const clientId = document.getElementById('gmail-client-id')?.value?.trim();
-  if(!clientId){ toast('Введи Google Client ID'); return; }
-  localStorage.setItem('gmail_client_id', clientId);
-  const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
-  const scope = encodeURIComponent('https://www.googleapis.com/auth/gmail.send');
-  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=token&scope=${scope}&prompt=select_account`;
-  const popup = window.open(authUrl, 'gmail_oauth', 'width=520,height=640,top=100,left=200');
-  if(!popup){ toast('Разреши всплывающие окна для этого сайта'); return; }
-  const handler = (e) => {
-    if(e.data?.type === 'gmail_oauth_token'){
-      window.removeEventListener('message', handler);
-      localStorage.setItem('gmail_oauth_token', e.data.token);
-      localStorage.setItem('gmail_oauth_expiry', String(e.data.expiry));
-      updateGmailAuthStatus();
-      toast('Gmail подключён! ✓');
-    }
-  };
-  window.addEventListener('message', handler);
-}
-
-function gmailDisconnect(){
-  localStorage.removeItem('gmail_oauth_token');
-  localStorage.removeItem('gmail_oauth_expiry');
-  updateGmailAuthStatus();
-  toast('Gmail отключён');
-}
-
-function _buildEmailRaw(to, subject, body){
-  const encodeB64 = str => {
-    const bytes = new TextEncoder().encode(str);
-    let bin = '';
-    bytes.forEach(b => bin += String.fromCharCode(b));
-    return btoa(bin);
-  };
-  const msg = [
-    'To: ' + to,
-    'Subject: =?utf-8?B?' + encodeB64(subject) + '?=',
-    'Content-Type: text/plain; charset=utf-8',
-    'MIME-Version: 1.0',
-    '',
-    body
-  ].join('\r\n');
-  const bytes = new TextEncoder().encode(msg);
-  let bin = '';
-  bytes.forEach(b => bin += String.fromCharCode(b));
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  if(statusEl) statusEl.innerHTML = '<span style="color:var(--green);">● Отправка через сервер (Supabase)</span>';
 }
 
 async function gmailSendDirectOne(leadId){
-  const token  = localStorage.getItem('gmail_oauth_token');
-  const expiry = parseInt(localStorage.getItem('gmail_oauth_expiry') || '0');
-  if(!token || Date.now() > expiry){ toast('Токен истёк — переподключи Gmail'); return false; }
   const l = leads.find(x => x.id === leadId);
   if(!l) return false;
   const email = l.contact_email || l.email;
   const {subject, body} = gmailGetTemplate();
-  const raw = _buildEmailRaw(email, gmailFillVars(subject, l), gmailFillVars(body, l));
-  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw })
+  const { data, error } = await sb.functions.invoke('send-email', {
+    body: {
+      to: email,
+      subject: gmailFillVars(subject, l),
+      body: gmailFillVars(body, l),
+      account: gmailActiveAccount
+    }
   });
-  if(!res.ok){
-    const err = await res.json().catch(() => ({}));
-    toast('Ошибка Gmail API: ' + (err.error?.message || res.status));
-    if(res.status === 401){ localStorage.removeItem('gmail_oauth_token'); updateGmailAuthStatus(); }
+  if(error || data?.error){
+    toast('Ошибка отправки: ' + (data?.error || error?.message || 'неизвестно'));
     return false;
   }
   return true;
@@ -7809,28 +7740,6 @@ function animateCounter(el, target, duration = 800){
 }
 
 // ══════════════════════════════════════════
-//  GMAIL OAUTH CALLBACK HANDLER
-// ══════════════════════════════════════════
-try {
-  if(window.location.hash.includes('access_token=')){
-    const hp = new URLSearchParams(window.location.hash.substring(1));
-    const token = hp.get('access_token');
-    const expiresIn = parseInt(hp.get('expires_in') || '3600');
-    if(token){
-      const expiry = Date.now() + expiresIn * 1000;
-      if(window.opener){
-        window.opener.postMessage({ type:'gmail_oauth_token', token, expiry }, '*');
-        window.close();
-      } else {
-        localStorage.setItem('gmail_oauth_token', token);
-        localStorage.setItem('gmail_oauth_expiry', String(expiry));
-        history.replaceState(null, '', window.location.pathname);
-      }
-    }
-  }
-} catch(e){ console.error('oauth callback:', e); }
-
-// ══════════════════════════════════════════
 //  СТАРТ
 // ══════════════════════════════════════════
 try {
@@ -10230,17 +10139,20 @@ try {
         </div>
         <button onclick="saveGmailConfig()" style="width:100%;font-size:11px;font-family:var(--font-mono);padding:7px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">💾 Сохранить аккаунты</button>
       </div>
-      <!-- gmail api oauth card -->
+      <!-- auto-send info card -->
       <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
-        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">Gmail API (авто-отправка)</div>
-        <div id="gmail-auth-status" style="font-size:11px;font-family:var(--font-mono);margin-bottom:12px;"><span style="color:var(--text3);">● Не подключено</span></div>
-        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;line-height:1.5;">Google Client ID (из Google Cloud Console → Credentials → OAuth 2.0):</div>
-        <input id="gmail-client-id" type="text" placeholder="1234567890-xxxx.apps.googleusercontent.com" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:10px;padding:6px 8px;border-radius:5px;outline:none;margin-bottom:8px;">
-        <div style="display:flex;gap:8px;">
-          <button onclick="gmailConnectOAuth()" style="flex:1;font-size:11px;font-family:var(--font-mono);padding:7px;border-radius:6px;border:1px solid rgba(59,130,246,.4);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;">🔑 Авторизоваться</button>
-          <button onclick="gmailDisconnect()" style="font-size:11px;font-family:var(--font-mono);padding:7px 10px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text3);cursor:pointer;">✕</button>
+        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">Авто-отправка</div>
+        <div id="gmail-auth-status" style="font-size:11px;font-family:var(--font-mono);margin-bottom:12px;"><span style="color:var(--green);">● Отправка через сервер (Supabase)</span></div>
+        <div style="font-size:10px;color:var(--text2);line-height:1.7;">
+          Создай Edge Function <code style="color:var(--accent2);background:var(--bg3);padding:1px 5px;border-radius:3px;">send-email</code> в Supabase и добавь секреты:<br>
+          <span style="color:var(--accent2);">GMAIL_USER_MAIN</span> — email 1xBet/Casino<br>
+          <span style="color:var(--accent2);">GMAIL_PASS_MAIN</span> — App Password<br>
+          <span style="color:var(--accent2);">GMAIL_USER_LP</span> — email LuckyPari<br>
+          <span style="color:var(--accent2);">GMAIL_PASS_LP</span> — App Password
         </div>
-        <div style="font-size:9px;color:var(--text3);margin-top:10px;line-height:1.5;">Для работы нужно в Google Cloud Console:<br>1. Включить Gmail API<br>2. Создать OAuth 2.0 (Web app)<br>3. В Authorized JS origins и redirect URIs добавить URL этого сайта</div>
+        <div style="font-size:9px;color:var(--text3);margin-top:10px;line-height:1.6;border-top:1px solid var(--border);padding-top:10px;">
+          App Password: myaccount.google.com → Безопасность → Двухэтапная аутентификация → Пароли приложений → создай «AffiliateOS»
+        </div>
       </div>
     </div>
     <!-- right: leads list -->
@@ -10252,7 +10164,7 @@ try {
             <button onclick="gmailSelectAll()" style="font-size:10px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">Все</button>
             <button onclick="gmailSelectNone()" style="font-size:10px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">Сбросить</button>
             <button onclick="gmailSendSelected()" style="font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(59,130,246,.35);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;">✉ Черновики (<span id="gmail-sel-count">0</span>)</button>
-            <button id="gmail-send-direct-btn" onclick="gmailSendDirectSelected()" style="display:none;font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(123,97,255,.4);background:rgba(123,97,255,.12);color:var(--accent2);cursor:pointer;">📤 Отправить напрямую</button>
+            <button id="gmail-send-direct-btn" onclick="gmailSendDirectSelected()" style="font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(123,97,255,.4);background:rgba(123,97,255,.12);color:var(--accent2);cursor:pointer;">📤 Отправить напрямую</button>
             <button onclick="gmailMoveToWaiting()" style="font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(16,185,129,.35);background:rgba(16,185,129,.1);color:var(--green);cursor:pointer;">✓ В Ожидание (<span id="gmail-wait-count">0</span>)</button>
           </div>
         </div>
