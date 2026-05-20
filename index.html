@@ -5124,7 +5124,7 @@ async function gmailMoveToWaiting(){
   let moved = 0;
   for(const id of ids){
     const l = leads.find(x => x.id === id);
-    if(!l || l.message_sent_at) continue;
+    if(!l) continue;
     const {error} = await sb.from('leads').update({ stage:'waiting', message_sent_at: now }).eq('id', id);
     if(!error){
       Object.assign(l, { stage:'waiting', message_sent_at: now });
