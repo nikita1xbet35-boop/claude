@@ -5142,8 +5142,13 @@ function gmailSetManager(mgr){
 }
 
 function gmailToast(msg, err = false){
-  if(window.toastify) window.toastify({ type: err ? 'err' : 'ok', title: err ? 'Ошибка' : '✓', msg });
-  else alert(msg);
+  const el = document.getElementById('gmail-notif');
+  if(!el){ console.warn('gmailToast:', msg); return; }
+  el.textContent = (err ? '✕ ' : '✓ ') + msg;
+  el.style.cssText = 'position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:9999;padding:10px 22px;border-radius:10px;font-size:13px;font-family:var(--font-mono);box-shadow:0 4px 20px rgba(0,0,0,.4);opacity:1;display:block;' +
+    (err ? 'background:#7f1d1d;border:1px solid #ef4444;color:#fca5a5;' : 'background:#052e16;border:1px solid #22c55e;color:#86efac;');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.opacity='0'; setTimeout(()=>{ el.style.display='none'; },220); }, 3000);
 }
 
 function updateGmailAuthStatus(){
@@ -10177,6 +10182,7 @@ try {
       </div>
     </div>
   </div>
+  <div id="gmail-notif" style="position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:9999;display:none;padding:10px 22px;border-radius:10px;font-size:13px;font-family:var(--font-mono);box-shadow:0 4px 20px rgba(0,0,0,.4);transition:opacity .2s;"></div>
 </div>
 
 <div id="brand-switcher-fixed">
