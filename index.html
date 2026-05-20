@@ -4948,9 +4948,9 @@ function gmailFillVars(text, lead){
 }
 
 function gmailAccountIndex(){
-  if(currentBrand === 'luckypari'){
+  const acc = gmailActiveAccount || 'main';
+  if(acc === 'lp')
     return parseInt(document.getElementById('gmail-idx-lp')?.value || localStorage.getItem('gmail_idx_lp') || '1');
-  }
   return parseInt(document.getElementById('gmail-idx-main')?.value || localStorage.getItem('gmail_idx_main') || '0');
 }
 
@@ -4963,11 +4963,11 @@ function saveGmailTemplate(){
 }
 
 function saveGmailConfig(){
-  const idxMain = document.getElementById('gmail-idx-main')?.value || '0';
-  const idxLp   = document.getElementById('gmail-idx-lp')?.value   || '1';
-  localStorage.setItem('gmail_idx_main', idxMain);
-  localStorage.setItem('gmail_idx_lp',   idxLp);
-  toast('Настройки сохранены');
+  localStorage.setItem('gmail_idx_main',   document.getElementById('gmail-idx-main')?.value   || '0');
+  localStorage.setItem('gmail_idx_lp',     document.getElementById('gmail-idx-lp')?.value     || '1');
+  localStorage.setItem('gmail_email_main', document.getElementById('gmail-email-main')?.value || '');
+  localStorage.setItem('gmail_email_lp',   document.getElementById('gmail-email-lp')?.value   || '');
+  toast('Аккаунты сохранены');
 }
 
 function previewGmailTemplate(){
@@ -4988,6 +4988,21 @@ function previewGmailTemplate(){
 }
 
 let gmailSelected = new Set();
+let gmailOpened = new Set(); // открыли черновик но ещё не подтвердили
+let gmailActiveAccount = localStorage.getItem('gmail_active_account') || 'main';
+
+function setGmailActiveAccount(acc){
+  gmailActiveAccount = acc;
+  localStorage.setItem('gmail_active_account', acc);
+  const mainBadge = document.getElementById('gmail-acc-main-badge');
+  const lpBadge   = document.getElementById('gmail-acc-lp-badge');
+  const mainBox   = document.getElementById('gmail-acc-main');
+  const lpBox     = document.getElementById('gmail-acc-lp');
+  if(mainBadge) mainBadge.style.display = acc==='main' ? '' : 'none';
+  if(lpBadge)   lpBadge.style.display   = acc==='lp'   ? '' : 'none';
+  if(mainBox)   mainBox.style.borderColor  = acc==='main' ? '#7B61FF' : 'var(--border2)';
+  if(lpBox)     lpBox.style.borderColor    = acc==='lp'   ? '#f97316' : 'var(--border2)';
+}
 
 function initGmailOutreach(){
   const {subject, body} = gmailGetTemplate();
@@ -4996,12 +5011,18 @@ function initGmailOutreach(){
   if(subjEl) subjEl.value = subject;
   if(tmplEl) tmplEl.value = body;
 
-  const idxMain = document.getElementById('gmail-idx-main');
-  const idxLp   = document.getElementById('gmail-idx-lp');
-  if(idxMain) idxMain.value = localStorage.getItem('gmail_idx_main') || '0';
-  if(idxLp)   idxLp.value   = localStorage.getItem('gmail_idx_lp')   || '1';
+  const idxMain   = document.getElementById('gmail-idx-main');
+  const idxLp     = document.getElementById('gmail-idx-lp');
+  const emailMain = document.getElementById('gmail-email-main');
+  const emailLp   = document.getElementById('gmail-email-lp');
+  if(idxMain)   idxMain.value   = localStorage.getItem('gmail_idx_main')   || '0';
+  if(idxLp)     idxLp.value     = localStorage.getItem('gmail_idx_lp')     || '1';
+  if(emailMain) emailMain.value = localStorage.getItem('gmail_email_main') || '';
+  if(emailLp)   emailLp.value   = localStorage.getItem('gmail_email_lp')   || '';
 
   gmailSelected.clear();
+  gmailOpened.clear();
+  setGmailActiveAccount(gmailActiveAccount);
   renderGmailLeads();
 }
 
@@ -5033,7 +5054,7 @@ function renderGmailLeads(){
         </div>
         <div style="font-size:11px;color:var(--blue);font-family:var(--font-mono);">${email}</div>
       </div>
-      ${!sent ? `<button onclick="gmailOpenOne('${l.id}')" title="Открыть черновик" style="font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid rgba(59,130,246,.3);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;flex-shrink:0;">✉</button>` : ''}
+      ${!sent ? `<button onclick="gmailOpenOne('${l.id}')" title="Открыть черновик" style="font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid rgba(59,130,246,.3);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;flex-shrink:0;" id="gmail-open-btn-${l.id}">✉</button>` : ''}
     </div>`;
   }).join('');
 
@@ -5054,16 +5075,19 @@ function gmailSelectAll(){
 
 function gmailSelectNone(){
   gmailSelected.clear();
+  gmailOpened.clear();
   document.querySelectorAll('#gmail-leads-list input[type=checkbox]').forEach(cb => cb.checked=false);
   updateGmailSelCount();
 }
 
 function updateGmailSelCount(){
-  const el = document.getElementById('gmail-sel-count');
-  if(el) el.textContent = gmailSelected.size;
+  const sel = document.getElementById('gmail-sel-count');
+  if(sel) sel.textContent = gmailSelected.size;
+  const wait = document.getElementById('gmail-wait-count');
+  if(wait) wait.textContent = gmailOpened.size;
 }
 
-async function gmailOpenOne(leadId){
+function gmailOpenOne(leadId){
   const l = leads.find(x => x.id === leadId);
   if(!l) return;
   const email = l.contact_email || l.email;
@@ -5072,27 +5096,40 @@ async function gmailOpenOne(leadId){
   const b = encodeURIComponent(gmailFillVars(body, l));
   const idx = gmailAccountIndex();
   window.open(`https://mail.google.com/mail/u/${idx}/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${s}&body=${b}`, '_blank');
-  // после открытия — предлагаем отметить как отправленное
-  setTimeout(() => gmailMarkSent(leadId), 1200);
+  // отмечаем как "черновик открыт" — подсвечиваем строку
+  gmailOpened.add(leadId);
+  const btn = document.getElementById('gmail-open-btn-' + leadId);
+  if(btn){ btn.textContent = '✓'; btn.style.color = 'var(--green)'; btn.style.borderColor = 'rgba(16,185,129,.35)'; btn.style.background = 'rgba(16,185,129,.1)'; }
+  updateGmailSelCount();
 }
 
 async function gmailSendSelected(){
   if(!gmailSelected.size){ toast('Выбери лиды'); return; }
   const ids = [...gmailSelected];
   for(const id of ids){
-    await gmailOpenOne(id);
-    await new Promise(r => setTimeout(r, 600));
+    gmailOpenOne(id);
+    await new Promise(r => setTimeout(r, 700));
   }
 }
 
-async function gmailMarkSent(leadId){
-  const l = leads.find(x => x.id === leadId);
-  if(!l || l.message_sent_at) return;
+async function gmailMoveToWaiting(){
+  const ids = gmailOpened.size > 0 ? [...gmailOpened] : [...gmailSelected];
+  if(!ids.length){ toast('Сначала открой черновики или выбери лиды'); return; }
   const now = new Date().toISOString();
-  const {error} = await sb.from('leads').update({ stage:'waiting', message_sent_at: now }).eq('id', leadId);
-  if(!error){
-    Object.assign(l, { stage:'waiting', message_sent_at: now });
-    gmailSelected.delete(leadId);
+  let moved = 0;
+  for(const id of ids){
+    const l = leads.find(x => x.id === id);
+    if(!l || l.message_sent_at) continue;
+    const {error} = await sb.from('leads').update({ stage:'waiting', message_sent_at: now }).eq('id', id);
+    if(!error){
+      Object.assign(l, { stage:'waiting', message_sent_at: now });
+      gmailSelected.delete(id);
+      gmailOpened.delete(id);
+      moved++;
+    }
+  }
+  if(moved){
+    toast(moved + ' лидов переведено в Ожидание');
     renderGmailLeads();
     updateBadge();
   }
@@ -10016,19 +10053,41 @@ try {
           <button onclick="previewGmailTemplate()" style="font-size:11px;font-family:var(--font-mono);padding:7px 12px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">👁 Превью</button>
         </div>
       </div>
-      <!-- gmail account config -->
+      <!-- gmail accounts switcher -->
       <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:12px;">Gmail аккаунты</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.5;">Индекс аккаунта в браузере (0 = первый, 1 = второй). Убедись что оба Gmail залогинены в Chrome.</div>
-        <div style="display:grid;grid-template-columns:1fr 60px;gap:8px;align-items:center;margin-bottom:8px;">
-          <div style="font-size:11px;color:var(--text2);font-family:var(--font-mono);">1xBet + Casino</div>
-          <input id="gmail-idx-main" type="number" min="0" max="9" value="0" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:5px 8px;border-radius:6px;outline:none;text-align:center;">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.5;">Укажи email каждого аккаунта и его порядковый номер в Chrome (0 = первый залогиненный).</div>
+        <!-- account 1: 1xBet + Casino -->
+        <div id="gmail-acc-main" onclick="setGmailActiveAccount('main')" style="border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;transition:all .15s;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#7B61FF;"></div>
+              <span style="font-size:11px;font-family:var(--font-mono);color:var(--text);">1xBet + 1xCasino</span>
+            </div>
+            <span id="gmail-acc-main-badge" style="font-size:9px;font-family:var(--font-mono);padding:1px 7px;border-radius:20px;background:var(--accent-glow);color:var(--accent2);">активный</span>
+          </div>
+          <input onclick="event.stopPropagation()" id="gmail-email-main" type="email" placeholder="nick@gmail.com" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:5px 8px;border-radius:5px;outline:none;margin-bottom:6px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:10px;color:var(--text3);">Индекс в Chrome:</span>
+            <input onclick="event.stopPropagation()" id="gmail-idx-main" type="number" min="0" max="9" value="0" style="width:50px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 6px;border-radius:5px;outline:none;text-align:center;">
+          </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 60px;gap:8px;align-items:center;margin-bottom:12px;">
-          <div style="font-size:11px;color:var(--text2);font-family:var(--font-mono);">LuckyPari</div>
-          <input id="gmail-idx-lp" type="number" min="0" max="9" value="1" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:5px 8px;border-radius:6px;outline:none;text-align:center;">
+        <!-- account 2: LuckyPari -->
+        <div id="gmail-acc-lp" onclick="setGmailActiveAccount('lp')" style="border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:12px;cursor:pointer;transition:all .15s;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#f97316;"></div>
+              <span style="font-size:11px;font-family:var(--font-mono);color:var(--text);">LuckyPari</span>
+            </div>
+            <span id="gmail-acc-lp-badge" style="font-size:9px;font-family:var(--font-mono);padding:1px 7px;border-radius:20px;display:none;background:rgba(249,115,22,.15);color:#f97316;">активный</span>
+          </div>
+          <input onclick="event.stopPropagation()" id="gmail-email-lp" type="email" placeholder="luckypari@gmail.com" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:5px 8px;border-radius:5px;outline:none;margin-bottom:6px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:10px;color:var(--text3);">Индекс в Chrome:</span>
+            <input onclick="event.stopPropagation()" id="gmail-idx-lp" type="number" min="0" max="9" value="1" style="width:50px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 6px;border-radius:5px;outline:none;text-align:center;">
+          </div>
         </div>
-        <button onclick="saveGmailConfig()" style="width:100%;font-size:11px;font-family:var(--font-mono);padding:7px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">Сохранить</button>
+        <button onclick="saveGmailConfig()" style="width:100%;font-size:11px;font-family:var(--font-mono);padding:7px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">💾 Сохранить аккаунты</button>
       </div>
     </div>
     <!-- right: leads list -->
@@ -10039,7 +10098,8 @@ try {
           <div style="display:flex;gap:8px;align-items:center;">
             <button onclick="gmailSelectAll()" style="font-size:10px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">Все</button>
             <button onclick="gmailSelectNone()" style="font-size:10px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">Сбросить</button>
-            <button onclick="gmailSendSelected()" id="gmail-send-btn" style="font-size:11px;font-family:var(--font-mono);padding:6px 16px;border-radius:6px;border:1px solid var(--accent)40;background:var(--accent-glow);color:var(--accent2);cursor:pointer;">✉ Открыть черновики (<span id="gmail-sel-count">0</span>)</button>
+            <button onclick="gmailSendSelected()" style="font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(59,130,246,.35);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;">✉ Открыть черновики (<span id="gmail-sel-count">0</span>)</button>
+            <button onclick="gmailMoveToWaiting()" style="font-size:11px;font-family:var(--font-mono);padding:6px 14px;border-radius:6px;border:1px solid rgba(16,185,129,.35);background:rgba(16,185,129,.1);color:var(--green);cursor:pointer;">✓ В Ожидание (<span id="gmail-wait-count">0</span>)</button>
           </div>
         </div>
         <div id="gmail-leads-list"></div>
