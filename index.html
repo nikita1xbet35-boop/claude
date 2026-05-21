@@ -1169,6 +1169,11 @@
             <button onclick="recalcLowScores(this)" style="width:100%;padding:7px;background:var(--bg4);color:var(--text2);border:1px solid var(--border2);border-radius:6px;font-size:11px;font-weight:600;font-family:var(--font-body);cursor:pointer;">🔄 Пересчитать score ≤ 10</button>
             <div id="recalc-status" style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-top:6px;display:none;"></div>
           </div>
+          <div style="margin:10px 0;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:10px;">
+            <div style="font-size:10px;color:var(--blue);font-family:var(--font-mono);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px;">📧 Поиск контактов</div>
+            <div id="batch-contact-status" style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px;">—</div>
+            <button onclick="batchExtractContacts()" id="batch-contact-btn" style="width:100%;padding:7px;background:var(--blue);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;font-family:var(--font-body);cursor:pointer;">🔍 Найти для всех новых</button>
+          </div>
           <div class="sidebar-label">История запросов</div>
           <div id="history-list">
             <div class="history-item"><span class="history-dot" style="background:var(--green)"></span>betting review sites Bangladesh</div>
@@ -2991,6 +2996,23 @@ async function extractContactsFromUrl(siteUrl){
   return { contact_email: bestEmail, contact_email_type: bestType, contact_telegram: tg, contact_whatsapp: wa, contact_phone: phone, contact_source_url: sourceUrl };
 }
 
+async function batchExtractContacts(){
+  const btn = document.getElementById('batch-contact-btn');
+  const status = document.getElementById('batch-contact-status');
+  const targets = leads.filter(l => l.stage === 'new' && !l.contact_email && !l.contact_telegram && l.contact_email_type !== 'not_found');
+  if(!targets.length){ if(status) status.textContent = 'Нет новых без контакта'; return; }
+  if(btn) btn.disabled = true;
+  let done = 0;
+  for(const l of targets){
+    if(status) status.textContent = `[${done+1}/${targets.length}] ${l.name || l.url}`;
+    await runContactExtraction(l.id);
+    done++;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if(status) status.textContent = `Готово: ${done} лидов обработано`;
+  if(btn) btn.disabled = false;
+}
+
 async function runContactExtraction(leadId){
   const l = leads.find(x => x.id === leadId);
   if(!l) return;
@@ -3112,7 +3134,27 @@ let pipelineSortBy = 'score'; // score | date
 
 function renderLeads(filter = ''){
   const list = document.getElementById('leads-list');
-  let data = filter ? leads.filter(l => l.stage === filter) : leads;
+
+  // Read all active filters from dropdowns (so both statClick and applyFilters use the same path)
+  const prio    = document.getElementById('filter-priority')?.value || '';
+  const contact = document.getElementById('filter-contact')?.value || '';
+  const geo     = document.getElementById('filter-geo')?.value || '';
+  const xbet    = document.getElementById('filter-1xbet')?.value || '';
+  const search  = (document.getElementById('pipeline-search')?.value || '').toLowerCase();
+  const stage   = filter || document.getElementById('filter-stage')?.value || '';
+
+  let data = leads.filter(l => {
+    if(stage   && l.stage !== stage) return false;
+    if(prio    && l.priority !== prio) return false;
+    if(geo     && l.geo !== geo) return false;
+    if(xbet === 'no'  && l.has_1xbet) return false;
+    if(xbet === 'yes' && !l.has_1xbet) return false;
+    if(contact === 'email' && !(l.contact_email || l.email)) return false;
+    if(contact === 'tg'    && !(l.contact_telegram || l.tg)) return false;
+    if(contact === 'none'  && (l.contact_email || l.email || l.contact_telegram || l.tg)) return false;
+    if(search  && !`${l.name} ${l.url} ${l.geo}`.toLowerCase().includes(search)) return false;
+    return true;
+  });
 
   // dedup by domain - keep highest score per domain
   const domainMap = {};
@@ -3630,58 +3672,8 @@ function populateGeoFilter(){
 }
 
 function applyFilters(){
-  const prio    = document.getElementById('filter-priority')?.value || '';
-  const contact = document.getElementById('filter-contact')?.value || '';
-  const stage   = document.getElementById('filter-stage')?.value || '';
-  const search  = (document.getElementById('pipeline-search')?.value || '').toLowerCase();
-  curFilter = stage;
-
-  const geo = document.getElementById('filter-geo')?.value || '';
-  let data = leads.filter(l => {
-    if(stage   && l.stage !== stage) return false;
-    if(prio    && l.priority !== prio) return false;
-    if(geo     && l.geo !== geo) return false;
-    if(contact === 'email' && !l.email) return false;
-    if(contact === 'tg'    && !l.tg) return false;
-    if(contact === 'none'  && (l.email || l.tg)) return false;
-    const xbet = document.getElementById('filter-1xbet')?.value || '';
-    if(xbet === 'no'  && l.has_1xbet) return false;
-    if(xbet === 'yes' && !l.has_1xbet) return false;
-    if(search  && !`${l.name} ${l.url} ${l.geo}`.toLowerCase().includes(search)) return false;
-    return true;
-  });
-
-  const list = document.getElementById('leads-list');
-  const countEl = document.getElementById('leads-count-label');
-  if(countEl) countEl.textContent = data.length + ' лидов';
-
-  if(data.length === 0){
-    list.innerHTML = '<div style="padding:40px 16px;text-align:center;color:var(--text3);font-size:12px;" style="font-size:15px;color:var(--text2);">Нет лидов по выбранным фильтрам</div>';
-    return;
-  }
-  list.innerHTML = data.map(l =>
-    '<div class="lead-card' + (activeId===l.id?' active':'') + '" onclick="openLead(\'' + l.id + '\')" id="lc-' + l.id + '">' +
-    '<div style="min-width:0;">' +
-    '<div class="lead-name">' + (l.name||'—') + '</div>' +
-    '<div class="lead-url">' + (l.url||'') + '</div>' +
-    '<div class="lead-meta">' +
-    '<span class="chip chip-type">' + (l.type||'—') + '</span>' +
-    '<span class="chip chip-geo">' + (l.geo||'—') + '</span>' +
-    '<span class="chip ' + (stageChip[l.stage]||'chip-new') + '">' + (stageRU[l.stage]||l.stage) + '</span>' +
-    '</div></div>' +
-    '<span class="score-badge ' + sc(l.score||0) + '">' + (l.score||'—') + '</span>' +
-    '</div>'
-  ).join('');
-
-  // update stats
-  const cnt = {new:0,researched:0,ready:0,waiting:0,followup:0};
-  leads.forEach(l => { if(cnt[l.stage]!==undefined) cnt[l.stage]++; });
-  document.getElementById('sn-all').textContent = leads.length;
-  document.getElementById('sn-new').textContent = cnt.new;
-  document.getElementById('sn-res').textContent = cnt.researched;
-  document.getElementById('sn-rdy').textContent = cnt.ready;
-  document.getElementById('sn-wt').textContent  = cnt.waiting;
-  document.getElementById('sn-fu').textContent  = cnt.followup;
+  curFilter = document.getElementById('filter-stage')?.value || '';
+  renderLeads(curFilter);
 }
 function statClick(v, el){
   document.querySelectorAll('.stat-item').forEach(s => s.classList.remove('active'));
@@ -3867,6 +3859,7 @@ async function runSearch(){
     renderSearchHistory();
 
     await loadLeads();
+    setTimeout(() => batchExtractContacts(), 1000);
 
   } catch(err){
     clearInterval(fakeProgress);
@@ -7593,6 +7586,7 @@ async function runPreset(){
   document.getElementById('btn-icon').textContent = '▶';
   document.getElementById('btn-text').textContent = 'Запустить анализ';
   await loadLeads();
+  setTimeout(() => batchExtractContacts(), 1000);
   setTimeout(() => {
     document.getElementById('progress-wrap').style.display = 'none';
     fill.style.width = '0%';
