@@ -1,7 +1,11 @@
 {
   "name": "claude",
+  "main": "worker.js",
   "compatibility_date": "2026-05-19",
   "assets": {
     "directory": "./"
+  },
+  "triggers": {
+    "crons": ["*/30 * * * *", "0 6 * * *"]
   }
 }
