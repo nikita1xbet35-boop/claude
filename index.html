@@ -2999,7 +2999,7 @@ async function extractContactsFromUrl(siteUrl){
 async function batchExtractContacts(){
   const btn = document.getElementById('batch-contact-btn');
   const status = document.getElementById('batch-contact-status');
-  const targets = leads.filter(l => l.stage === 'new' && !l.contact_email && !l.contact_telegram && l.contact_email_type !== 'not_found');
+  const targets = leads.filter(l => l.stage === 'new' && !l.contact_email && !l.contact_telegram && l.contact_email_type !== 'not_found' && !isBlacklisted(l.url));
   if(!targets.length){ if(status) status.textContent = 'Нет новых без контакта'; return; }
   if(btn) btn.disabled = true;
   let done = 0;
@@ -3144,6 +3144,7 @@ function renderLeads(filter = ''){
   const stage   = filter || document.getElementById('filter-stage')?.value || '';
 
   let data = leads.filter(l => {
+    if(isBlacklisted(l.url)) return false;
     if(stage   && l.stage !== stage) return false;
     if(prio    && l.priority !== prio) return false;
     if(geo     && l.geo !== geo) return false;
@@ -5090,7 +5091,7 @@ function renderGmailLeads(){
   const container = document.getElementById('gmail-leads-list');
   if(!container) return;
 
-  const eligible = leads.filter(l => l.stage === 'new' && (l.contact_email || l.email));
+  const eligible = leads.filter(l => l.stage === 'new' && (l.contact_email || l.email) && !isBlacklisted(l.url));
   const badge = document.getElementById('gmail-badge');
   if(badge) badge.textContent = eligible.length + ' лидов';
 
@@ -5127,7 +5128,7 @@ function gmailToggle(id, checked){
 }
 
 function gmailSelectAll(){
-  leads.filter(l => l.stage==='new' && (l.contact_email||l.email))
+  leads.filter(l => l.stage==='new' && (l.contact_email||l.email) && !isBlacklisted(l.url))
     .forEach(l => { gmailSelected.add(l.id); const cb = document.querySelector(`#gmail-row-${l.id} input`); if(cb) cb.checked=true; });
   updateGmailSelCount();
 }
@@ -6809,6 +6810,13 @@ async function ytSaveToLeads(ch){
 //  BLACKLIST
 // ══════════════════════════════════════════
 let blItems = [];
+function isBlacklisted(url){
+  if(!url || !blItems.length) return false;
+  try {
+    const host = new URL(url.startsWith('http') ? url : 'https://' + url).hostname.replace(/^www\./, '');
+    return blItems.some(b => host === b.value || host.endsWith('.' + b.value));
+  } catch(e){ return false; }
+}
 
 const BL_DEFAULTS = [
   {value:'youtube.com', reason:'Соцсеть/видео'},
@@ -6852,6 +6860,7 @@ async function initBlacklist(){
   const {data} = await sb.from('blacklist').select('*').order('created_at',{ascending:false});
   blItems = data || [];
   blRender();
+  renderLeads(curFilter); // re-render pipeline with updated blacklist
   const badge = document.getElementById('bl-badge');
   if(badge) badge.textContent = blItems.length + ' доменов';
 }
@@ -7845,6 +7854,8 @@ try {
     goTo(lastPage);
   }
   loadLeads();
+  // load blacklist at startup so it's always available for filtering
+  sb.from('blacklist').select('value,type').then(({data}) => { if(data) blItems = data; });
 } catch(e) { console.error('loadLeads:', e); }
 try {
   renderSearchHistory();
