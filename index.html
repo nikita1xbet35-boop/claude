@@ -2740,13 +2740,13 @@ function applyBrandTheme(brand){
   r.setProperty('--accent-grad', cfg.accentGrad);
   const glowEl = document.getElementById('brand-glow-style');
   if(glowEl) glowEl.textContent = `body::before{background:${cfg.bgGlow}!important;}`;
+  document.querySelectorAll('.bs-opt').forEach(o => o.classList.toggle('active', o.dataset.brand === brand));
   const bsFixed = document.getElementById('brand-switcher-fixed');
   if(bsFixed){
     const lbl = bsFixed.querySelector('.bs-lbl');
     if(lbl){ lbl.textContent = cfg.label; lbl.style.color = cfg.accent; }
     const btn = bsFixed.querySelector('.bs-btn');
     if(btn) btn.style.borderColor = cfg.accent + '50';
-    bsFixed.querySelectorAll('.bs-opt').forEach(o => o.classList.toggle('active', o.dataset.brand === brand));
   }
 }
 
@@ -7522,7 +7522,7 @@ async function runPreset(){
       const res = await fetch(FUNCTIONS_URL + '/search-and-analyze', {
         method: 'POST',
         headers: {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},
-        body: JSON.stringify({query: kw, limit})
+        body: JSON.stringify({query: kw, limit, brand: currentBrand})
       });
       if(res.ok){
         const data = await res.json();
