@@ -3005,15 +3005,14 @@ async function batchExtractContacts(){
   if(btn) btn.disabled = true;
   let done = 0, found = 0;
   for(const l of targets){
-    showProgress(`🔍 Контакты [${done+1}/${targets.length}] ${l.name || l.url}`);
+    if(status) status.textContent = `🔍 [${done+1}/${targets.length}] ${l.name || l.url}`;
     const hadContact = !!(l.contact_email || l.contact_telegram);
     await runContactExtraction(l.id);
     if(!hadContact && (l.contact_email || l.contact_telegram)) found++;
     done++;
     await new Promise(r => setTimeout(r, 500));
   }
-  hideProgress();
-  if(status) status.textContent = `Готово: найдено ${found} из ${done}`;
+  if(status) status.textContent = `✓ Найдено ${found} из ${done}`;
   if(btn) btn.disabled = false;
   renderLeads(curFilter);
   if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
