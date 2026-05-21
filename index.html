@@ -249,6 +249,7 @@
 
   /* ANIMATIONS */
   @keyframes fadeUp{0%{opacity:0;transform:translateY(12px)}100%{opacity:1;transform:translateY(0)}}
+  @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
   @keyframes fadeIn{0%{opacity:0}100%{opacity:1}}
   @keyframes glowPulse{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 12px 2px var(--glow-color,var(--accent))30}}
   @keyframes countUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
@@ -3002,14 +3003,17 @@ async function batchExtractContacts(){
   const targets = leads.filter(l => l.stage === 'new' && !l.contact_email && !l.contact_telegram && l.contact_email_type !== 'not_found' && !isBlacklisted(l.url));
   if(!targets.length){ if(status) status.textContent = 'Нет новых без контакта'; return; }
   if(btn) btn.disabled = true;
-  let done = 0;
+  let done = 0, found = 0;
   for(const l of targets){
-    if(status) status.textContent = `[${done+1}/${targets.length}] ${l.name || l.url}`;
+    showProgress(`🔍 Контакты [${done+1}/${targets.length}] ${l.name || l.url}`);
+    const hadContact = !!(l.contact_email || l.contact_telegram);
     await runContactExtraction(l.id);
+    if(!hadContact && (l.contact_email || l.contact_telegram)) found++;
     done++;
     await new Promise(r => setTimeout(r, 500));
   }
-  if(status) status.textContent = `Готово: ${done} лидов обработано`;
+  hideProgress();
+  if(status) status.textContent = `Готово: найдено ${found} из ${done}`;
   if(btn) btn.disabled = false;
   renderLeads(curFilter);
   if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
@@ -5062,6 +5066,8 @@ function setGmailActiveAccount(acc){
   if(lpBadge)   lpBadge.style.display   = acc==='lp'   ? '' : 'none';
   if(mainBox)   mainBox.style.borderColor  = acc==='main' ? '#7B61FF' : 'var(--border2)';
   if(lpBox)     lpBox.style.borderColor    = acc==='lp'   ? '#f97316' : 'var(--border2)';
+  gmailSelected.clear();
+  renderGmailLeads();
 }
 
 function initGmailOutreach(){
@@ -5094,7 +5100,14 @@ function renderGmailLeads(){
   const container = document.getElementById('gmail-leads-list');
   if(!container) return;
 
-  const eligible = leads.filter(l => l.stage === 'new' && (l.contact_email || l.email) && !isBlacklisted(l.url));
+  // filter by active account's brands: main = 1xbet+1xcasino, lp = luckypari
+  const acctBrands = gmailActiveAccount === 'lp' ? ['luckypari'] : ['1xbet','1xcasino'];
+  const eligible = leads.filter(l =>
+    l.stage === 'new' &&
+    (l.contact_email || l.email) &&
+    !isBlacklisted(l.url) &&
+    acctBrands.includes(l.brand || '1xbet')
+  );
   const badge = document.getElementById('gmail-badge');
   if(badge) badge.textContent = eligible.length + ' лидов';
 
@@ -5131,7 +5144,8 @@ function gmailToggle(id, checked){
 }
 
 function gmailSelectAll(){
-  leads.filter(l => l.stage==='new' && (l.contact_email||l.email) && !isBlacklisted(l.url))
+  const acctBrands = gmailActiveAccount === 'lp' ? ['luckypari'] : ['1xbet','1xcasino'];
+  leads.filter(l => l.stage==='new' && (l.contact_email||l.email) && !isBlacklisted(l.url) && acctBrands.includes(l.brand||'1xbet'))
     .forEach(l => { gmailSelected.add(l.id); const cb = document.querySelector(`#gmail-row-${l.id} input`); if(cb) cb.checked=true; });
   updateGmailSelCount();
 }
@@ -5202,6 +5216,21 @@ function gmailSetManager(mgr){
   localStorage.setItem('gmail_manager', mgr);
 }
 
+let _progressEl = null;
+function showProgress(msg){
+  if(!_progressEl){
+    _progressEl = document.createElement('div');
+    _progressEl.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99998;background:var(--bg);border-bottom:2px solid var(--accent);padding:10px 24px;display:flex;align-items:center;gap:14px;font-family:var(--font-mono);font-size:12px;color:var(--text2);box-shadow:0 2px 20px rgba(0,0,0,.4);';
+    _progressEl.innerHTML = '<span style="width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite;flex-shrink:0;display:inline-block;"></span><span id="_prog_msg"></span>';
+    document.body.appendChild(_progressEl);
+  }
+  _progressEl.style.display = 'flex';
+  document.getElementById('_prog_msg').textContent = msg;
+}
+function hideProgress(){
+  if(_progressEl) _progressEl.style.display = 'none';
+}
+
 function gmailToast(msg, err = false){
   const el = document.getElementById('gmail-notif');
   if(!el){ console.warn('gmailToast:', msg); return; }
@@ -5246,13 +5275,21 @@ async function gmailSendDirectOne(leadId){
 async function gmailSendDirectSelected(){
   if(!gmailSelected.size){ gmailToast('Выбери лиды', true); return; }
   const ids = [...gmailSelected];
-  let sent = 0;
-  for(const id of ids){
-    const ok = await gmailSendDirectOne(id);
-    if(ok) sent++;
+  const btn = document.getElementById('gmail-send-direct-btn');
+  if(btn) btn.disabled = true;
+  let sent = 0, failed = 0;
+  for(let i = 0; i < ids.length; i++){
+    const l = leads.find(x => x.id === ids[i]);
+    const name = l?.name || l?.url || ids[i];
+    showProgress(`📤 Отправляю [${i+1}/${ids.length}] ${name}`);
+    const ok = await gmailSendDirectOne(ids[i]);
+    if(ok) sent++; else failed++;
     await new Promise(r => setTimeout(r, 400));
   }
-  if(sent){ gmailToast(sent + ' писем отправлено'); }
+  hideProgress();
+  if(btn) btn.disabled = false;
+  gmailToast(`Отправлено: ${sent}${failed ? ` · Ошибок: ${failed}` : ''}`);
+  if(sent) renderGmailLeads();
 }
 
 // ══════════════════════════════════════════
