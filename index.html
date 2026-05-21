@@ -2863,14 +2863,22 @@ function emailType(e){
 }
 
 async function fetchViaProxy(url){
-  try {
-    const r = await Promise.race([
-      fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url)),
-      new Promise((_,rej) => setTimeout(()=>rej(new Error('timeout')), 10000))
-    ]);
-    if(!r.ok) return null;
-    return await r.text();
-  } catch(e){ return null; }
+  const attempt = async (proxyUrl, timeout=12000) => {
+    try {
+      const r = await Promise.race([
+        fetch(proxyUrl),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),timeout))
+      ]);
+      if(!r.ok) return null;
+      const t = await r.text();
+      return (t && t.length > 200) ? t : null;
+    } catch(e){ return null; }
+  };
+  return (
+    await attempt('https://corsproxy.io/?' + encodeURIComponent(url)) ||
+    await attempt('https://api.allorigins.win/raw?url=' + encodeURIComponent(url)) ||
+    await attempt('https://r.jina.ai/' + url)  // returns clean text, good fallback
+  );
 }
 
 function normalizeBase(url){
@@ -6454,15 +6462,22 @@ async function runAutoSearch(){
         body: JSON.stringify({ geos: [geo], max_total: perGeo, limit_per_key: limitKey, brand: currentBrand })
       });
       const data = await res.json();
-      if(data.success){
+      if(!res.ok || data.error){
+        const errText = data.error || ('HTTP ' + res.status);
+        label.style.color = '#f87171';
+        label.textContent = '[' + (i+1) + '/' + geos.length + '] ' + geo + ' — ошибка: ' + errText;
+      } else {
         totalSaved += data.saved || 0;
         totalFound += data.found || 0;
-        label.textContent = '[' + (i+1) + '/' + geos.length + '] ' + geo + ' — сохранено: ' + (data.saved||0) + ' · Итого: ' + totalSaved;
-      } else {
-        label.textContent = '[' + (i+1) + '/' + geos.length + '] ' + geo + ' — ошибка: ' + (data.error||'неизвестно');
+        label.style.color = '';
+        label.textContent = '[' + (i+1) + '/' + geos.length + '] ' + geo
+          + ' — найдено: ' + (data.found||0)
+          + ', дедуп отсев: ' + ((data.found||0)-(data.saved||0))
+          + ', сохранено: ' + (data.saved||0);
       }
     } catch(e) {
-      label.textContent = '[' + (i+1) + '/' + geos.length + '] ' + geo + ' — ' + e.message;
+      label.style.color = '#f87171';
+      label.textContent = '[' + (i+1) + '/' + geos.length + '] ' + geo + ' — сетевая ошибка: ' + e.message;
     }
 
     // Small pause between requests
@@ -6470,7 +6485,9 @@ async function runAutoSearch(){
   }
 
   bar.style.width = '100%';
-  label.textContent = '✓ Готово! Сохранено: ' + totalSaved + ' из ' + totalFound + ' найденных';
+  label.style.color = totalSaved > 0 ? '#4ade80' : '#facc15';
+  label.textContent = '✓ Готово! Найдено: ' + totalFound + ', сохранено: ' + totalSaved
+    + (totalFound === 0 ? ' — проверь SERP API квоту в Supabase Logs' : totalSaved === 0 ? ' — все уже в базе (дедуп)' : '');
 
   await loadLeads();
   updateBadge();
