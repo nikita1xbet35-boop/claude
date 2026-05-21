@@ -2620,7 +2620,8 @@ function sigC(t){return t==='positive'?'sig-green':t==='negative'?'sig-red':'sig
 // ══════════════════════════════════════════
 //  MULTI-BRAND CONFIG
 // ══════════════════════════════════════════
-let currentBrand = localStorage.getItem('affiliateos_brand') || '1xbet';
+// LuckyPari paused — reset to 1xbet if previously selected
+let currentBrand = (() => { const b = localStorage.getItem('affiliateos_brand'); return (b === 'luckypari') ? '1xbet' : (b || '1xbet'); })();
 
 const BRAND_CONFIG = {
   '1xbet': {
@@ -3005,15 +3006,14 @@ async function batchExtractContacts(){
   if(btn) btn.disabled = true;
   let done = 0, found = 0;
   for(const l of targets){
-    showProgress(`🔍 Контакты [${done+1}/${targets.length}] ${l.name || l.url}`);
+    if(status) status.textContent = `🔍 [${done+1}/${targets.length}] ${l.name || l.url}`;
     const hadContact = !!(l.contact_email || l.contact_telegram);
     await runContactExtraction(l.id);
     if(!hadContact && (l.contact_email || l.contact_telegram)) found++;
     done++;
     await new Promise(r => setTimeout(r, 500));
   }
-  hideProgress();
-  if(status) status.textContent = `Готово: найдено ${found} из ${done}`;
+  if(status) status.textContent = `✓ Найдено ${found} из ${done}`;
   if(btn) btn.disabled = false;
   renderLeads(curFilter);
   if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
@@ -3843,7 +3843,7 @@ async function runSearch(){
         'apikey': SUPABASE_KEY,
         'Authorization': 'Bearer ' + SUPABASE_KEY
       },
-      body: JSON.stringify({ query: q, limit: parseInt(document.getElementById('leads-limit').value) || 5, brand: currentBrand })
+      body: JSON.stringify({ query: q, limit: parseInt(document.getElementById('leads-limit').value) || 5, brand: currentBrand, skip_domains: leads.map(l => getDomain(l.url||'')).filter(Boolean) })
     });
 
     clearInterval(fakeProgress);
@@ -3867,6 +3867,7 @@ async function runSearch(){
     renderSearchHistory();
 
     await loadLeads();
+    await silentDedup();
     setTimeout(() => batchExtractContacts(), 1000);
 
   } catch(err){
@@ -5053,9 +5054,10 @@ function previewGmailTemplate(){
 
 let gmailSelected = new Set();
 let gmailOpened = new Set(); // открыли черновик но ещё не подтвердили
-let gmailActiveAccount = localStorage.getItem('gmail_active_account') || 'main';
+let gmailActiveAccount = (() => { const a = localStorage.getItem('gmail_active_account'); return (a === 'lp') ? 'main' : (a || 'main'); })();
 
 function setGmailActiveAccount(acc){
+  if(acc === 'lp') acc = 'main'; // LuckyPari paused — force main
   gmailActiveAccount = acc;
   localStorage.setItem('gmail_active_account', acc);
   const mainBadge = document.getElementById('gmail-acc-main-badge');
@@ -5281,13 +5283,12 @@ async function gmailSendDirectSelected(){
   for(let i = 0; i < ids.length; i++){
     const l = leads.find(x => x.id === ids[i]);
     const name = l?.name || l?.url || ids[i];
-    showProgress(`📤 Отправляю [${i+1}/${ids.length}] ${name}`);
+    if(btn) btn.textContent = `📤 [${i+1}/${ids.length}] ${name.slice(0,20)}...`;
     const ok = await gmailSendDirectOne(ids[i]);
     if(ok) sent++; else failed++;
     await new Promise(r => setTimeout(r, 400));
   }
-  hideProgress();
-  if(btn) btn.disabled = false;
+  if(btn){ btn.disabled = false; btn.textContent = '📤 Отправить напрямую'; }
   gmailToast(`Отправлено: ${sent}${failed ? ` · Ошибок: ${failed}` : ''}`);
   if(sent) renderGmailLeads();
 }
@@ -6592,6 +6593,9 @@ async function runAutoSearch(){
 
   btn.disabled = false;
   btn.textContent = '▶ Запустить';
+
+  // Auto-run contact extraction for newly saved leads
+  if(totalSaved > 0) setTimeout(() => batchExtractContacts(), 1000);
 }
 
 // ══════════════════════════════════════════
@@ -6990,9 +6994,15 @@ async function blDeduplicateLeads(){
   }
 
   const toDelete = [];
+  const stagePrio = {ready:0, waiting:1, followup:2, researched:3, new:4};
   duplicateGroups.forEach(([domain, group]) => {
-    // Keep highest score, delete rest
-    const sorted = group.sort((a,b) => (b.score||0) - (a.score||0));
+    // Keep the lead with best stage first, then highest score; delete the rest
+    const sorted = group.sort((a,b) => {
+      const pA = stagePrio[a.stage] ?? 5;
+      const pB = stagePrio[b.stage] ?? 5;
+      if(pA !== pB) return pA - pB;
+      return (b.score||0) - (a.score||0);
+    });
     toDelete.push(...sorted.slice(1).map(l => l.id));
   });
 
@@ -7011,6 +7021,33 @@ async function blDeduplicateLeads(){
   result.textContent = '✓ Удалено ' + deleted + ' дублей. Сохранён лучший из каждой группы.';
   btn.disabled = false;
   btn.textContent = '✦ Найти дубли в базе';
+}
+
+async function silentDedup(){
+  const stagePrio = {ready:0, waiting:1, followup:2, researched:3, new:4};
+  const domainMap = {};
+  leads.forEach(l => {
+    const domain = getDomain(l.url || '');
+    if(!domain) return;
+    if(!domainMap[domain]) domainMap[domain] = [];
+    domainMap[domain].push(l);
+  });
+  const duplicateGroups = Object.entries(domainMap).filter(([,g]) => g.length > 1);
+  if(!duplicateGroups.length) return;
+  const toDelete = [];
+  duplicateGroups.forEach(([, group]) => {
+    const sorted = group.sort((a,b) => {
+      const pA = stagePrio[a.stage] ?? 5;
+      const pB = stagePrio[b.stage] ?? 5;
+      if(pA !== pB) return pA - pB;
+      return (b.score||0) - (a.score||0);
+    });
+    toDelete.push(...sorted.slice(1).map(l => l.id));
+  });
+  for(const id of toDelete){
+    await sb.from('leads').delete().eq('id', id);
+  }
+  if(toDelete.length) await loadLeads();
 }
 
 // ══════════════════════════════════════════
@@ -7619,7 +7656,7 @@ async function runPreset(){
       const res = await fetch(FUNCTIONS_URL + '/search-and-analyze', {
         method: 'POST',
         headers: {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},
-        body: JSON.stringify({query: kw, limit, brand: currentBrand})
+        body: JSON.stringify({query: kw, limit, brand: currentBrand, skip_domains: leads.map(l => getDomain(l.url||'')).filter(Boolean)})
       });
       if(res.ok){
         const data = await res.json();
@@ -7634,6 +7671,7 @@ async function runPreset(){
   document.getElementById('btn-icon').textContent = '▶';
   document.getElementById('btn-text').textContent = 'Запустить анализ';
   await loadLeads();
+  await silentDedup();
   setTimeout(() => batchExtractContacts(), 1000);
   setTimeout(() => {
     document.getElementById('progress-wrap').style.display = 'none';
@@ -10223,7 +10261,7 @@ try {
           <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">МЕНЕДЖЕР:</span>
           <select id="gmail-manager-select" onchange="gmailSetManager(this.value)" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:5px;outline:none;cursor:pointer;">
             <option value="Nick">Nick</option>
-            <option value="Andreas">Andreas</option>
+            <!-- Andreas (LuckyPari) paused -->
           </select>
         </div>
         <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px;line-height:1.6;">
@@ -10261,12 +10299,13 @@ try {
             <input onclick="event.stopPropagation()" id="gmail-idx-main" type="number" min="0" max="9" value="0" style="width:50px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 6px;border-radius:5px;outline:none;text-align:center;">
           </div>
         </div>
-        <!-- account 2: LuckyPari -->
-        <div id="gmail-acc-lp" onclick="setGmailActiveAccount('lp')" style="border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:12px;cursor:pointer;transition:all .15s;">
+        <!-- account 2: LuckyPari (paused) -->
+        <div id="gmail-acc-lp" style="border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:12px;opacity:0.4;pointer-events:none;cursor:not-allowed;transition:all .15s;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
             <div style="display:flex;align-items:center;gap:6px;">
               <div style="width:8px;height:8px;border-radius:50%;background:#f97316;"></div>
               <span style="font-size:11px;font-family:var(--font-mono);color:var(--text);">LuckyPari</span>
+              <span style="font-size:9px;font-family:var(--font-mono);color:var(--text3);">— приостановлен</span>
             </div>
             <span id="gmail-acc-lp-badge" style="font-size:9px;font-family:var(--font-mono);padding:1px 7px;border-radius:20px;display:none;background:rgba(249,115,22,.15);color:#f97316;">активный</span>
           </div>
