@@ -5281,13 +5281,12 @@ async function gmailSendDirectSelected(){
   for(let i = 0; i < ids.length; i++){
     const l = leads.find(x => x.id === ids[i]);
     const name = l?.name || l?.url || ids[i];
-    showProgress(`📤 Отправляю [${i+1}/${ids.length}] ${name}`);
+    if(btn) btn.textContent = `📤 [${i+1}/${ids.length}] ${name.slice(0,20)}...`;
     const ok = await gmailSendDirectOne(ids[i]);
     if(ok) sent++; else failed++;
     await new Promise(r => setTimeout(r, 400));
   }
-  hideProgress();
-  if(btn) btn.disabled = false;
+  if(btn){ btn.disabled = false; btn.textContent = '📤 Отправить напрямую'; }
   gmailToast(`Отправлено: ${sent}${failed ? ` · Ошибок: ${failed}` : ''}`);
   if(sent) renderGmailLeads();
 }
@@ -6592,6 +6591,9 @@ async function runAutoSearch(){
 
   btn.disabled = false;
   btn.textContent = '▶ Запустить';
+
+  // Auto-run contact extraction for newly saved leads
+  if(totalSaved > 0) setTimeout(() => batchExtractContacts(), 1000);
 }
 
 // ══════════════════════════════════════════
