@@ -2620,7 +2620,8 @@ function sigC(t){return t==='positive'?'sig-green':t==='negative'?'sig-red':'sig
 // ══════════════════════════════════════════
 //  MULTI-BRAND CONFIG
 // ══════════════════════════════════════════
-let currentBrand = localStorage.getItem('affiliateos_brand') || '1xbet';
+// LuckyPari paused — reset to 1xbet if previously selected
+let currentBrand = (() => { const b = localStorage.getItem('affiliateos_brand'); return (b === 'luckypari') ? '1xbet' : (b || '1xbet'); })();
 
 const BRAND_CONFIG = {
   '1xbet': {
@@ -5056,6 +5057,7 @@ let gmailOpened = new Set(); // открыли черновик но ещё не
 let gmailActiveAccount = localStorage.getItem('gmail_active_account') || 'main';
 
 function setGmailActiveAccount(acc){
+  if(acc === 'lp') return; // LuckyPari paused
   gmailActiveAccount = acc;
   localStorage.setItem('gmail_active_account', acc);
   const mainBadge = document.getElementById('gmail-acc-main-badge');
@@ -10259,7 +10261,7 @@ try {
           <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">МЕНЕДЖЕР:</span>
           <select id="gmail-manager-select" onchange="gmailSetManager(this.value)" style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:5px;outline:none;cursor:pointer;">
             <option value="Nick">Nick</option>
-            <option value="Andreas">Andreas</option>
+            <!-- Andreas (LuckyPari) paused -->
           </select>
         </div>
         <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px;line-height:1.6;">
@@ -10297,12 +10299,13 @@ try {
             <input onclick="event.stopPropagation()" id="gmail-idx-main" type="number" min="0" max="9" value="0" style="width:50px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 6px;border-radius:5px;outline:none;text-align:center;">
           </div>
         </div>
-        <!-- account 2: LuckyPari -->
-        <div id="gmail-acc-lp" onclick="setGmailActiveAccount('lp')" style="border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:12px;cursor:pointer;transition:all .15s;">
+        <!-- account 2: LuckyPari (paused) -->
+        <div id="gmail-acc-lp" style="border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:12px;opacity:0.4;pointer-events:none;cursor:not-allowed;transition:all .15s;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
             <div style="display:flex;align-items:center;gap:6px;">
               <div style="width:8px;height:8px;border-radius:50%;background:#f97316;"></div>
               <span style="font-size:11px;font-family:var(--font-mono);color:var(--text);">LuckyPari</span>
+              <span style="font-size:9px;font-family:var(--font-mono);color:var(--text3);">— приостановлен</span>
             </div>
             <span id="gmail-acc-lp-badge" style="font-size:9px;font-family:var(--font-mono);padding:1px 7px;border-radius:20px;display:none;background:rgba(249,115,22,.15);color:#f97316;">активный</span>
           </div>
