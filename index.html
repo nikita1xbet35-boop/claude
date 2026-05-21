@@ -5054,10 +5054,10 @@ function previewGmailTemplate(){
 
 let gmailSelected = new Set();
 let gmailOpened = new Set(); // открыли черновик но ещё не подтвердили
-let gmailActiveAccount = localStorage.getItem('gmail_active_account') || 'main';
+let gmailActiveAccount = (() => { const a = localStorage.getItem('gmail_active_account'); return (a === 'lp') ? 'main' : (a || 'main'); })();
 
 function setGmailActiveAccount(acc){
-  if(acc === 'lp') return; // LuckyPari paused
+  if(acc === 'lp') acc = 'main'; // LuckyPari paused — force main
   gmailActiveAccount = acc;
   localStorage.setItem('gmail_active_account', acc);
   const mainBadge = document.getElementById('gmail-acc-main-badge');
