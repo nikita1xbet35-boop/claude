@@ -2923,15 +2923,15 @@ async function extractContactsFromUrl(siteUrl){
   let bestEmail = null, bestPrio = 99, bestType = null, sourceUrl = null;
   let tg = null, wa = null, phone = null;
 
-  // Try homepage first for quick links, then contact paths
-  const pages = [siteUrl, ...CONTACT_PATHS.map(p => base + p)];
+  // Cascade: homepage → /contact → /about — stop as soon as any contact found
+  const pages = [siteUrl, base + '/contact', base + '/contact-us', base + '/about', base + '/about-us', base + '/advertise', base + '/advertise-with-us'];
 
   for(let i = 0; i < pages.length; i++){
-    if(i > 0) await new Promise(r => setTimeout(r, 400)); // rate limit
+    if(i > 0) await new Promise(r => setTimeout(r, 300));
     const html = await fetchViaProxy(pages[i]);
     if(!html || html.length < 100) continue;
 
-    // emails: try mailto: links first (most reliable), then regex on deobfuscated text
+    // emails: mailto: links first, then regex on deobfuscated text
     const deobf = deobfuscateEmails(html);
     const mailtoEmails = extractMailtoLinks(html);
     const regexEmails = (deobf.match(EMAIL_REGEX)||[]).filter(e => {
@@ -2960,7 +2960,8 @@ async function extractContactsFromUrl(siteUrl){
       if(m) phone = m[0].replace(/\s+/g,' ').trim();
     }
 
-    if(bestPrio === 1) break; // found advertising email — best possible
+    // stop as soon as any contact found
+    if(bestEmail || tg || wa) break;
   }
 
   // Fallback: SerpAPI email search — finds emails mentioned on third-party sites
