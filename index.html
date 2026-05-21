@@ -2851,11 +2851,31 @@ async function saveLead(leadData){
 // ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_phone TEXT;
 // ALTER TABLE leads ADD COLUMN IF NOT EXISTS contact_source_url TEXT;
 
-const CONTACT_PATHS = ['/advertise','/advertise-with-us','/advertising','/partnerships','/partner','/sponsors','/contact','/contact-us','/about','/about-us'];
+const CONTACT_PATHS = ['/advertise','/advertise-with-us','/advertising','/partnerships','/partner','/sponsors','/contact','/contact-us','/about','/about-us','/work-with-us','/media','/press'];
 const EMAIL_REGEX = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
-const EMAIL_IGNORE = ['noreply','no-reply','unsubscribe','privacy','legal','abuse','example','sentry','wpcf7'];
+const EMAIL_IGNORE = ['noreply','no-reply','unsubscribe','privacy','legal','abuse','example','sentry','wpcf7','@2x','@3x','.png','@example','.jpg','.gif'];
 const EMAIL_AD = ['advertis','ads@','partner','sponsor','commercial','business','collab','media@','marketing'];
 const EMAIL_GEN = ['contact','info@','hello@','hi@','enquir','support'];
+
+function deobfuscateEmails(text){
+  // catch: contact [at] domain [dot] com / contact(at)domain.com / contact AT domain DOT com
+  return text
+    .replace(/([a-zA-Z0-9._%+\-]+)\s*[\[(]at[\])\s]\s*([a-zA-Z0-9.\-]+)\s*[\[(]dot[\])\s]\s*([a-zA-Z]{2,})/gi, '$1@$2.$3')
+    .replace(/([a-zA-Z0-9._%+\-]+)\s+AT\s+([a-zA-Z0-9.\-]+)\s+DOT\s+([a-zA-Z]{2,})/g, '$1@$2.$3')
+    .replace(/([a-zA-Z0-9._%+\-]+)\s*\[at\]\s*([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, '$1@$2')
+    .replace(/([a-zA-Z0-9._%+\-]+)\s*\(at\)\s*([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, '$1@$2');
+}
+
+function extractMailtoLinks(html){
+  const found = [];
+  const re = /href=["']mailto:([^"'?]+)/gi;
+  let m;
+  while((m = re.exec(html)) !== null){
+    const e = m[1].trim().toLowerCase();
+    if(e.includes('@') && !EMAIL_IGNORE.some(ig => e.includes(ig))) found.push(m[1].trim());
+  }
+  return found;
+}
 
 function emailPriority(e){
   const l = e.toLowerCase();
@@ -2911,11 +2931,14 @@ async function extractContactsFromUrl(siteUrl){
     const html = await fetchViaProxy(pages[i]);
     if(!html || html.length < 100) continue;
 
-    // emails
-    const found = [...new Set((html.match(EMAIL_REGEX)||[]).filter(e => {
+    // emails: try mailto: links first (most reliable), then regex on deobfuscated text
+    const deobf = deobfuscateEmails(html);
+    const mailtoEmails = extractMailtoLinks(html);
+    const regexEmails = (deobf.match(EMAIL_REGEX)||[]).filter(e => {
       const l = e.toLowerCase();
       return !EMAIL_IGNORE.some(ig => l.includes(ig)) && e.includes('.');
-    }))];
+    });
+    const found = [...new Set([...mailtoEmails, ...regexEmails])];
     for(const e of found){
       const p = emailPriority(e);
       if(p < bestPrio){ bestPrio = p; bestEmail = e; bestType = emailType(e); sourceUrl = pages[i]; }
@@ -2938,6 +2961,29 @@ async function extractContactsFromUrl(siteUrl){
     }
 
     if(bestPrio === 1) break; // found advertising email — best possible
+  }
+
+  // Fallback: SerpAPI email search — finds emails mentioned on third-party sites
+  if(!bestEmail){
+    try {
+      const domain = new URL(base).hostname.replace(/^www\./, '');
+      const q = encodeURIComponent(`"@${domain}" email contact`);
+      const serpUrl = `https://serpapi.com/search.json?q=${q}&num=10&api_key=${SERP_API_KEY}`;
+      const sr = await Promise.race([fetch(serpUrl), new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),10000))]);
+      if(sr.ok){
+        const sd = await sr.json();
+        const snippets = (sd.organic_results||[]).map(r=>(r.snippet||'')+(r.title||'')).join(' ');
+        const deobfSnippets = deobfuscateEmails(snippets);
+        const serpEmails = [...new Set((deobfSnippets.match(EMAIL_REGEX)||[]).filter(e => {
+          const l = e.toLowerCase();
+          return l.includes(domain.split('.')[0]) && !EMAIL_IGNORE.some(ig => l.includes(ig));
+        }))];
+        for(const e of serpEmails){
+          const p = emailPriority(e);
+          if(p < bestPrio){ bestPrio = p; bestEmail = e; bestType = emailType(e); sourceUrl = 'serp:' + domain; }
+        }
+      }
+    } catch(e){ /* serp fallback failed, continue */ }
   }
 
   if(!bestEmail && !tg && !wa) return null;
