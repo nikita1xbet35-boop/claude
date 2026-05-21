@@ -55,18 +55,10 @@
   .topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
   .badge-count{background:var(--accent-glow);border:1px solid var(--accent)30;color:var(--accent2);font-size:11px;font-family:var(--font-mono);padding:3px 8px;border-radius:20px;}
   .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)80;}
-  /* BRAND SWITCHER — fixed position, always on top */
-  #brand-switcher-fixed{position:fixed;bottom:60px;right:18px;z-index:99999;}
-  .bs-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;background:oklch(0.115 0.008 280);border:1px solid var(--border2);border-radius:7px;font-size:11px;font-family:var(--font-mono);font-weight:600;letter-spacing:.4px;cursor:pointer;transition:all .15s;white-space:nowrap;color:var(--accent2);}
-  .bs-btn:hover{border-color:var(--border3);}
-  .bs-btn svg{transition:transform .15s;flex-shrink:0;}
-  .bs-btn.open svg{transform:rotate(180deg);}
-  .bs-dd{display:none;position:absolute;bottom:calc(100% + 6px);right:0;background:oklch(0.13 0.008 280);border:1px solid var(--border2);border-radius:9px;padding:4px;min-width:144px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.6);}
-  .bs-dd.open{display:block;}
-  .bs-opt{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--text2);transition:background .1s;}
-  .bs-opt:hover{background:var(--bg4);}
-  .bs-opt.active{color:var(--bs-clr,var(--accent));}
-  .bs-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  /* BRAND PILLS — inline in search sidebar / modals */
+  .sbrand-pill{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:6px;font-size:10px;font-family:var(--font-mono);font-weight:600;letter-spacing:.3px;cursor:pointer;transition:all .15s;border:1px solid var(--border);color:var(--text3);background:var(--bg3);}
+  .sbrand-pill.active{color:var(--sbrand-clr,var(--accent));border-color:var(--sbrand-clr,var(--accent));background:var(--sbrand-bg,var(--accent-glow));}
+  .sbrand-pill:hover:not(.active){border-color:var(--border2);color:var(--text2);}
   /* hide the inline copies inside topbars */
   .bs-wrap{display:none!important;}
 
@@ -1066,6 +1058,11 @@
           <span class="search-icon">⌕</span>
           <input class="search-input" id="search-query" placeholder="напр. betting review Bangladesh" />
         </div>
+        <div style="display:flex;gap:4px;margin-top:8px;" id="sidebar-brand-pills">
+          <button class="sbrand-pill active" data-sbrand="1xbet" style="--sbrand-clr:#7B61FF;--sbrand-bg:#7B61FF22;" onclick="setSearchBrand('1xbet')"><span style="width:5px;height:5px;border-radius:50%;background:#7B61FF;display:inline-block;flex-shrink:0;"></span>1XBET</button>
+          <button class="sbrand-pill" data-sbrand="1xcasino" style="--sbrand-clr:#10b981;--sbrand-bg:#10b98122;" onclick="setSearchBrand('1xcasino')"><span style="width:5px;height:5px;border-radius:50%;background:#10b981;display:inline-block;flex-shrink:0;"></span>1XCASINO</button>
+          <button class="sbrand-pill" data-sbrand="luckypari" style="--sbrand-clr:#f97316;--sbrand-bg:#f9731622;" onclick="setSearchBrand('luckypari')"><span style="width:5px;height:5px;border-radius:50%;background:#f97316;display:inline-block;flex-shrink:0;"></span>LUCKYPARI</button>
+        </div>
         <div style="display:flex;gap:6px;margin-top:9px;">
           <button class="btn btn-primary" id="run-btn" onclick="runSearch()" style="flex:1;margin-top:0;">
             <span id="btn-icon">▶</span>
@@ -2046,12 +2043,20 @@
     </div>
 
     <!-- Run preset footer -->
-    <div id="preset-run-footer" style="display:none;padding:12px 20px;border-top:1px solid var(--border);align-items:center;gap:10px;flex-shrink:0;">
-      <span id="preset-run-label" style="font-size:12px;color:var(--text2);flex:1;"></span>
-      <input id="preset-run-limit" type="number" min="1" max="10" value="3" placeholder="5"
-        style="width:48px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;border-radius:6px;text-align:center;outline:none;padding:4px;">
-      <span style="font-size:11px;color:var(--text3);">лидов/ключ</span>
-      <button id="preset-run-btn" onclick="runPreset()" style="padding:7px 18px;background:var(--accent);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;">▶ Запустить</button>
+    <div id="preset-run-footer" style="display:none;padding:12px 20px;border-top:1px solid var(--border);flex-direction:column;gap:10px;flex-shrink:0;">
+      <div style="display:flex;gap:4px;">
+        <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);align-self:center;margin-right:4px;">БРЕНД:</span>
+        <button class="sbrand-pill" data-sbrand="1xbet" style="--sbrand-clr:#7B61FF;--sbrand-bg:#7B61FF22;" onclick="setSearchBrand('1xbet')"><span style="width:5px;height:5px;border-radius:50%;background:#7B61FF;display:inline-block;flex-shrink:0;"></span>1XBET</button>
+        <button class="sbrand-pill" data-sbrand="1xcasino" style="--sbrand-clr:#10b981;--sbrand-bg:#10b98122;" onclick="setSearchBrand('1xcasino')"><span style="width:5px;height:5px;border-radius:50%;background:#10b981;display:inline-block;flex-shrink:0;"></span>1XCASINO</button>
+        <button class="sbrand-pill" data-sbrand="luckypari" style="--sbrand-clr:#f97316;--sbrand-bg:#f9731622;" onclick="setSearchBrand('luckypari')"><span style="width:5px;height:5px;border-radius:50%;background:#f97316;display:inline-block;flex-shrink:0;"></span>LUCKYPARI</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span id="preset-run-label" style="font-size:12px;color:var(--text2);flex:1;"></span>
+        <input id="preset-run-limit" type="number" min="1" max="10" value="3" placeholder="5"
+          style="width:48px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;border-radius:6px;text-align:center;outline:none;padding:4px;">
+        <span style="font-size:11px;color:var(--text3);">лидов/ключ</span>
+        <button id="preset-run-btn" onclick="runPreset()" style="padding:7px 18px;background:var(--accent);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;">▶ Запустить</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2690,6 +2695,12 @@ const BRAND_PRESETS = {
 
 function getBrandCfg(){ return BRAND_CONFIG[currentBrand] || BRAND_CONFIG['1xbet']; }
 
+function brandBadge(brand){
+  const cfg = BRAND_CONFIG[brand];
+  if(!cfg) return '';
+  return `<span style="background:${cfg.accent}22;color:${cfg.accent};border:1px solid ${cfg.accent}55;padding:1px 6px;border-radius:20px;font-size:10px;font-family:var(--font-mono);font-weight:600;">${cfg.display}</span>`;
+}
+
 function brandPresenceBadges(l, compact = false){
   const brands = [
     { key: 'has_1xbet',     label: '1xBet',    color: '#7B61FF' },
@@ -2740,14 +2751,7 @@ function applyBrandTheme(brand){
   r.setProperty('--accent-grad', cfg.accentGrad);
   const glowEl = document.getElementById('brand-glow-style');
   if(glowEl) glowEl.textContent = `body::before{background:${cfg.bgGlow}!important;}`;
-  const bsFixed = document.getElementById('brand-switcher-fixed');
-  if(bsFixed){
-    const lbl = bsFixed.querySelector('.bs-lbl');
-    if(lbl){ lbl.textContent = cfg.label; lbl.style.color = cfg.accent; }
-    const btn = bsFixed.querySelector('.bs-btn');
-    if(btn) btn.style.borderColor = cfg.accent + '50';
-    bsFixed.querySelectorAll('.bs-opt').forEach(o => o.classList.toggle('active', o.dataset.brand === brand));
-  }
+  document.querySelectorAll('.sbrand-pill').forEach(p => p.classList.toggle('active', p.dataset.sbrand === brand));
 }
 
 function toggleBrandDropdown(e, btn){
@@ -2768,12 +2772,16 @@ function setBrandOpt(brand){
   setBrand(brand);
 }
 
+function setSearchBrand(brand){
+  setBrand(brand);
+  if(document.getElementById('presets-modal')?.style.display === 'flex') renderDefaultPresets();
+}
+
 function setBrand(brand){
   if(!BRAND_CONFIG[brand]) return;
   currentBrand = brand;
   localStorage.setItem('affiliateos_brand', brand);
   applyBrandTheme(brand);
-  loadLeads();
 }
 
 // SQL migration needed in Supabase:
@@ -2785,7 +2793,7 @@ function setBrand(brand){
 // ══════════════════════════════════════════
 async function loadLeads(){
   showGlobalLoading(true);
-  const {data, error} = await sb.from('leads').select('*').eq('brand', currentBrand).order('created_at', {ascending: false});
+  const {data, error} = await sb.from('leads').select('*').order('created_at', {ascending: false});
   showGlobalLoading(false);
   if(error){ showError('Ошибка загрузки: ' + error.message); return; }
   leads = data || [];
@@ -3099,6 +3107,7 @@ function renderLeads(filter = ''){
           <div class="lead-name">${l.name || '—'}</div>
           <div class="lead-url">${l.url || ''}</div>
           <div class="lead-meta">
+            ${brandBadge(l.brand)}
             <span class="chip chip-type">${l.type || '—'}</span>
             <span class="chip chip-geo">${l.geo || '—'}</span>
             <span class="chip ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage}</span>
@@ -7522,7 +7531,7 @@ async function runPreset(){
       const res = await fetch(FUNCTIONS_URL + '/search-and-analyze', {
         method: 'POST',
         headers: {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},
-        body: JSON.stringify({query: kw, limit})
+        body: JSON.stringify({query: kw, limit, brand: currentBrand})
       });
       if(res.ok){
         const data = await res.json();
@@ -10215,16 +10224,5 @@ try {
   <div id="gmail-notif" style="position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:9999;display:none;padding:10px 22px;border-radius:10px;font-size:13px;font-family:var(--font-mono);box-shadow:0 4px 20px rgba(0,0,0,.4);transition:opacity .2s;"></div>
 </div>
 
-<div id="brand-switcher-fixed">
-  <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
-    <span class="bs-lbl">1XBET</span>
-    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-  </button>
-  <div class="bs-dd">
-    <div class="bs-opt active" data-brand="1xbet" style="--bs-clr:#7B61FF" onclick="setBrandOpt('1xbet')"><div class="bs-dot" style="background:#7B61FF"></div>1XBET</div>
-    <div class="bs-opt" data-brand="1xcasino" style="--bs-clr:#10b981" onclick="setBrandOpt('1xcasino')"><div class="bs-dot" style="background:#10b981"></div>1XCASINO</div>
-    <div class="bs-opt" data-brand="luckypari" style="--bs-clr:#f97316" onclick="setBrandOpt('luckypari')"><div class="bs-dot" style="background:#f97316"></div>LUCKYPARI</div>
-  </div>
-</div>
 </body>
 </html>
