@@ -6401,8 +6401,14 @@ async function loadAutoSearchStatus(){
   el.textContent = status + ' ' + d + ' · сохранено: ' + (data.total_saved||0);
 }
 
+let autoSearchBrand = '1xbet'; // locked when modal opens
+
 function openAutoSearchModal(){
+  autoSearchBrand = currentBrand; // lock brand at open time
   const modal = document.getElementById('auto-search-modal');
+  const cfg = getBrandCfg();
+  const brandEl = document.getElementById('auto-search-brand-label');
+  if(brandEl) brandEl.textContent = cfg.display || cfg.partnerBrand;
   modal.style.display = 'flex';
   modal.onclick = e => { if(e.target === modal) closeAutoSearchModal(); };
 }
@@ -6431,6 +6437,7 @@ function autoSelectAllGeo(val){
 async function runAutoSearch(){
   const geos = [...document.querySelectorAll('.auto-geo-btn.active')].map(b => b.dataset.geo);
   if(!geos.length){ showError('Выбери хотя бы одно GEO'); return; }
+  const brand = autoSearchBrand; // use brand locked at modal open time
 
   const maxTotal = parseInt(document.getElementById('auto-max-total').value) || 100;
   const limitKey = parseInt(document.getElementById('auto-limit-key').value) || 3;
@@ -6459,7 +6466,7 @@ async function runAutoSearch(){
       const res = await fetch(FUNCTIONS_URL + '/auto-search', {
         method: 'POST',
         headers: {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},
-        body: JSON.stringify({ geos: [geo], max_total: perGeo, limit_per_key: limitKey, brand: currentBrand })
+        body: JSON.stringify({ geos: [geo], max_total: perGeo, limit_per_key: limitKey, brand })
       });
       const data = await res.json();
       if(!res.ok || data.error){
@@ -9775,7 +9782,7 @@ try {
 <div id="auto-search-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.8);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
   <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:16px;width:520px;max-width:92vw;max-height:88vh;display:flex;flex-direction:column;">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);">
-      <div style="font-size:15px;font-weight:600;color:var(--text);">⚡ Автопоиск</div>
+      <div style="font-size:15px;font-weight:600;color:var(--text);">⚡ Автопоиск — <span id="auto-search-brand-label" style="color:var(--accent2);">1xBet</span></div>
       <button onclick="closeAutoSearchModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;line-height:1;">×</button>
     </div>
     <div style="overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px;">
