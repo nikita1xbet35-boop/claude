@@ -2690,6 +2690,12 @@ const BRAND_PRESETS = {
 
 function getBrandCfg(){ return BRAND_CONFIG[currentBrand] || BRAND_CONFIG['1xbet']; }
 
+function brandBadge(brand){
+  const cfg = BRAND_CONFIG[brand];
+  if(!cfg) return '';
+  return `<span style="background:${cfg.accent}22;color:${cfg.accent};border:1px solid ${cfg.accent}55;padding:1px 6px;border-radius:20px;font-size:10px;font-family:var(--font-mono);font-weight:600;">${cfg.display}</span>`;
+}
+
 function brandPresenceBadges(l, compact = false){
   const brands = [
     { key: 'has_1xbet',     label: '1xBet',    color: '#7B61FF' },
@@ -2785,7 +2791,7 @@ function setBrand(brand){
 // ══════════════════════════════════════════
 async function loadLeads(){
   showGlobalLoading(true);
-  const {data, error} = await sb.from('leads').select('*').eq('brand', currentBrand).order('created_at', {ascending: false});
+  const {data, error} = await sb.from('leads').select('*').order('created_at', {ascending: false});
   showGlobalLoading(false);
   if(error){ showError('Ошибка загрузки: ' + error.message); return; }
   leads = data || [];
@@ -3099,6 +3105,7 @@ function renderLeads(filter = ''){
           <div class="lead-name">${l.name || '—'}</div>
           <div class="lead-url">${l.url || ''}</div>
           <div class="lead-meta">
+            ${brandBadge(l.brand)}
             <span class="chip chip-type">${l.type || '—'}</span>
             <span class="chip chip-geo">${l.geo || '—'}</span>
             <span class="chip ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage}</span>
@@ -10215,9 +10222,9 @@ try {
   <div id="gmail-notif" style="position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:9999;display:none;padding:10px 22px;border-radius:10px;font-size:13px;font-family:var(--font-mono);box-shadow:0 4px 20px rgba(0,0,0,.4);transition:opacity .2s;"></div>
 </div>
 
-<div id="brand-switcher-fixed">
+<div id="brand-switcher-fixed" title="Бренд для поиска и пресетов">
   <button class="bs-btn" onclick="toggleBrandDropdown(event,this)">
-    <span class="bs-lbl">1XBET</span>
+    <span style="color:var(--text3);font-size:9px;margin-right:2px;">поиск:</span><span class="bs-lbl">1XBET</span>
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </button>
   <div class="bs-dd">
