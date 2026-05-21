@@ -2999,7 +2999,7 @@ async function extractContactsFromUrl(siteUrl){
 async function batchExtractContacts(){
   const btn = document.getElementById('batch-contact-btn');
   const status = document.getElementById('batch-contact-status');
-  const targets = leads.filter(l => l.stage === 'new' && !l.contact_email && !l.contact_telegram && l.contact_email_type !== 'not_found');
+  const targets = leads.filter(l => l.stage === 'new' && !l.contact_email && !l.contact_telegram && l.contact_email_type !== 'not_found' && !isBlacklisted(l.url));
   if(!targets.length){ if(status) status.textContent = 'Нет новых без контакта'; return; }
   if(btn) btn.disabled = true;
   let done = 0;
@@ -3011,6 +3011,8 @@ async function batchExtractContacts(){
   }
   if(status) status.textContent = `Готово: ${done} лидов обработано`;
   if(btn) btn.disabled = false;
+  renderLeads(curFilter);
+  if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
 }
 
 async function runContactExtraction(leadId){
@@ -3034,6 +3036,7 @@ async function runContactExtraction(leadId){
   if(!error){
     Object.assign(l, result);
     if(document.getElementById('contact-status-' + leadId)) renderContactSection(leadId);
+    if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
   }
 }
 
@@ -3144,6 +3147,7 @@ function renderLeads(filter = ''){
   const stage   = filter || document.getElementById('filter-stage')?.value || '';
 
   let data = leads.filter(l => {
+    if(isBlacklisted(l.url)) return false;
     if(stage   && l.stage !== stage) return false;
     if(prio    && l.priority !== prio) return false;
     if(geo     && l.geo !== geo) return false;
@@ -5090,7 +5094,7 @@ function renderGmailLeads(){
   const container = document.getElementById('gmail-leads-list');
   if(!container) return;
 
-  const eligible = leads.filter(l => l.stage === 'new' && (l.contact_email || l.email));
+  const eligible = leads.filter(l => l.stage === 'new' && (l.contact_email || l.email) && !isBlacklisted(l.url));
   const badge = document.getElementById('gmail-badge');
   if(badge) badge.textContent = eligible.length + ' лидов';
 
@@ -5127,7 +5131,7 @@ function gmailToggle(id, checked){
 }
 
 function gmailSelectAll(){
-  leads.filter(l => l.stage==='new' && (l.contact_email||l.email))
+  leads.filter(l => l.stage==='new' && (l.contact_email||l.email) && !isBlacklisted(l.url))
     .forEach(l => { gmailSelected.add(l.id); const cb = document.querySelector(`#gmail-row-${l.id} input`); if(cb) cb.checked=true; });
   updateGmailSelCount();
 }
@@ -6809,6 +6813,13 @@ async function ytSaveToLeads(ch){
 //  BLACKLIST
 // ══════════════════════════════════════════
 let blItems = [];
+function isBlacklisted(url){
+  if(!url || !blItems.length) return false;
+  try {
+    const host = new URL(url.startsWith('http') ? url : 'https://' + url).hostname.replace(/^www\./, '');
+    return blItems.some(b => host === b.value || host.endsWith('.' + b.value));
+  } catch(e){ return false; }
+}
 
 const BL_DEFAULTS = [
   {value:'youtube.com', reason:'Соцсеть/видео'},
@@ -6852,6 +6863,7 @@ async function initBlacklist(){
   const {data} = await sb.from('blacklist').select('*').order('created_at',{ascending:false});
   blItems = data || [];
   blRender();
+  renderLeads(curFilter); // re-render pipeline with updated blacklist
   const badge = document.getElementById('bl-badge');
   if(badge) badge.textContent = blItems.length + ' доменов';
 }
@@ -6922,14 +6934,13 @@ async function blDeduplicateLeads(){
   btn.textContent = '⏳ Анализирую...';
   result.textContent = '';
 
-  // Group leads by root domain
+  // Group leads by domain (same as renderLeads dedup)
   const domainMap = {};
   leads.forEach(l => {
-    try {
-      const domain = getRootDomain(new URL(l.url).hostname.replace('www.',''));
-      if(!domainMap[domain]) domainMap[domain] = [];
-      domainMap[domain].push(l);
-    } catch {}
+    const domain = getDomain(l.url || '');
+    if(!domain) return;
+    if(!domainMap[domain]) domainMap[domain] = [];
+    domainMap[domain].push(l);
   });
 
   // Find groups with more than 1 lead
@@ -7844,7 +7855,8 @@ try {
   if(lastPage && lastPage !== 'dashboard' && document.getElementById('page-' + lastPage)){
     goTo(lastPage);
   }
-  loadLeads();
+  // load blacklist first, then leads — so renderLeads always has blItems populated
+  sb.from('blacklist').select('value,type').then(({data}) => { if(data) blItems = data; loadLeads(); });
 } catch(e) { console.error('loadLeads:', e); }
 try {
   renderSearchHistory();
