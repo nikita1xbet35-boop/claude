@@ -4951,7 +4951,7 @@ function gmailGetTemplate(){
 }
 
 function gmailFillVars(text, lead){
-  const cfg = getBrandCfg();
+  const cfg = BRAND_CONFIG[lead.brand] || getBrandCfg();
   const mgr = localStorage.getItem('gmail_manager') || cfg.managerName;
   return text
     .replace(/\[сайт\]/g, lead.name || getDomain(lead.url || ''))
@@ -5050,7 +5050,7 @@ function renderGmailLeads(){
   const container = document.getElementById('gmail-leads-list');
   if(!container) return;
 
-  const eligible = leads.filter(l => l.stage === 'new' && (l.contact_email || l.email) && (!l.brand || l.brand === currentBrand));
+  const eligible = leads.filter(l => l.stage === 'new' && (l.contact_email || l.email));
   const badge = document.getElementById('gmail-badge');
   if(badge) badge.textContent = eligible.length + ' лидов';
 
@@ -5087,7 +5087,7 @@ function gmailToggle(id, checked){
 }
 
 function gmailSelectAll(){
-  leads.filter(l => l.stage==='new' && (l.contact_email||l.email) && (!l.brand || l.brand === currentBrand))
+  leads.filter(l => l.stage==='new' && (l.contact_email||l.email))
     .forEach(l => { gmailSelected.add(l.id); const cb = document.querySelector(`#gmail-row-${l.id} input`); if(cb) cb.checked=true; });
   updateGmailSelCount();
 }
