@@ -3011,6 +3011,8 @@ async function batchExtractContacts(){
   }
   if(status) status.textContent = `Готово: ${done} лидов обработано`;
   if(btn) btn.disabled = false;
+  renderLeads(curFilter);
+  if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
 }
 
 async function runContactExtraction(leadId){
@@ -3034,6 +3036,7 @@ async function runContactExtraction(leadId){
   if(!error){
     Object.assign(l, result);
     if(document.getElementById('contact-status-' + leadId)) renderContactSection(leadId);
+    if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
   }
 }
 
@@ -6931,14 +6934,13 @@ async function blDeduplicateLeads(){
   btn.textContent = '⏳ Анализирую...';
   result.textContent = '';
 
-  // Group leads by root domain
+  // Group leads by domain (same as renderLeads dedup)
   const domainMap = {};
   leads.forEach(l => {
-    try {
-      const domain = getRootDomain(new URL(l.url).hostname.replace('www.',''));
-      if(!domainMap[domain]) domainMap[domain] = [];
-      domainMap[domain].push(l);
-    } catch {}
+    const domain = getDomain(l.url || '');
+    if(!domain) return;
+    if(!domainMap[domain]) domainMap[domain] = [];
+    domainMap[domain].push(l);
   });
 
   // Find groups with more than 1 lead
@@ -7853,9 +7855,8 @@ try {
   if(lastPage && lastPage !== 'dashboard' && document.getElementById('page-' + lastPage)){
     goTo(lastPage);
   }
-  loadLeads();
-  // load blacklist at startup so it's always available for filtering
-  sb.from('blacklist').select('value,type').then(({data}) => { if(data) blItems = data; });
+  // load blacklist first, then leads — so renderLeads always has blItems populated
+  sb.from('blacklist').select('value,type').then(({data}) => { if(data) blItems = data; loadLeads(); });
 } catch(e) { console.error('loadLeads:', e); }
 try {
   renderSearchHistory();
