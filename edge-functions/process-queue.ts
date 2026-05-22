@@ -80,10 +80,9 @@ async function sendAlert(level: string, service: string, message: string) {
 }
 
 /** Build the subject line for a queue item. */
-function buildSubject(itemId: string, leadName: string, brand: string): string {
-  // Use last hex digit of UUID as a numeric discriminator (0–15 → mod 4 → 0–3)
-  const lastHex = itemId.replace(/-/g, '').slice(-1);
-  const variant = parseInt(lastHex, 16) % 4;
+function buildSubject(itemId: string | number, leadName: string, brand: string): string {
+  // send_queue.id is BIGSERIAL (integer), use modulo directly for variant selection
+  const variant = (Number(itemId) || 0) % 4;
 
   const brandDisplay = brand === '1xcasino' ? '1xCasino' : '1xBet';
   const sitename     = leadName || 'your site';
