@@ -30,7 +30,7 @@ ON CONFLICT (service) DO NOTHING;
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS email_log (
   id               BIGSERIAL PRIMARY KEY,
-  lead_id          BIGINT REFERENCES leads(id) ON DELETE SET NULL,
+  lead_id          UUID REFERENCES leads(id) ON DELETE SET NULL,
   email            TEXT NOT NULL,
   brand            TEXT,
   subject          TEXT,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS email_log (
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS send_queue (
   id            BIGSERIAL PRIMARY KEY,
-  lead_id       BIGINT REFERENCES leads(id) ON DELETE CASCADE,
+  lead_id       UUID REFERENCES leads(id) ON DELETE CASCADE,
   brand         TEXT NOT NULL,
   gmail_account TEXT NOT NULL DEFAULT 'main',
   scheduled_at  TIMESTAMPTZ NOT NULL,
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS error_log (
   level      TEXT NOT NULL,  -- 'error', 'warning', 'info'
   service    TEXT,
   message    TEXT NOT NULL,
-  lead_id    BIGINT,
+  lead_id    UUID,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
