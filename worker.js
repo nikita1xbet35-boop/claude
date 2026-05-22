@@ -2,6 +2,7 @@
 // fetch()     → serves static index.html via Cloudflare Assets
 // scheduled() → fires Supabase Edge Functions on cron schedule:
 //   every 5 min   → process-queue
+//   every 15 min  → search-and-analyze (continuous lead search)
 //   every 30 min  → check-limits
 //   05:00 UTC     → generate-queue (08:00 GMT+3)
 //   06:00 UTC     → daily-report (09:00 GMT+3)
@@ -40,6 +41,20 @@ export default {
           console.error('process-queue failed:', queueResp.status, await queueResp.text());
         }
         return; // skip check-limits on high-frequency ticks
+      }
+
+      // ── Every 15 min: run search-and-analyze (continuous lead search) ──────
+      if (cron === '*/15 * * * *') {
+        const searchResp = await fetch(FUNCTIONS_URL + '/search-and-analyze', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ cron }),
+        });
+
+        if (!searchResp.ok) {
+          console.error('search-and-analyze failed:', searchResp.status, await searchResp.text());
+        }
+        return;
       }
 
       // ── 05:00 UTC = 08:00 GMT+3: generate daily queue ─────────────────────
