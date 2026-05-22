@@ -16,9 +16,7 @@
 export default {
   // ── HTTP handler ─────────────────────────────────────────────────────────────
   async fetch(request, env, ctx) {
-    // Static assets (index.html, etc.) are served automatically via the
-    // `assets` binding configured in wrangler.jsonc.
-    return new Response('AffiliateOS', { status: 200 });
+    return env.ASSETS.fetch(request);
   },
 
   // ── Cron handler ─────────────────────────────────────────────────────────────
