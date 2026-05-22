@@ -295,9 +295,13 @@ Deno.serve(async (req: Request) => {
       (existingLeadRows || []).map((l: any) => getDomain(l.url || '')).filter(Boolean),
     );
 
-    const { data: blRows } = await supabase
-      .from('blacklist').select('domain').or(`brand.eq.${brand},brand.is.null`).catch(() => ({ data: [] }));
-    const blacklistSet = new Set(((blRows as any[] | null) || []).map((r: any) => (r.domain || '').toLowerCase()));
+    let blRows: any[] = [];
+    try {
+      const { data } = await supabase
+        .from('blacklist').select('domain').or(`brand.eq.${brand},brand.is.null`);
+      blRows = data || [];
+    } catch (_) {}
+    const blacklistSet = new Set(blRows.map((r: any) => (r.domain || '').toLowerCase()));
 
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const { data: recentSent } = await supabase
@@ -344,7 +348,7 @@ Deno.serve(async (req: Request) => {
         if (contact?.email && emailedSet.has(contact.email.toLowerCase())) continue;
 
         const leadData: Record<string, unknown> = {
-          url, website: url,
+          url,
           name:  nameFromTitle(result.title),
           brand, stage: 'new',
           geo:   preset.geo,
