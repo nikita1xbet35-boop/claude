@@ -2,12 +2,12 @@
 // fetch()     → serves the static dashboard via Cloudflare Assets
 // scheduled() → drives the autonomous pipeline by firing Supabase Edge Functions:
 //
-//   every 5 min  → process-queue      (send due emails)
-//                + extract-contacts   (find emails for new leads)
-//   every 15 min → generate-queue     (rolling queue top-up, 5-7 min cadence)
-//                + search-and-analyze (continuous lead search)
-//   every 30 min → check-limits       (API limit monitoring + Telegram alerts)
-//   06:00 UTC    → daily-report       (09:00 GMT+3 Telegram report)
+//   every 5 min  → process-queue    (send due emails)
+//                + extract-contacts (find emails for new leads)
+//   every 15 min → cron-search      (autonomous GEO-rotating lead search)
+//                + generate-queue   (rolling queue top-up, 4-6 min cadence)
+//   every 30 min → check-limits     (API limit monitoring + Telegram alerts)
+//   06:00 UTC    → daily-report     (09:00 GMT+3 Telegram report)
 //
 // Env vars (optional — sane fallbacks below): SUPABASE_URL, SUPABASE_ANON_KEY
 
@@ -57,9 +57,9 @@ export default {
     }
 
     if (cron === '*/15 * * * *') {
-      // Lead search + rolling queue top-up
-      await call('search-and-analyze', { cron });
-      await call('generate-queue', { cron });
+      // Autonomous lead search (rotates GEOs) + rolling queue top-up
+      await call('cron-search', {});
+      await call('generate-queue', {});
       return;
     }
 

@@ -104,7 +104,28 @@ Deno.serve(async (req: Request) => {
       .order('id', { ascending: true });
     if (pendErr) throw new Error(`send_queue query failed: ${pendErr.message}`);
 
-    const pending = (pendingRaw || []).slice(0, capacity);
+    // Drop queue items whose lead has no contact_email — endless repacking with nothing to send.
+    let noContactLeadIds = new Set<string>();
+    if (pendingRaw && pendingRaw.length > 0) {
+      const leadIds = [...new Set(pendingRaw.map(p => p.lead_id as string))];
+      const { data: leadsCheck } = await supabase
+        .from('leads').select('id, contact_email').in('id', leadIds);
+      noContactLeadIds = new Set(
+        (leadsCheck || []).filter(l => !l.contact_email).map(l => l.id as string),
+      );
+      if (noContactLeadIds.size > 0) {
+        const staleIds = pendingRaw
+          .filter(p => noContactLeadIds.has(p.lead_id as string))
+          .map(p => p.id);
+        await supabase.from('send_queue')
+          .update({ status: 'skipped', error: 'no contact email' })
+          .in('id', staleIds);
+      }
+    }
+
+    const pending = (pendingRaw || [])
+      .filter(p => !noContactLeadIds.has(p.lead_id as string))
+      .slice(0, capacity);
 
     // Fill remaining capacity with new eligible leads
     const newQuota = capacity - pending.length;

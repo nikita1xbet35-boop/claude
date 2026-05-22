@@ -181,6 +181,14 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
+      if (!lead.contact_email) {
+        await supabase.from('send_queue')
+          .update({ status: 'skipped', error: 'no contact email' })
+          .eq('id', item.id);
+        stats.skipped++;
+        continue;
+      }
+
       const subject = buildSubject(item.id as number, lead.name, item.brand);
 
       // Generate email body (with fallback)
