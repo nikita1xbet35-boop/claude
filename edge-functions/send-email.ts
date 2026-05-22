@@ -52,6 +52,8 @@ Deno.serve(async (req: Request) => {
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
+  const senderName = isLP ? 'Andreas — LuckyPari' : 'Nick — 1xPartners';
+
   try {
     const client = new SMTPClient({
       connection: {
@@ -63,22 +65,22 @@ Deno.serve(async (req: Request) => {
     });
 
     await client.send({
-      from: gmailUser,
+      from:    `${senderName} <${gmailUser}>`,
       to,
+      replyTo: gmailUser,
       subject,
-      content: emailBody,
+      content: emailBody,   // plain-text body
     });
 
-    await client.close();
+    // A failure to close the connection must not fail an already-sent email.
+    try { await client.close(); } catch (_) { /* connection cleanup only */ }
 
-    // Generate a pseudo message-id (SMTP doesn't return one easily)
     const pseudoId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
     return new Response(JSON.stringify({ success: true, gmail_message_id: pseudoId }),
       { headers: { ...cors, 'Content-Type': 'application/json' } });
 
   } catch (e: any) {
-    return new Response(JSON.stringify({ error: e.message || 'SMTP send failed' }),
+    return new Response(JSON.stringify({ error: `SMTP send failed: ${e.message || e}` }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 });

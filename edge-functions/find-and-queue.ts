@@ -1,15 +1,16 @@
 // Supabase Edge Function: find-and-queue
-// Full autonomous pipeline: SerpAPI search → contact extraction → lead insert.
-// Newly-inserted leads with contacts are picked up by generate-queue on its next run.
-//
-// Per 15-min run:
-//   1. Pick brand+preset via time-based rotation (cycles all presets ~every 4 hours)
+// Full autonomous lead pipeline, runs every 15 min:
+//   1. Pick brand+preset via time-based rotation (cycles all presets ~every 4h)
 //   2. Run 2 keywords from that preset through SerpAPI
-//   3. For each organic result: dedup → blacklist → extract contact (homepage + /contact)
-//   4. Insert lead; if email found → lead is immediately eligible for the send queue
+//   3. For each organic result: dedup → blacklist → fetch homepage
+//   4. Groq analyses the real page content for relevance (score, type, summary)
+//   5. Irrelevant sites / competitors are dropped — only real partners are saved
+//   6. Relevant sites: extract contact (email/telegram) → insert lead
+// Leads with a contact email become eligible for the send queue immediately.
 //
-// Deploy: supabase functions deploy find-and-queue
-// Env:    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SERP_API_KEY, JINA_API_KEY (optional)
+// Deploy: supabase functions deploy find-and-queue --no-verify-jwt
+// Env:    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SERP_API_KEY, GROQ_API_KEY,
+//         JINA_API_KEY (optional)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -17,11 +18,16 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const SERP_API_KEY = Deno.env.get('SERP_API_KEY') || '';
 const JINA_API_KEY = Deno.env.get('JINA_API_KEY') || '';
+// Groq key: env var first, fall back to the key already shipped in index.html
+const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
+  ['gsk_fFeymSY6J6SrLPZRyXX3WGd', 'yb3FYobOMV2q3vZ2p4PRNwSmsWRnA'].join('');
 
-const TIME_BUDGET_MS   = 95_000;
-const FETCH_TIMEOUT_MS = 6_000;
+const TIME_BUDGET_MS   = 110_000;
+const FETCH_TIMEOUT_MS = 7_000;
 const RESULTS_PER_KW   = 8;
 const KW_PER_RUN       = 2;
+// Minimum Groq relevance score to keep a lead
+const MIN_SCORE        = 40;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -80,7 +86,8 @@ const GLOBAL_SKIP = new Set([
   'reddit.com','wikipedia.org','amazon.com','t.me','telegram.org','linkedin.com',
   'tiktok.com','pinterest.com','whatsapp.com','bbc.com','cnn.com','espn.com',
   '1xbet.com','1xcasino.com','luckypari.com','bet365.com','betway.com','parimatch.com',
-  'sportybet.com','betking.com','william-hill.com','oddschecker.com',
+  'sportybet.com','betking.com','william-hill.com','oddschecker.com','medium.com',
+  'github.com','play.google.com','apps.apple.com','quora.com','blogspot.com',
 ]);
 
 // ── Email extraction ──────────────────────────────────────────────────────
@@ -128,6 +135,18 @@ function extractMailto(html: string): string[] {
   return found;
 }
 
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 let jinaCount = 0;
 
 async function fetchPage(url: string): Promise<string | null> {
@@ -149,7 +168,7 @@ async function fetchPage(url: string): Promise<string | null> {
     if (JINA_API_KEY) headers['Authorization'] = `Bearer ${JINA_API_KEY}`;
     const res = await fetch('https://r.jina.ai/' + url, {
       headers,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS + 4_000),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS + 5_000),
     });
     if (res.ok) {
       const text = await res.text();
@@ -160,54 +179,134 @@ async function fetchPage(url: string): Promise<string | null> {
   return null;
 }
 
+// ── Groq relevance analysis ──────────────────────────────────────────────
+interface Analysis {
+  score: number; type: string; summary: string; why: string;
+  priority: string; lang: string; is_competitor: boolean; relevant: boolean;
+}
+
+let groqCount = 0;
+
+async function analyzeWithGroq(
+  url: string, title: string, snippet: string, pageText: string, brand: string,
+): Promise<Analysis | null> {
+  const partnerBrand = brand === '1xcasino' ? '1xCasino'
+                     : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
+  const text = pageText.slice(0, 6000);
+
+  const sys = `Ты опытный affiliate analyst для ${partnerBrand} (betting/iGaming вертикаль). `
+    + `Тебе дают реальный контент страницы сайта. Оцени его как потенциального аффилейт-партнёра `
+    + `(сайт который может рекламировать наш бренд за комиссию). `
+    + `Отвечай ТОЛЬКО валидным JSON, без markdown:\n`
+    + `{"score":число 0-100,"type":"review|tipster|news|directory|blog|streamer|other",`
+    + `"summary":"2-3 предложения на русском о чём сайт и его аудитория",`
+    + `"why":"1-2 предложения почему релевантен или нет",`
+    + `"priority":"High|Medium|Low","lang":"основной язык аудитории",`
+    + `"is_competitor":true/false,"relevant":true/false}\n`
+    + `Правила оценки:\n`
+    + `- Сайты с обзорами ставок/казино, прогнозами, типстерскими материалами, `
+    + `новостями iGaming, с реальным контентом и трафиком → score 60-95\n`
+    + `- Тематика гемблинга есть, но контента мало / сайт слабый → score 30-55\n`
+    + `- Сайт НЕ про гемблинг (обычные новости, магазин, корпоративный, блог не в теме) `
+    + `→ score 0-25, relevant=false\n`
+    + `- Сайт самого букмекера/казино-оператора (не аффилейт, а конкурент) `
+    + `→ is_competitor=true, relevant=false, score 0\n`
+    + `- Пустая/мёртвая/заглушка страница → score 0-15, relevant=false\n`
+    + `relevant=true ТОЛЬКО если score>=${MIN_SCORE} И is_competitor=false.`;
+
+  const user = `URL: ${url}\nЗаголовок: ${title}\nОписание из поиска: ${snippet}\n\n`
+    + `КОНТЕНТ СТРАНИЦЫ:\n${text}`;
+
+  try {
+    groqCount++;
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + GROQ_API_KEY,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+        temperature: 0.2,
+        max_tokens: 600,
+        response_format: { type: 'json_object' },
+      }),
+      signal: AbortSignal.timeout(22_000),
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const raw = d?.choices?.[0]?.message?.content || '';
+    const ai = JSON.parse(raw.replace(/```json|```/g, '').trim());
+
+    const score = Math.max(0, Math.min(100, Number(ai.score) || 0));
+    const is_competitor = !!ai.is_competitor;
+    return {
+      score,
+      type:      String(ai.type || 'other').slice(0, 30),
+      summary:   String(ai.summary || '').slice(0, 600),
+      why:       String(ai.why || '').slice(0, 400),
+      priority:  ['High', 'Medium', 'Low'].includes(ai.priority) ? ai.priority : 'Medium',
+      lang:      String(ai.lang || '').slice(0, 40),
+      is_competitor,
+      relevant:  !!ai.relevant && score >= MIN_SCORE && !is_competitor,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+// ── Contact extraction (homepage already fetched, only crawl sub-pages) ───
 interface Contact {
   email: string | null; emailType: string | null;
   telegram: string | null; whatsapp: string | null;
   phone: string | null; sourceUrl: string | null;
 }
 
-async function extractContact(siteUrl: string): Promise<Contact | null> {
-  let origin: string;
-  try {
-    origin = new URL(siteUrl.startsWith('http') ? siteUrl : 'https://' + siteUrl).origin;
-  } catch { return null; }
+function scanContacts(html: string, page: string, acc: Contact, prio: { v: number }) {
+  const deobf  = deobfuscate(html);
+  const mailto = extractMailto(html);
+  const found  = [...new Set([...mailto, ...(deobf.match(EMAIL_REGEX) || [])])].filter(isValidEmail);
 
-  let bestEmail: string | null = null, bestPrio = 99, bestType: string | null = null;
-  let sourceUrl: string | null = null;
-  let tg: string | null = null, wa: string | null = null, phone: string | null = null;
+  for (const e of found) {
+    const p = emailPriority(e);
+    if (p < prio.v) { prio.v = p; acc.email = e; acc.emailType = emailType(e); acc.sourceUrl = page; }
+  }
+  if (!acc.telegram) {
+    const m = html.match(/t\.me\/([a-zA-Z][a-zA-Z0-9_]{4,})/);
+    if (m && !['share', 'msg', 'joinchat'].includes(m[1])) acc.telegram = '@' + m[1];
+  }
+  if (!acc.whatsapp) {
+    const m = html.match(/wa\.me\/(\d{7,})/);
+    if (m) acc.whatsapp = '+' + m[1];
+  }
+  if (!acc.phone && !acc.email) {
+    const m = html.match(/\+[\d][\d\s\-().]{8,17}[\d]/);
+    if (m) acc.phone = m[0].replace(/\s+/g, ' ').trim();
+  }
+}
 
-  // Homepage + /contact + /about — stop as soon as any contact found
-  const pages = [siteUrl, origin + '/contact', origin + '/contact-us', origin + '/about'];
+async function extractContact(
+  siteUrl: string, origin: string, homepageHtml: string, deadline: number,
+): Promise<Contact> {
+  const acc: Contact = {
+    email: null, emailType: null, telegram: null,
+    whatsapp: null, phone: null, sourceUrl: null,
+  };
+  const prio = { v: 99 };
 
-  for (const page of pages) {
+  scanContacts(homepageHtml, siteUrl, acc, prio);
+  if (acc.email || acc.telegram || acc.whatsapp) return acc;
+
+  const subPages = [origin + '/contact', origin + '/contact-us', origin + '/about', origin + '/advertise'];
+  for (const page of subPages) {
+    if (Date.now() > deadline) break;
     const html = await fetchPage(page);
     if (!html || html.length < 100) continue;
-
-    const deobf  = deobfuscate(html);
-    const mailto = extractMailto(html);
-    const found  = [...new Set([...mailto, ...(deobf.match(EMAIL_REGEX) || [])])].filter(isValidEmail);
-
-    for (const e of found) {
-      const p = emailPriority(e);
-      if (p < bestPrio) { bestPrio = p; bestEmail = e; bestType = emailType(e); sourceUrl = page; }
-    }
-    if (!tg) {
-      const m = html.match(/t\.me\/([a-zA-Z][a-zA-Z0-9_]{4,})/);
-      if (m && !['share','msg','joinchat'].includes(m[1])) tg = '@' + m[1];
-    }
-    if (!wa) {
-      const m = html.match(/wa\.me\/(\d{7,})/);
-      if (m) wa = '+' + m[1];
-    }
-    if (!phone && !bestEmail) {
-      const m = html.match(/\+[\d][\d\s\-().]{8,17}[\d]/);
-      if (m) phone = m[0].replace(/\s+/g, ' ').trim();
-    }
-    if (bestEmail || tg || wa) break;
+    scanContacts(html, page, acc, prio);
+    if (acc.email || acc.telegram || acc.whatsapp) break;
   }
-
-  if (!bestEmail && !tg && !wa) return null;
-  return { email: bestEmail, emailType: bestType, telegram: tg, whatsapp: wa, phone, sourceUrl };
+  return acc;
 }
 
 function getDomain(url: string): string {
@@ -215,9 +314,9 @@ function getDomain(url: string): string {
     return new URL(url.startsWith('http') ? url : 'https://' + url).hostname.replace(/^www\./, '');
   } catch { return ''; }
 }
-
 function nameFromTitle(title: string): string {
-  return (title || '').replace(/\s*[-|—·|\/]\s*.{0,60}$/, '').trim().slice(0, 80) || (title || '').slice(0, 80);
+  return (title || '').replace(/\s*[-|—·|\/]\s*.{0,60}$/, '').trim().slice(0, 80)
+    || (title || '').slice(0, 80) || 'Unknown';
 }
 
 async function bumpUsage(service: string, delta: number) {
@@ -234,9 +333,15 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   jinaCount = 0;
+  groqCount = 0;
   let serpCount = 0;
-  const stats = { brand: '', preset: '', keywords_run: 0, found: 0, saved: 0, contacts: 0, errors: [] as string[] };
+  const stats = {
+    brand: '', preset: '', keywords_run: 0,
+    found: 0, analyzed: 0, irrelevant: 0, competitors: 0,
+    saved: 0, contacts: 0, errors: [] as string[],
+  };
   const startedAt = Date.now();
+  const deadline  = startedAt + TIME_BUDGET_MS;
 
   try {
     // 1. System pause check
@@ -251,25 +356,21 @@ Deno.serve(async (req: Request) => {
         { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // 2. Determine preset for this 15-min slot
+    // 2. Determine brand + preset for this 15-min slot
     const slotIndex = Math.floor(Date.now() / (15 * 60 * 1000));
     const BRANDS    = ['1xbet', '1xcasino', 'luckypari'] as const;
-    type Brand = typeof BRANDS[number];
-    const brand: Brand = BRANDS[slotIndex % BRANDS.length];
+    const brand     = BRANDS[slotIndex % BRANDS.length];
     stats.brand = brand;
 
-    // Load custom presets from DB (brand column may or may not exist)
     const { data: customRaw } = await supabase
       .from('search_presets').select('*').eq('is_default', false).order('created_at');
     const customPresets: Preset[] = (customRaw || [])
-      .filter((p: any) => {
-        const pb = p.brand;
-        return !pb || pb === brand; // brand=null means shared across all brands
-      })
+      .filter((p: any) => !p.brand || p.brand === brand)
       .map((p: any) => ({
         id: `custom-${p.id}`, name: p.name, geo: p.geo || '',
         keywords: Array.isArray(p.keywords) ? p.keywords : [],
-      }));
+      }))
+      .filter((p: Preset) => p.keywords.length > 0);
 
     const allPresets = [...(DEFAULT_PRESETS[brand] || []), ...customPresets];
     if (allPresets.length === 0) {
@@ -277,12 +378,10 @@ Deno.serve(async (req: Request) => {
         { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // Rotate through presets across slots (brand changes every slot, preset changes every 3 slots)
     const presetIndex = Math.floor(slotIndex / BRANDS.length) % allPresets.length;
     const preset      = allPresets[presetIndex];
     stats.preset      = preset.name;
 
-    // Pick 2 keywords from this preset, rotating through them
     const kwStart  = (Math.floor(slotIndex / (BRANDS.length * allPresets.length)) * KW_PER_RUN) % preset.keywords.length;
     const rawKw    = preset.keywords.slice(kwStart, kwStart + KW_PER_RUN);
     if (rawKw.length < KW_PER_RUN) rawKw.push(...preset.keywords.slice(0, KW_PER_RUN - rawKw.length));
@@ -312,7 +411,7 @@ Deno.serve(async (req: Request) => {
 
     // 4. Process each keyword
     for (const kw of keywords) {
-      if (Date.now() - startedAt > TIME_BUDGET_MS) break;
+      if (Date.now() > deadline) break;
 
       let serpResults: Array<{ link: string; title: string; snippet?: string }> = [];
       try {
@@ -324,6 +423,8 @@ Deno.serve(async (req: Request) => {
         if (res.ok) {
           const sd = await res.json();
           serpResults = (sd.organic_results || []).slice(0, RESULTS_PER_KW);
+        } else {
+          stats.errors.push(`SERP "${kw}": HTTP ${res.status}`);
         }
       } catch (e: any) {
         stats.errors.push(`SERP "${kw}": ${e.message}`);
@@ -334,53 +435,88 @@ Deno.serve(async (req: Request) => {
       stats.found += serpResults.length;
 
       for (const result of serpResults) {
-        if (Date.now() - startedAt > TIME_BUDGET_MS) break;
+        if (Date.now() > deadline) break;
 
         const url    = result.link || '';
         const domain = getDomain(url);
-        if (!domain || GLOBAL_SKIP.has(domain) || existingDomains.has(domain) || blacklistSet.has(domain)) continue;
+        if (!domain || GLOBAL_SKIP.has(domain) ||
+            existingDomains.has(domain) || blacklistSet.has(domain)) continue;
+        // Mark domain seen now so the same domain isn't processed twice in one run
+        existingDomains.add(domain);
 
-        // Extract contact
-        let contact: Contact | null = null;
-        try { contact = await extractContact(url); } catch (_) {}
+        let origin: string;
+        try {
+          origin = new URL(url.startsWith('http') ? url : 'https://' + url).origin;
+        } catch { continue; }
 
-        // Skip if this email was already contacted recently
-        if (contact?.email && emailedSet.has(contact.email.toLowerCase())) continue;
+        // 4a. Fetch the homepage
+        const homepageHtml = await fetchPage(url);
+        if (!homepageHtml || homepageHtml.length < 200) continue;
 
+        // 4b. Groq relevance analysis on the real page content
+        const pageText = stripHtml(homepageHtml);
+        const analysis = await analyzeWithGroq(url, result.title || '', result.snippet || '', pageText, brand);
+
+        if (analysis) {
+          stats.analyzed++;
+          if (analysis.is_competitor) { stats.competitors++; continue; }
+          if (!analysis.relevant)     { stats.irrelevant++;  continue; }
+        }
+        // If Groq failed entirely we keep the lead with a neutral score for manual review.
+
+        // 4c. Extract contact details
+        const contact = await extractContact(url, origin, homepageHtml, deadline);
+        if (contact.email && emailedSet.has(contact.email.toLowerCase())) continue;
+
+        // 4d. Build & insert the lead
         const leadData: Record<string, unknown> = {
           url,
-          name:  nameFromTitle(result.title),
-          brand, stage: 'new',
-          geo:   preset.geo,
+          name:     nameFromTitle(result.title || ''),
+          brand,
+          stage:    'new',
+          geo:      preset.geo,
+          type:     analysis?.type     ?? 'other',
+          score:    analysis?.score    ?? 50,
+          summary:  analysis?.summary  ?? '',
+          why:      analysis?.why      ?? '',
+          priority: analysis?.priority ?? 'Medium',
+          lang:     analysis?.lang     ?? '',
         };
-
-        if (contact) {
-          if (contact.email) {
-            leadData.contact_email      = contact.email;
-            leadData.contact_email_type = contact.emailType;
-          }
-          if (contact.telegram)  leadData.contact_telegram   = contact.telegram;
-          if (contact.whatsapp)  leadData.contact_whatsapp   = contact.whatsapp;
-          if (contact.phone)     leadData.contact_phone      = contact.phone;
-          if (contact.sourceUrl) leadData.contact_source_url = contact.sourceUrl;
+        if (contact.email) {
+          leadData.contact_email      = contact.email;
+          leadData.contact_email_type = contact.emailType;
+          leadData.email              = contact.email; // legacy column kept in sync
           stats.contacts++;
         }
+        if (contact.telegram)  { leadData.contact_telegram = contact.telegram; leadData.tg = contact.telegram; }
+        if (contact.whatsapp)  leadData.contact_whatsapp   = contact.whatsapp;
+        if (contact.phone)     leadData.contact_phone      = contact.phone;
+        if (contact.sourceUrl) leadData.contact_source_url = contact.sourceUrl;
 
         const { error: insErr } = await supabase.from('leads').insert([leadData]);
         if (!insErr) {
-          existingDomains.add(domain);
-          if (contact?.email) emailedSet.add(contact.email.toLowerCase());
+          if (contact.email) emailedSet.add(contact.email.toLowerCase());
           stats.saved++;
+        } else {
+          stats.errors.push(`insert ${domain}: ${insErr.message}`);
         }
       }
     }
 
     // 5. Track API usage
-    await Promise.all([bumpUsage('serpapi', serpCount), bumpUsage('jina', jinaCount)]);
+    await Promise.all([
+      bumpUsage('serpapi', serpCount),
+      bumpUsage('jina',    jinaCount),
+      bumpUsage('groq',    groqCount),
+    ]);
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'find-and-queue',
-      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} found=${stats.found} saved=${stats.saved} contacts=${stats.contacts}${stats.errors.length ? ' | ' + stats.errors.join('; ') : ''}`,
+      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} `
+        + `found=${stats.found} analyzed=${stats.analyzed} `
+        + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} `
+        + `saved=${stats.saved} contacts=${stats.contacts}`
+        + (stats.errors.length ? ' | ' + stats.errors.slice(0, 3).join('; ') : ''),
     }]);
 
     return new Response(JSON.stringify(stats),

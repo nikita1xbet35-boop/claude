@@ -2,10 +2,11 @@
 // fetch()     → serves the static dashboard via Cloudflare Assets
 // scheduled() → drives the autonomous pipeline by firing Supabase Edge Functions:
 //
-//   every 5 min  → process-queue    (send due emails)
-//                + extract-contacts (find emails for new leads)
-//   every 15 min → cron-search      (autonomous GEO-rotating lead search)
-//                + generate-queue   (rolling queue top-up, 4-6 min cadence)
+//   every 2 min  → process-queue    (send due emails — tight tick so sends fire
+//                                    close to their scheduled time)
+//   every 15 min → find-and-queue   (search → Groq relevance analysis → contact → lead)
+//                + generate-queue   (queue top-up, stable schedule, 3-5 min cadence)
+//                + extract-contacts (find emails for leads added outside the pipeline)
 //   every 30 min → check-limits     (API limit monitoring + Telegram alerts)
 //   06:00 UTC    → daily-report     (09:00 GMT+3 Telegram report)
 //
@@ -49,19 +50,20 @@ export default {
 
     const cron = event.cron;
 
-    if (cron === '*/5 * * * *') {
-      // Sending and contact extraction run on the fast tick
+    if (cron === '*/2 * * * *') {
+      // Fast tick — send any emails that are now due.
       await call('process-queue', { cron });
-      await call('extract-contacts', { cron });
       return;
     }
 
     if (cron === '*/15 * * * *') {
-      // find-and-queue: full pipeline (SerpAPI → contact → lead insert)
-      // cron-search:    calls auto-search as secondary breadth source
-      // Both run in parallel; generate-queue runs after to schedule new leads
-      await Promise.all([call('find-and-queue', {}), call('cron-search', {})]);
+      // find-and-queue runs the full pipeline (search → Groq analysis →
+      // contact extraction → lead insert); generate-queue then schedules
+      // newly-eligible leads; extract-contacts backfills contacts for leads
+      // added outside the pipeline.
+      await call('find-and-queue', {});
       await call('generate-queue', {});
+      await call('extract-contacts', {});
       return;
     }
 

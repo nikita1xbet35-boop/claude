@@ -1,17 +1,15 @@
 // Supabase Edge Function: generate-queue
-// Builds and continuously tops up the daily send queue.
+// Continuously tops up the daily send queue.
 //
-// Runs every 15 minutes (rolling model — NOT once a day):
-//   - Repacks all still-pending items into a tight 5-7 min cadence from now
-//   - Pulls in newly-eligible leads (with contacts) found since the last run
+// Runs every 15 minutes:
+//   - Leaves already future-scheduled items UNTOUCHED, so the time shown on
+//     the dashboard stays stable and matches when the email actually sends
+//   - Reschedules only overdue items (slot in the past) to fire again soon
+//   - Appends newly-eligible leads (with contacts) after the last occupied slot
 //   - Keeps the queue within the daily target (100 weekday / 30 weekend)
 //   - Respects working hours 09:00-18:00 GMT+3 and the 13:00-14:00 lunch break
 //
-// This replaces the old "schedule the whole day at 08:00" approach, which
-// spread a handful of leads hours apart. With the rolling model, sends happen
-// every 5-7 minutes as long as there are leads with contacts available.
-//
-// Deploy: supabase functions deploy generate-queue
+// Deploy: supabase functions deploy generate-queue --no-verify-jwt
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto-injected)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -21,10 +19,11 @@ const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const WEEKDAY_TARGET = 100;
 const WEEKEND_TARGET = 30;
-// 4-6 min cadence (avg 5) fits ~96 sends into the 09-18 window minus lunch.
+// 3-5 min cadence (avg 4) gives ~120 send slots in the 09-18 window minus
+// lunch — comfortably enough headroom to actually reach 100/day.
 // Randomized so the pattern stays human, not robotic.
-const MIN_INTERVAL_MS = 4 * 60 * 1000;
-const MAX_INTERVAL_MS = 6 * 60 * 1000;
+const MIN_INTERVAL_MS = 3 * 60 * 1000;
+const MAX_INTERVAL_MS = 5 * 60 * 1000;
 const START_DELAY_MS  = 90 * 1000;     // first slot is now + 90s
 
 const cors = {
@@ -95,16 +94,16 @@ Deno.serve(async (req: Request) => {
         { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // All still-pending queue items — these get repacked into a tight cadence
+    // All still-pending queue items
     const { data: pendingRaw, error: pendErr } = await supabase
       .from('send_queue')
-      .select('id, lead_id, brand, gmail_account')
+      .select('id, lead_id, brand, gmail_account, scheduled_at')
       .eq('status', 'pending')
       .order('scheduled_at', { ascending: true })
       .order('id', { ascending: true });
     if (pendErr) throw new Error(`send_queue query failed: ${pendErr.message}`);
 
-    // Drop queue items whose lead has no contact_email — endless repacking with nothing to send.
+    // Drop queue items whose lead has no contact_email — nothing to ever send.
     let noContactLeadIds = new Set<string>();
     if (pendingRaw && pendingRaw.length > 0) {
       const leadIds = [...new Set(pendingRaw.map(p => p.lead_id as string))];
@@ -123,12 +122,20 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const pending = (pendingRaw || [])
-      .filter(p => !noContactLeadIds.has(p.lead_id as string))
+    const livePending = (pendingRaw || [])
+      .filter(p => !noContactLeadIds.has(p.lead_id as string));
+
+    // Split into items already scheduled in the future (KEEP their time — this is
+    // what the dashboard shows, so it must stay stable) and overdue items whose
+    // slot is in the past (these get rescheduled to fire again soon).
+    const futureSlack = nowMs + 30 * 1000;
+    const futurePending  = livePending.filter(p => new Date(p.scheduled_at as string).getTime() > futureSlack);
+    const overduePending = livePending
+      .filter(p => new Date(p.scheduled_at as string).getTime() <= futureSlack)
       .slice(0, capacity);
 
     // Fill remaining capacity with new eligible leads
-    const newQuota = capacity - pending.length;
+    const newQuota = Math.max(0, capacity - futurePending.length - overduePending.length);
     let newLeads: Array<{ id: string; brand: string }> = [];
 
     if (newQuota > 0) {
@@ -139,7 +146,7 @@ Deno.serve(async (req: Request) => {
       const emailedSet = new Set(
         (recentSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
       );
-      const queuedLeadIds = new Set(pending.map(p => p.lead_id));
+      const queuedLeadIds = new Set(livePending.map(p => p.lead_id));
 
       const { data: candidates, error: leadsErr } = await supabase
         .from('leads')
@@ -160,42 +167,47 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Build the schedule: repacked pending rows first, then new leads
-    type Slot = { kind: 'update'; queueId: number } | { kind: 'insert'; leadId: string; brand: string };
-    const slots: Slot[] = [
-      ...pending.map(p => ({ kind: 'update' as const, queueId: p.id as number })),
-      ...newLeads.map(l => ({ kind: 'insert' as const, leadId: l.id, brand: l.brand })),
-    ];
-
-    let cursor = Math.max(nowMs + START_DELAY_MS, workStartMs);
-
+    // ── Scheduling ──────────────────────────────────────────────────────────
+    // Future-scheduled items are LEFT UNTOUCHED so the dashboard's displayed
+    // times stay stable. We only reschedule overdue items and append new leads
+    // after the last occupied slot.
     const updates: Array<{ id: number; scheduled_at: string }> = [];
     const inserts: Array<Record<string, unknown>> = [];
 
-    for (const slot of slots) {
-      // Jump over the lunch break
-      if (cursor >= lunchStart && cursor < lunchEnd) cursor = lunchEnd;
-      // Day is over — remaining leads wait for tomorrow
+    // Advance cursor past lunch / clamp to the working window.
+    const advance = (c: number): number => {
+      if (c >= lunchStart && c < lunchEnd) c = lunchEnd;
+      return c;
+    };
+
+    // 1. Overdue items fire first — densely from now+delay.
+    let cursor = advance(Math.max(nowMs + START_DELAY_MS, workStartMs));
+    for (const p of overduePending) {
+      cursor = advance(cursor);
       if (cursor >= workEndMs) break;
-
-      const scheduledAt = new Date(cursor).toISOString();
-
-      if (slot.kind === 'update') {
-        updates.push({ id: slot.queueId, scheduled_at: scheduledAt });
-      } else {
-        inserts.push({
-          lead_id:       slot.leadId,
-          brand:         slot.brand,
-          gmail_account: slot.brand === 'luckypari' ? 'lp' : 'main',
-          scheduled_at:  scheduledAt,
-          status:        'pending',
-        });
-      }
-
+      updates.push({ id: p.id as number, scheduled_at: new Date(cursor).toISOString() });
       cursor += randInterval();
     }
 
-    // Apply: repack existing rows, insert new ones
+    // 2. New leads continue after both the overdue burst and any future items.
+    const latestFuture = futurePending.reduce(
+      (max, p) => Math.max(max, new Date(p.scheduled_at as string).getTime()), 0,
+    );
+    cursor = advance(Math.max(cursor, latestFuture + randInterval()));
+    for (const l of newLeads) {
+      cursor = advance(cursor);
+      if (cursor >= workEndMs) break;
+      inserts.push({
+        lead_id:       l.id,
+        brand:         l.brand,
+        gmail_account: l.brand === 'luckypari' ? 'lp' : 'main',
+        scheduled_at:  new Date(cursor).toISOString(),
+        status:        'pending',
+      });
+      cursor += randInterval();
+    }
+
+    // Apply: reschedule overdue rows, insert new ones.
     for (const u of updates) {
       await supabase.from('send_queue')
         .update({ scheduled_at: u.scheduled_at })
@@ -209,7 +221,8 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'generate-queue',
-      message: `Queue updated — repacked ${updates.length}, added ${inserts.length} (sent today ${sentToday ?? 0}/${dailyTarget})`,
+      message: `Queue updated — kept ${futurePending.length} future, rescheduled ${updates.length} overdue, `
+        + `added ${inserts.length} new (sent today ${sentToday ?? 0}/${dailyTarget})`,
     }]);
 
     return new Response(JSON.stringify({
