@@ -1,23 +1,31 @@
 // Supabase Edge Function: generate-queue
-// Generates the daily send schedule and fills send_queue with emails
-// distributed throughout the working day in a human-like pattern.
+// Builds and continuously tops up the daily send queue.
 //
-// Distribution (100 emails/day, 09:00-18:00 GMT+3, lunch 13:00-14:00):
-//   09:00-11:00 → 15 emails
-//   11:00-13:00 → 30 emails
-//   13:00-14:00 → 0 (lunch)
-//   14:00-17:00 → 40 emails
-//   17:00-18:00 → 15 emails
+// Runs every 15 minutes (rolling model — NOT once a day):
+//   - Repacks all still-pending items into a tight 5-7 min cadence from now
+//   - Pulls in newly-eligible leads (with contacts) found since the last run
+//   - Keeps the queue within the daily target (100 weekday / 30 weekend)
+//   - Respects working hours 09:00-18:00 GMT+3 and the 13:00-14:00 lunch break
 //
-// Weekend: 30 emails (same proportional distribution).
+// This replaces the old "schedule the whole day at 08:00" approach, which
+// spread a handful of leads hours apart. With the rolling model, sends happen
+// every 5-7 minutes as long as there are leads with contacts available.
 //
 // Deploy: supabase functions deploy generate-queue
-// Env vars needed: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto-injected)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+const WEEKDAY_TARGET = 100;
+const WEEKEND_TARGET = 30;
+// 4-6 min cadence (avg 5) fits ~96 sends into the 09-18 window minus lunch.
+// Randomized so the pattern stays human, not robotic.
+const MIN_INTERVAL_MS = 4 * 60 * 1000;
+const MAX_INTERVAL_MS = 6 * 60 * 1000;
+const START_DELAY_MS  = 90 * 1000;     // first slot is now + 90s
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -26,236 +34,177 @@ const cors = {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ── Time window definitions ──────────────────────────────────────────────────
-// Each window: [startHour, endHour, fraction of daily total]
-const WINDOWS = [
-  { start: 9,  end: 11, weight: 15 },
-  { start: 11, end: 13, weight: 30 },
-  // 13-14 lunch break — skipped
-  { start: 14, end: 17, weight: 40 },
-  { start: 17, end: 18, weight: 15 },
-];
-const TOTAL_WEIGHT = WINDOWS.reduce((s, w) => s + w.weight, 0); // 100
+const EMAIL_RE   = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+const DISPOSABLE = ['mailinator.com', 'guerrillamail.com', '10minutemail.com', 'tempmail', 'throwaway'];
 
-/**
- * Generate N timestamps within [startHour, endHour) on the given date (GMT+3).
- * Applies ±2-3 min jitter around evenly spaced slots.
- */
-function generateTimestamps(
-  dateGMT3: Date,
-  startHour: number,
-  endHour: number,
-  count: number
-): Date[] {
-  if (count <= 0) return [];
+function isSendableEmail(e: string | null): boolean {
+  if (!e) return false;
+  const l = e.toLowerCase();
+  if (DISPOSABLE.some(d => l.includes(d))) return false;
+  return EMAIL_RE.test(e);
+}
 
-  const windowMinutes = (endHour - startHour) * 60;
-  const timestamps: Date[] = [];
-
-  // Evenly space slots, then add jitter
-  for (let i = 0; i < count; i++) {
-    // Base offset within window (in minutes)
-    const baseOffset = (i / count) * windowMinutes + Math.random() * (windowMinutes / count);
-    const clampedOffset = Math.min(baseOffset, windowMinutes - 1);
-
-    const hours   = startHour + Math.floor(clampedOffset / 60);
-    const minutes = Math.floor(clampedOffset % 60);
-
-    // Apply ±2-3 min jitter, ensure result stays in [startHour, endHour)
-    const jitter = Math.floor(Math.random() * 6) - 3; // -3 to +2
-    let totalMinutes = hours * 60 + minutes + jitter;
-    totalMinutes = Math.max(startHour * 60, Math.min(endHour * 60 - 1, totalMinutes));
-
-    const finalHour = Math.floor(totalMinutes / 60);
-    // Use non-round minute; try the computed minute first, adjust if round
-    let finalMinute = totalMinutes % 60;
-    if (finalMinute % 5 === 0) {
-      // Shift by 1-2 min while staying in window
-      const bump = (Math.random() < 0.5 ? 1 : 2) * (Math.random() < 0.5 ? 1 : -1);
-      const adjusted = totalMinutes + bump;
-      if (adjusted >= startHour * 60 && adjusted < endHour * 60) {
-        finalMinute = adjusted % 60;
-      } else {
-        finalMinute = (finalMinute + 1) % 60;
-      }
-    }
-
-    // Add random seconds (non-zero) for extra human-like feel
-    const seconds = 7 + Math.floor(Math.random() * 47); // 7-53 seconds
-
-    // Build UTC timestamp: dateGMT3 is already midnight in GMT+3 expressed as UTC
-    // dateGMT3.getTime() is the UTC ms of GMT+3 midnight
-    const utcMs = dateGMT3.getTime() + (finalHour * 60 + finalMinute - 3 * 60) * 60 * 1000 + seconds * 1000;
-    timestamps.push(new Date(utcMs));
-  }
-
-  // Sort chronologically
-  timestamps.sort((a, b) => a.getTime() - b.getTime());
-  return timestamps;
+function randInterval(): number {
+  return MIN_INTERVAL_MS + Math.floor(Math.random() * (MAX_INTERVAL_MS - MIN_INTERVAL_MS));
 }
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   try {
-    const now = new Date();
+    const nowMs   = Date.now();
+    const nowGMT3 = new Date(nowMs + 3 * 60 * 60 * 1000);
+    const todayStr = nowGMT3.toISOString().slice(0, 10);
 
-    // ── Determine today's date in GMT+3 ────────────────────────────────────
-    const gmt3offset = 3 * 60 * 60 * 1000;
-    const nowGMT3    = new Date(now.getTime() + gmt3offset);
+    // System pause check
+    const { data: sysRow } = await supabase
+      .from('api_usage').select('system_paused').eq('service', 'gmail_main').single();
+    if (sysRow?.system_paused) {
+      return new Response(JSON.stringify({ generated: 0, repacked: 0, skipped: true, reason: 'system paused' }),
+        { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
 
-    // Midnight of today in GMT+3, expressed as a plain UTC Date
-    const todayGMT3 = new Date(nowGMT3);
-    todayGMT3.setUTCHours(0, 0, 0, 0);
-    // todayGMT3 is now: "today 00:00 GMT+3" = "today 00:00 UTC - 3h" as UTC ms
-    const todayMidnightUTC = new Date(todayGMT3.getTime() - gmt3offset);
-
+    // GMT+3 day boundaries / working window (as UTC instants)
+    const todayMidnightUTC    = new Date(`${todayStr}T00:00:00+03:00`);
     const tomorrowMidnightUTC = new Date(todayMidnightUTC.getTime() + 24 * 60 * 60 * 1000);
+    const workStartMs = new Date(`${todayStr}T09:00:00+03:00`).getTime();
+    const workEndMs   = new Date(`${todayStr}T18:00:00+03:00`).getTime();
+    const lunchStart  = new Date(`${todayStr}T13:00:00+03:00`).getTime();
+    const lunchEnd    = new Date(`${todayStr}T14:00:00+03:00`).getTime();
 
-    // Date string for logging
-    const todayStr = nowGMT3.toISOString().slice(0, 10); // YYYY-MM-DD
+    // After the work day — nothing to schedule today
+    if (nowMs >= workEndMs) {
+      return new Response(JSON.stringify({ generated: 0, repacked: 0, skipped: true, reason: 'after working hours' }),
+        { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
 
-    // ── Step 1: Check if queue already generated for today ──────────────────
-    // FIX: with head:true, data=null and count is a separate field — must destructure count directly
-    const { count: existingCount, error: existingError } = await supabase
-      .from('send_queue')
+    const dayOfWeek    = nowGMT3.getUTCDay();
+    const isWeekend    = dayOfWeek === 0 || dayOfWeek === 6;
+    const dailyTarget  = isWeekend ? WEEKEND_TARGET : WEEKDAY_TARGET;
+
+    // How many were already sent today
+    const { count: sentToday } = await supabase
+      .from('email_log')
       .select('id', { count: 'exact', head: true })
+      .gte('sent_at', todayMidnightUTC.toISOString())
+      .lt('sent_at',  tomorrowMidnightUTC.toISOString());
+
+    const capacity = dailyTarget - (sentToday ?? 0);
+    if (capacity <= 0) {
+      return new Response(JSON.stringify({ generated: 0, repacked: 0, skipped: true, reason: 'daily target reached' }),
+        { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
+    // All still-pending queue items — these get repacked into a tight cadence
+    const { data: pendingRaw, error: pendErr } = await supabase
+      .from('send_queue')
+      .select('id, lead_id, brand, gmail_account')
       .eq('status', 'pending')
-      .gte('scheduled_at', todayMidnightUTC.toISOString())
-      .lt('scheduled_at',  tomorrowMidnightUTC.toISOString());
+      .order('scheduled_at', { ascending: true })
+      .order('id', { ascending: true });
+    if (pendErr) throw new Error(`send_queue query failed: ${pendErr.message}`);
 
-    if (existingError) throw existingError;
+    const pending = (pendingRaw || []).slice(0, capacity);
 
-    if ((existingCount ?? 0) > 0) {
-      return new Response(JSON.stringify({
-        generated: 0,
-        date:       todayStr,
-        skipped:    true,
-        reason:     'Queue already generated for today',
-      }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    // Fill remaining capacity with new eligible leads
+    const newQuota = capacity - pending.length;
+    let newLeads: Array<{ id: string; brand: string }> = [];
+
+    if (newQuota > 0) {
+      // Emails contacted in the last 30 days — dedup by address (spec §9)
+      const thirtyDaysAgo = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: recentSent } = await supabase
+        .from('email_log').select('email').gt('sent_at', thirtyDaysAgo);
+      const emailedSet = new Set(
+        (recentSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
+      );
+      const queuedLeadIds = new Set(pending.map(p => p.lead_id));
+
+      const { data: candidates, error: leadsErr } = await supabase
+        .from('leads')
+        .select('id, brand, contact_email')
+        .eq('stage', 'new')
+        .not('contact_email', 'is', null)
+        .neq('contact_email', '')
+        .order('created_at', { ascending: true })
+        .limit(600);
+      if (leadsErr) throw new Error(`leads query failed: ${leadsErr.message}`);
+
+      for (const l of (candidates || [])) {
+        if (newLeads.length >= newQuota) break;
+        if (queuedLeadIds.has(l.id)) continue;
+        if (!isSendableEmail(l.contact_email)) continue;
+        if (emailedSet.has(l.contact_email.toLowerCase())) continue;
+        newLeads.push({ id: l.id, brand: l.brand });
+      }
     }
 
-    // ── Step 2: Determine target count (weekend vs weekday) ─────────────────
-    const dayOfWeek = nowGMT3.getUTCDay(); // 0=Sun, 6=Sat
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    const target    = isWeekend ? 30 : 100;
+    // Build the schedule: repacked pending rows first, then new leads
+    type Slot = { kind: 'update'; queueId: number } | { kind: 'insert'; leadId: string; brand: string };
+    const slots: Slot[] = [
+      ...pending.map(p => ({ kind: 'update' as const, queueId: p.id as number })),
+      ...newLeads.map(l => ({ kind: 'insert' as const, leadId: l.id, brand: l.brand })),
+    ];
 
-    // ── Step 3: Collect excluded lead IDs ──────────────────────────────────
-    // FIX: PostgREST does not support SQL subqueries in URL params.
-    // Fetch excluded IDs as separate queries, then pass integer arrays.
+    let cursor = Math.max(nowMs + START_DELAY_MS, workStartMs);
 
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const updates: Array<{ id: number; scheduled_at: string }> = [];
+    const inserts: Array<Record<string, unknown>> = [];
 
-    const [recentlySentRes, alreadyQueuedRes] = await Promise.all([
-      supabase
-        .from('email_log')
-        .select('lead_id')
-        .gt('sent_at', thirtyDaysAgo),
-      supabase
-        .from('send_queue')
-        .select('lead_id')
-        .gte('scheduled_at', todayMidnightUTC.toISOString())
-        .lt('scheduled_at',  tomorrowMidnightUTC.toISOString()),
-    ]);
+    for (const slot of slots) {
+      // Jump over the lunch break
+      if (cursor >= lunchStart && cursor < lunchEnd) cursor = lunchEnd;
+      // Day is over — remaining leads wait for tomorrow
+      if (cursor >= workEndMs) break;
 
-    if (recentlySentRes.error) throw recentlySentRes.error;
-    if (alreadyQueuedRes.error) throw alreadyQueuedRes.error;
+      const scheduledAt = new Date(cursor).toISOString();
 
-    const excludedIds: number[] = [
-      ...(recentlySentRes.data  || []).map((r: any) => r.lead_id),
-      ...(alreadyQueuedRes.data || []).map((r: any) => r.lead_id),
-    ].filter(Boolean);
+      if (slot.kind === 'update') {
+        updates.push({ id: slot.queueId, scheduled_at: scheduledAt });
+      } else {
+        inserts.push({
+          lead_id:       slot.leadId,
+          brand:         slot.brand,
+          gmail_account: slot.brand === 'luckypari' ? 'lp' : 'main',
+          scheduled_at:  scheduledAt,
+          status:        'pending',
+        });
+      }
 
-    // ── Step 4: Get eligible leads ──────────────────────────────────────────
-    let leadsQuery = supabase
-      .from('leads')
-      .select('id, brand, contact_email')
-      .eq('stage', 'new')
-      .not('contact_email', 'is', null)
-      .neq('contact_email', '')
-      .limit(target);
-
-    if (excludedIds.length > 0) {
-      leadsQuery = leadsQuery.not('id', 'in', `(${excludedIds.join(',')})`);
+      cursor += randInterval();
     }
 
-    const { data: eligibleLeads, error: leadsError } = await leadsQuery;
-    if (leadsError) throw leadsError;
-
-    const leads = eligibleLeads || [];
-    const count  = Math.min(leads.length, target);
-
-    if (count === 0) {
-      await supabase.from('error_log').insert([{
-        level:   'info',
-        service: 'generate-queue',
-        message: `Generated 0 items for queue, date: ${todayStr} — no eligible leads`,
-      }]);
-
-      return new Response(JSON.stringify({
-        generated:     0,
-        date:          todayStr,
-        eligible_leads: 0,
-      }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    // Apply: repack existing rows, insert new ones
+    for (const u of updates) {
+      await supabase.from('send_queue')
+        .update({ scheduled_at: u.scheduled_at })
+        .eq('id', u.id)
+        .eq('status', 'pending'); // never touch a row that just got sent
+    }
+    if (inserts.length > 0) {
+      const { error: insErr } = await supabase.from('send_queue').insert(inserts);
+      if (insErr) throw new Error(`insert failed: ${insErr.message}`);
     }
 
-    // ── Step 5: Distribute across time windows ──────────────────────────────
-    // Compute per-window email counts (proportional to weight)
-    const windowCounts = WINDOWS.map(w => ({
-      ...w,
-      count: Math.round((w.weight / TOTAL_WEIGHT) * count),
-    }));
-
-    // Correct rounding drift so sum equals count
-    const assignedSum = windowCounts.reduce((s, w) => s + w.count, 0);
-    const drift = count - assignedSum;
-    if (drift !== 0) {
-      const largest = windowCounts.reduce((a, b) => a.count > b.count ? a : b);
-      largest.count += drift;
-    }
-
-    // Generate all timestamps
-    const allTimestamps: Date[] = [];
-    for (const w of windowCounts) {
-      const ts = generateTimestamps(todayGMT3, w.start, w.end, w.count);
-      allTimestamps.push(...ts);
-    }
-    allTimestamps.sort((a, b) => a.getTime() - b.getTime());
-
-    // ── Step 6: Build queue rows ────────────────────────────────────────────
-    const rows = leads.slice(0, allTimestamps.length).map((lead: any, i: number) => ({
-      lead_id:       lead.id,
-      brand:         lead.brand,
-      gmail_account: lead.brand === 'luckypari' ? 'lp' : 'main',
-      scheduled_at:  allTimestamps[i].toISOString(),
-      status:        'pending',
-    }));
-
-    const { error: insertError } = await supabase.from('send_queue').insert(rows);
-    if (insertError) throw insertError;
-
-    // ── Step 7: Log to error_log ────────────────────────────────────────────
     await supabase.from('error_log').insert([{
-      level:   'info',
-      service: 'generate-queue',
-      message: `Generated ${rows.length} items for queue, date: ${todayStr}`,
+      level: 'info', service: 'generate-queue',
+      message: `Queue updated — repacked ${updates.length}, added ${inserts.length} (sent today ${sentToday ?? 0}/${dailyTarget})`,
     }]);
 
-    // ── Step 8: Return summary ──────────────────────────────────────────────
     return new Response(JSON.stringify({
-      generated:      rows.length,
-      date:           todayStr,
-      eligible_leads: leads.length,
-      target,
-      is_weekend:     isWeekend,
-      excluded_leads: excludedIds.length,
+      generated:  inserts.length,
+      repacked:   updates.length,
+      sent_today: sentToday ?? 0,
+      target:     dailyTarget,
+      is_weekend: isWeekend,
+      date:       todayStr,
     }), { headers: { ...cors, 'Content-Type': 'application/json' } });
 
   } catch (e: any) {
-    console.error('generate-queue error:', e);
-    return new Response(JSON.stringify({ success: false, error: e.message }), {
-      status: 500,
-      headers: { ...cors, 'Content-Type': 'application/json' },
-    });
+    await supabase.from('error_log').insert([{
+      level: 'critical', service: 'generate-queue', message: e.message,
+    }]);
+    return new Response(JSON.stringify({ success: false, error: e.message }),
+      { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 });

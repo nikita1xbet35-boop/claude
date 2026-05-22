@@ -6069,11 +6069,11 @@ async function loadAutomatServices() {
     const { data: services, error } = await sb.from('api_usage').select('*').order('service');
     if (error) throw error;
 
-    // Update master toggle button based on any service paused state
-    const anyPaused = (services || []).some(s => s.paused);
+    // Master toggle reflects the system_paused flag (master pause),
+    // independent of per-service limit pauses.
     const pauseBtn  = document.getElementById('automat-pause-btn');
     if (pauseBtn) {
-      const systemPaused = (services || []).find(s => s.service === 'system')?.paused || anyPaused;
+      const systemPaused = (services || []).some(s => s.system_paused);
       if (systemPaused) {
         pauseBtn.textContent = '⏸ Пауза';
         pauseBtn.style.background    = 'var(--amber-bg)';
@@ -6311,13 +6311,11 @@ async function toggleSystemPause() {
   if (btn) { btn.disabled = true; btn.style.opacity = '.5'; }
 
   try {
-    // Check current system_paused flag via api_usage (use a sentinel row or first row)
-    const { data: sysRow } = await sb.from('api_usage').select('paused').eq('service', 'serpapi').single();
-    const currentlyPaused = sysRow?.paused || false;
-    const newPaused = !currentlyPaused;
+    // Read the master pause flag (system_paused), toggle it on every row
+    const { data: sysRow } = await sb.from('api_usage').select('system_paused').eq('service', 'gmail_main').single();
+    const newPaused = !(sysRow?.system_paused || false);
 
-    // Toggle all services
-    const { error } = await sb.from('api_usage').update({ paused: newPaused }).neq('service', '___never___');
+    const { error } = await sb.from('api_usage').update({ system_paused: newPaused }).neq('service', '___never___');
     if (error) throw error;
 
     // Reload services to reflect new state
@@ -6354,15 +6352,15 @@ async function runGenerateQueue() {
     });
     const data = await res.json();
     if (data.skipped) {
-      btn.textContent = '✓ Уже есть (' + (data.date || '') + ')';
-      btn.style.color = 'var(--text2)';
-    } else if (data.generated > 0) {
-      btn.textContent = '✅ Создано ' + data.generated + ' писем';
+      btn.textContent = '— ' + (data.reason || 'пропущено');
+      btn.style.color = 'var(--text3)';
+    } else if (data.generated > 0 || data.repacked > 0) {
+      btn.textContent = '✅ +' + (data.generated || 0) + ' новых, очередь ' + ((data.generated || 0) + (data.repacked || 0));
       btn.style.color = 'var(--green)';
       btn.style.borderColor = 'var(--green)';
       await loadAutomatToday();
     } else {
-      btn.textContent = '⚠ Нет лидов для очереди';
+      btn.textContent = '⚠ Нет лидов с контактами';
       btn.style.color = 'var(--amber)';
     }
   } catch (e) {
