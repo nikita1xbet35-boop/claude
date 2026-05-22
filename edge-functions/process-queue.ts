@@ -234,16 +234,38 @@ Deno.serve(async (req: Request) => {
       // ── 5c. Build subject ───────────────────────────────────────────────────
       const subject = buildSubject(item.id, lead.name, item.brand);
 
-      // ── 5d. Call send-gmail ─────────────────────────────────────────────────
+      // ── 5d. Generate email body ─────────────────────────────────────────────
+      let body = '';
+      try {
+        const msgResult = await callFunction('generate-message', {
+          lead_id: item.lead_id,
+          brand: item.brand,
+          account,
+        });
+        if (msgResult.ok) {
+          const msgData = msgResult.data as Record<string, unknown>;
+          body = (msgData?.message || msgData?.body || '') as string;
+        }
+      } catch (_) {}
+
+      // Fallback template if generate-message failed
+      if (!body) {
+        const brandDisplay = item.brand === '1xcasino' ? '1xCasino' : '1xBet';
+        const managerName  = account === 'lp' ? 'Andreas' : 'Nick';
+        body = `Hi ${lead.name || 'there'},\n\nI came across ${lead.url} and would love to discuss a partnership opportunity with ${brandDisplay}.\n\nWe offer competitive commissions and dedicated support.\n\nWould you be open to a quick chat?\n\nBest regards,\n${managerName}`;
+      }
+
+      // ── 5e. Call send-email ─────────────────────────────────────────────────
       let sendResult: { ok: boolean; data: unknown };
       try {
-        sendResult = await callFunction('send-gmail', {
-          lead_id: item.lead_id,
-          account:  account === 'lp' ? 'lp' : 'main',
+        sendResult = await callFunction('send-email', {
+          to:      lead.contact_email,
           subject,
+          body,
+          account,
         });
       } catch (fetchErr: any) {
-        const errMsg = `Network error calling send-gmail: ${fetchErr.message}`;
+        const errMsg = `Network error calling send-email: ${fetchErr.message}`;
         await logError('error', 'process-queue', errMsg, item.lead_id);
         await markFailed(item, errMsg);
         stats.failed++;
@@ -306,7 +328,7 @@ Deno.serve(async (req: Request) => {
         const responseData = sendResult.data as Record<string, unknown> | null;
         const errMsg = (responseData?.error as string) ?? 'send-gmail returned non-OK response';
 
-        await logError('error', 'process-queue', `send-gmail failed for queue item ${item.id}: ${errMsg}`, item.lead_id);
+        await logError('error', 'process-queue', `send-email failed for queue item ${item.id}: ${errMsg}`, item.lead_id);
         const wasPersistent = await markFailed(item, errMsg);
 
         if (wasPersistent) {
