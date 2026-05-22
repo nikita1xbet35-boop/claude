@@ -1,17 +1,11 @@
-/**
- * AffiliateOS — Cloudflare Worker
- *
- * fetch()     → serves the static index.html (via Cloudflare Assets)
- * scheduled() → fires Supabase Edge Functions on cron schedule:
- *               "*/5 * * * *"   every 5 min   → process-queue (send pending emails)
- *               "*/30 * * * *"  every 30 min  → check-limits
- *               "0 5 * * *"     05:00 UTC      → generate-queue (08:00 GMT+3, before workday)
- *               "0 6 * * *"     06:00 UTC      → check-limits + daily-report (09:00 GMT+3)
- *
- * Required Worker env vars (set in Cloudflare dashboard or wrangler secret):
- *   SUPABASE_URL      – your project URL, e.g. https://xxxx.supabase.co
- *   SUPABASE_ANON_KEY – anon/public key
- */
+// AffiliateOS — Cloudflare Worker
+// fetch()     → serves static index.html via Cloudflare Assets
+// scheduled() → fires Supabase Edge Functions on cron schedule:
+//   every 5 min   → process-queue
+//   every 30 min  → check-limits
+//   05:00 UTC     → generate-queue (08:00 GMT+3)
+//   06:00 UTC     → daily-report (09:00 GMT+3)
+// Env vars needed: SUPABASE_URL, SUPABASE_ANON_KEY
 
 export default {
   // ── HTTP handler ─────────────────────────────────────────────────────────────
