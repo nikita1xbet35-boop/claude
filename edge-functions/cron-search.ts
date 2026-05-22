@@ -54,7 +54,7 @@ Deno.serve(async (req: Request) => {
     const headers = {
       'Content-Type': 'application/json',
       'apikey': SUPABASE_ANON,
-      'Authorization': `Bearer ${SUPABASE_ANON}`,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
     };
 
     let totalSaved = 0;
