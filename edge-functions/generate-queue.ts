@@ -38,24 +38,6 @@ const WINDOWS = [
 const TOTAL_WEIGHT = WINDOWS.reduce((s, w) => s + w.weight, 0); // 100
 
 /**
- * Returns a random integer in [min, max] exclusive of multiples of 5
- * to avoid round-number minutes.
- */
-function randomMinuteNotRound(min: number, max: number): number {
-  const range = max - min;
-  // Build candidate pool: minutes in range that are NOT multiples of 5
-  const candidates: number[] = [];
-  for (let m = min; m <= max; m++) {
-    if (m % 5 !== 0) candidates.push(m);
-  }
-  if (candidates.length === 0) {
-    // Fallback: pick anything but at least avoid :00
-    return min + 1 + Math.floor(Math.random() * (range - 1));
-  }
-  return candidates[Math.floor(Math.random() * candidates.length)];
-}
-
-/**
  * Generate N timestamps within [startHour, endHour) on the given date (GMT+3).
  * Applies ±2-3 min jitter around evenly spaced slots.
  */
@@ -134,7 +116,8 @@ Deno.serve(async (req: Request) => {
     const todayStr = nowGMT3.toISOString().slice(0, 10); // YYYY-MM-DD
 
     // ── Step 1: Check if queue already generated for today ──────────────────
-    const { data: existing, error: existingError } = await supabase
+    // FIX: with head:true, data=null and count is a separate field — must destructure count directly
+    const { count: existingCount, error: existingError } = await supabase
       .from('send_queue')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending')
@@ -143,7 +126,7 @@ Deno.serve(async (req: Request) => {
 
     if (existingError) throw existingError;
 
-    if ((existing as any)?.length > 0 || (existing as any)?.count > 0) {
+    if ((existingCount ?? 0) > 0) {
       return new Response(JSON.stringify({
         generated: 0,
         date:       todayStr,
@@ -157,24 +140,46 @@ Deno.serve(async (req: Request) => {
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const target    = isWeekend ? 30 : 100;
 
-    // ── Step 3: Get eligible leads ──────────────────────────────────────────
-    const { data: eligibleLeads, error: leadsError } = await supabase
+    // ── Step 3: Collect excluded lead IDs ──────────────────────────────────
+    // FIX: PostgREST does not support SQL subqueries in URL params.
+    // Fetch excluded IDs as separate queries, then pass integer arrays.
+
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [recentlySentRes, alreadyQueuedRes] = await Promise.all([
+      supabase
+        .from('email_log')
+        .select('lead_id')
+        .gt('sent_at', thirtyDaysAgo),
+      supabase
+        .from('send_queue')
+        .select('lead_id')
+        .gte('scheduled_at', todayMidnightUTC.toISOString())
+        .lt('scheduled_at',  tomorrowMidnightUTC.toISOString()),
+    ]);
+
+    if (recentlySentRes.error) throw recentlySentRes.error;
+    if (alreadyQueuedRes.error) throw alreadyQueuedRes.error;
+
+    const excludedIds: number[] = [
+      ...(recentlySentRes.data  || []).map((r: any) => r.lead_id),
+      ...(alreadyQueuedRes.data || []).map((r: any) => r.lead_id),
+    ].filter(Boolean);
+
+    // ── Step 4: Get eligible leads ──────────────────────────────────────────
+    let leadsQuery = supabase
       .from('leads')
       .select('id, brand, contact_email')
       .eq('stage', 'new')
       .not('contact_email', 'is', null)
       .neq('contact_email', '')
-      .not('id', 'in', `(
-        SELECT lead_id FROM email_log
-        WHERE sent_at > NOW() - INTERVAL '30 days'
-      )`)
-      .not('id', 'in', `(
-        SELECT lead_id FROM send_queue
-        WHERE scheduled_at >= '${todayMidnightUTC.toISOString()}'
-          AND scheduled_at <  '${tomorrowMidnightUTC.toISOString()}'
-      )`)
       .limit(target);
 
+    if (excludedIds.length > 0) {
+      leadsQuery = leadsQuery.not('id', 'in', `(${excludedIds.join(',')})`);
+    }
+
+    const { data: eligibleLeads, error: leadsError } = await leadsQuery;
     if (leadsError) throw leadsError;
 
     const leads = eligibleLeads || [];
@@ -194,7 +199,7 @@ Deno.serve(async (req: Request) => {
       }), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // ── Step 4: Distribute across time windows ──────────────────────────────
+    // ── Step 5: Distribute across time windows ──────────────────────────────
     // Compute per-window email counts (proportional to weight)
     const windowCounts = WINDOWS.map(w => ({
       ...w,
@@ -203,8 +208,7 @@ Deno.serve(async (req: Request) => {
 
     // Correct rounding drift so sum equals count
     const assignedSum = windowCounts.reduce((s, w) => s + w.count, 0);
-    let drift = count - assignedSum;
-    // Add drift to the largest window
+    const drift = count - assignedSum;
     if (drift !== 0) {
       const largest = windowCounts.reduce((a, b) => a.count > b.count ? a : b);
       largest.count += drift;
@@ -218,7 +222,7 @@ Deno.serve(async (req: Request) => {
     }
     allTimestamps.sort((a, b) => a.getTime() - b.getTime());
 
-    // ── Step 5: Build queue rows ────────────────────────────────────────────
+    // ── Step 6: Build queue rows ────────────────────────────────────────────
     const rows = leads.slice(0, allTimestamps.length).map((lead: any, i: number) => ({
       lead_id:       lead.id,
       brand:         lead.brand,
@@ -230,20 +234,21 @@ Deno.serve(async (req: Request) => {
     const { error: insertError } = await supabase.from('send_queue').insert(rows);
     if (insertError) throw insertError;
 
-    // ── Step 6: Log to error_log ────────────────────────────────────────────
+    // ── Step 7: Log to error_log ────────────────────────────────────────────
     await supabase.from('error_log').insert([{
       level:   'info',
       service: 'generate-queue',
       message: `Generated ${rows.length} items for queue, date: ${todayStr}`,
     }]);
 
-    // ── Step 7: Return summary ──────────────────────────────────────────────
+    // ── Step 8: Return summary ──────────────────────────────────────────────
     return new Response(JSON.stringify({
       generated:      rows.length,
       date:           todayStr,
       eligible_leads: leads.length,
       target,
       is_weekend:     isWeekend,
+      excluded_leads: excludedIds.length,
     }), { headers: { ...cors, 'Content-Type': 'application/json' } });
 
   } catch (e: any) {
