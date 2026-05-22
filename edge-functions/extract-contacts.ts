@@ -235,6 +235,10 @@ async function bumpUsage(service: string, delta: number) {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
+  // Reset per-run counters — module scope persists across calls in a warm isolate
+  jinaCalls = 0;
+  serpCalls = 0;
+
   const stats = { processed: 0, found: 0, not_found: 0, skipped: false };
   const startedAt = Date.now();
 
