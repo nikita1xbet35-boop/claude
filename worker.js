@@ -17,7 +17,7 @@ export default {
   // ── Cron handler ─────────────────────────────────────────────────────────────
   async scheduled(event, env, ctx) {
     const SUPABASE_URL = env.SUPABASE_URL || 'https://lxsyrserfuighwxuymgb.supabase.co';
-    const SUPABASE_KEY = env.SUPABASE_ANON_KEY || '';
+    const SUPABASE_KEY = env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
     const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
     const headers = {
