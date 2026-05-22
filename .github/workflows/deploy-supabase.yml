@@ -34,13 +34,11 @@ jobs:
           mkdir -p supabase/functions/extract-contacts
           mkdir -p supabase/functions/generate-queue
           mkdir -p supabase/functions/process-queue
-          mkdir -p supabase/functions/cron-search
           mkdir -p supabase/functions/find-and-queue
           mkdir -p supabase/functions/send-email
           cp edge-functions/extract-contacts.ts supabase/functions/extract-contacts/index.ts
           cp edge-functions/generate-queue.ts   supabase/functions/generate-queue/index.ts
           cp edge-functions/process-queue.ts    supabase/functions/process-queue/index.ts
-          cp edge-functions/cron-search.ts      supabase/functions/cron-search/index.ts
           cp edge-functions/find-and-queue.ts   supabase/functions/find-and-queue/index.ts
           cp edge-functions/send-email.ts       supabase/functions/send-email/index.ts
 
@@ -58,11 +56,6 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase functions deploy process-queue --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
-
-      - name: Deploy cron-search
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase functions deploy cron-search --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
       - name: Deploy find-and-queue
         env:

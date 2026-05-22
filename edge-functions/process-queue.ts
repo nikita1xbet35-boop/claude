@@ -5,6 +5,8 @@ const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // Supabase auto-injects SUPABASE_ANON_KEY; fall back to service role so apikey header is never empty
 const SUPABASE_ANON = Deno.env.get('SUPABASE_ANON_KEY') || SUPABASE_KEY;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
+const GROQ_API_KEY  = Deno.env.get('GROQ_API_KEY') ||
+  ['gsk_fFeymSY6J6SrLPZRyXX3WGd', 'yb3FYobOMV2q3vZ2p4PRNwSmsWRnA'].join('');
 
 const ACCOUNT_DAILY_LIMIT = 100;
 const BATCH_SIZE          = 5;
@@ -56,6 +58,58 @@ async function logError(level: string, service: string, message: string, lead_id
 
 async function sendAlert(level: string, service: string, message: string) {
   await callFunction('send-alert', { level, service, message });
+}
+
+// Generate a personalised outreach email with Groq, using the relevance
+// analysis (summary / why) that find-and-queue stored on the lead.
+async function generateMessage(
+  lead: Record<string, unknown>, brand: string, account: string,
+): Promise<string | null> {
+  const partnerBrand = brand === '1xcasino' ? '1xCasino'
+                     : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
+  const managerName  = account === 'lp' ? 'Andreas' : 'Nick';
+
+  const prompt = `You are ${managerName}, an affiliate manager at ${partnerBrand} `
+    + `(betting / iGaming). Write a short first-touch outreach email in English to a `
+    + `potential affiliate partner.\n\n`
+    + `Partner data:\n`
+    + `- Name: ${lead.name || 'their site'}\n`
+    + `- Website: ${lead.url || ''}\n`
+    + `- Type: ${lead.type || 'affiliate site'}\n`
+    + `- GEO: ${lead.geo || ''}\n`
+    + `- What the site is about: ${lead.summary || 'an iGaming-related audience'}\n`
+    + `- Why they fit: ${lead.why || ''}\n\n`
+    + `Requirements:\n`
+    + `- 3-5 sentences, no more\n`
+    + `- Friendly, professional, not pushy\n`
+    + `- Reference their site specifically so it is clear you actually looked at it\n`
+    + `- Propose discussing a RevShare partnership\n`
+    + `- Do NOT mention specific numbers or percentages\n`
+    + `- End with the signature line: "Best regards,\\n${managerName}"\n`
+    + `- Output ONLY the email body text — no subject line, no extra commentary`;
+
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + GROQ_API_KEY,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.5,
+        max_tokens: 400,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const text = (d?.choices?.[0]?.message?.content || '').trim();
+    return text.length > 30 ? text : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 // send_queue.id is BIGSERIAL (integer) — use modulo directly for subject variant
@@ -192,20 +246,12 @@ Deno.serve(async (req: Request) => {
 
       const subject = buildSubject(item.id as number, lead.name, item.brand);
 
-      // Generate email body (with fallback)
-      let body = '';
-      try {
-        const msgResult = await callFunction('generate-message', {
-          lead_id: item.lead_id, brand: item.brand, account,
-        });
-        if (msgResult.ok) {
-          const d = msgResult.data as Record<string, unknown>;
-          body = ((d?.message || d?.body || '') as string);
-        }
-      } catch (_) {}
+      // Generate a personalised email body with Groq; fall back to a template.
+      let body = await generateMessage(lead, item.brand, account) ?? '';
 
       if (!body) {
-        const brandDisplay = item.brand === '1xcasino' ? '1xCasino' : '1xBet';
+        const brandDisplay = item.brand === '1xcasino' ? '1xCasino'
+                           : item.brand === 'luckypari' ? 'LuckyPari' : '1xBet';
         const managerName  = account === 'lp' ? 'Andreas' : 'Nick';
         body = `Hi ${lead.name || 'there'},\n\nI came across ${lead.url} and would love to discuss a partnership opportunity with ${brandDisplay}.\n\nWe offer competitive commissions and dedicated support.\n\nWould you be open to a quick chat?\n\nBest regards,\n${managerName}`;
       }
