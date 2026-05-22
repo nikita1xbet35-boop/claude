@@ -2113,10 +2113,22 @@
     <!-- Page heading -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
       <div style="font-family:var(--font-head);font-size:18px;font-weight:600;color:var(--text);">⚡ Автомат</div>
-      <button id="automat-pause-btn" onclick="toggleSystemPause()"
-        style="padding:8px 20px;background:var(--green-bg);border:1px solid var(--green);color:var(--green);font-size:12px;font-family:var(--font-mono);font-weight:600;border-radius:8px;cursor:pointer;transition:all .2s;min-width:180px;">
-        🟢 Система работает
-      </button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button id="automat-genqueue-btn" onclick="runGenerateQueue()"
+          style="padding:8px 16px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);font-size:12px;font-family:var(--font-mono);font-weight:500;border-radius:8px;cursor:pointer;transition:all .2s;"
+          title="Сгенерировать очередь на сегодня (запускается автоматически в 08:00)">
+          ▶ Очередь на день
+        </button>
+        <button id="automat-process-btn" onclick="runProcessQueue()"
+          style="padding:8px 16px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);font-size:12px;font-family:var(--font-mono);font-weight:500;border-radius:8px;cursor:pointer;transition:all .2s;"
+          title="Запустить отправку прямо сейчас (обычно работает автоматически каждые 5 минут)">
+          ⚡ Отправить сейчас
+        </button>
+        <button id="automat-pause-btn" onclick="toggleSystemPause()"
+          style="padding:8px 20px;background:var(--green-bg);border:1px solid var(--green);color:var(--green);font-size:12px;font-family:var(--font-mono);font-weight:600;border-radius:8px;cursor:pointer;transition:all .2s;min-width:180px;">
+          🟢 Система работает
+        </button>
+      </div>
     </div>
 
     <!-- ── Section 1: Service Status ───────────────────────────────────────── -->
@@ -6326,6 +6338,85 @@ async function resumeService(service) {
   } catch (e) {
     console.error('resumeService error:', e);
   }
+}
+
+async function runGenerateQueue() {
+  const btn = document.getElementById('automat-genqueue-btn');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Генерирую...';
+  btn.style.color = 'var(--text3)';
+  try {
+    const res = await fetch(FUNCTIONS_URL + '/generate-queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (data.skipped) {
+      btn.textContent = '✓ Уже есть (' + (data.date || '') + ')';
+      btn.style.color = 'var(--text2)';
+    } else if (data.generated > 0) {
+      btn.textContent = '✅ Создано ' + data.generated + ' писем';
+      btn.style.color = 'var(--green)';
+      btn.style.borderColor = 'var(--green)';
+      await loadAutomatToday();
+    } else {
+      btn.textContent = '⚠ Нет лидов для очереди';
+      btn.style.color = 'var(--amber)';
+    }
+  } catch (e) {
+    btn.textContent = '✗ Ошибка';
+    btn.style.color = 'var(--red)';
+    console.error('generate-queue error:', e);
+  }
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = '▶ Очередь на день';
+    btn.style.color = 'var(--text2)';
+    btn.style.borderColor = 'var(--border2)';
+  }, 4000);
+}
+
+async function runProcessQueue() {
+  const btn = document.getElementById('automat-process-btn');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Отправляю...';
+  btn.style.color = 'var(--text3)';
+  try {
+    const res = await fetch(FUNCTIONS_URL + '/process-queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (data.reason) {
+      btn.textContent = '— ' + data.reason;
+      btn.style.color = 'var(--text3)';
+    } else if (data.sent > 0) {
+      btn.textContent = '✅ Отправлено: ' + data.sent;
+      btn.style.color = 'var(--green)';
+      btn.style.borderColor = 'var(--green)';
+      await loadAutomatToday();
+    } else if (data.failed > 0) {
+      btn.textContent = '✗ Ошибок: ' + data.failed;
+      btn.style.color = 'var(--red)';
+    } else {
+      btn.textContent = '— Нет писем к отправке';
+      btn.style.color = 'var(--text3)';
+    }
+  } catch (e) {
+    btn.textContent = '✗ Ошибка';
+    btn.style.color = 'var(--red)';
+    console.error('process-queue error:', e);
+  }
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = '⚡ Отправить сейчас';
+    btn.style.color = 'var(--text2)';
+    btn.style.borderColor = 'var(--border2)';
+  }, 4000);
 }
 
 // ══════════════════════════════════════════
