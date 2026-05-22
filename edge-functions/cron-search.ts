@@ -11,8 +11,11 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
+const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+// Supabase auto-injects SUPABASE_ANON_KEY; use it as the gateway apikey
+// so function-to-function calls pass JWT verification on the callee side.
+const SUPABASE_ANON = Deno.env.get('SUPABASE_ANON_KEY') || SUPABASE_KEY;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
 const cors = {
@@ -50,8 +53,8 @@ Deno.serve(async (req: Request) => {
 
     const headers = {
       'Content-Type': 'application/json',
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'apikey': SUPABASE_ANON,
+      'Authorization': `Bearer ${SUPABASE_ANON}`,
     };
 
     let totalSaved = 0;

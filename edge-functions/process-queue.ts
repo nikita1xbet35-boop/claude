@@ -2,7 +2,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const SUPABASE_ANON = Deno.env.get('SUPABASE_ANON_KEY') || '';
+// Supabase auto-injects SUPABASE_ANON_KEY; fall back to service role so apikey header is never empty
+const SUPABASE_ANON = Deno.env.get('SUPABASE_ANON_KEY') || SUPABASE_KEY;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
 const ACCOUNT_DAILY_LIMIT = 100;
@@ -253,9 +254,10 @@ Deno.serve(async (req: Request) => {
         accountQuotaCache[account]++;
         stats.sent++;
       } else {
-        const d   = sendResult.data as Record<string, unknown> | null;
-        const msg = (d?.error as string) ?? 'send-email returned non-OK';
-        await logError('error', 'process-queue', `send-email failed for item ${item.id}: ${msg}`, item.lead_id);
+        const d      = sendResult.data as Record<string, unknown> | null;
+        const detail = d ? JSON.stringify(d).slice(0, 300) : 'empty response';
+        const msg    = (d?.error as string) ?? (d?.message as string) ?? `send-email non-OK: ${detail}`;
+        await logError('error', 'process-queue', `send-email failed item ${item.id} to=${lead.contact_email}: ${msg}`, item.lead_id);
         const permanent = await markFailed(item, msg);
         if (permanent) {
           await sendAlert('warning', 'process-queue',

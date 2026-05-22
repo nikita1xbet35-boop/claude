@@ -255,7 +255,7 @@ Deno.serve(async (req: Request) => {
     // Pick leads that have never had contact extraction run
     const { data: leads, error } = await supabase
       .from('leads')
-      .select('id, url, website, name')
+      .select('id, url, name')
       .eq('stage', 'new')
       .is('contact_email', null)
       .is('contact_email_type', null)
@@ -271,7 +271,7 @@ Deno.serve(async (req: Request) => {
     for (const lead of leads) {
       if (Date.now() - startedAt > TIME_BUDGET_MS) break;
 
-      const url = lead.url || lead.website;
+      const url = lead.url;
       if (!url) {
         await supabase.from('leads')
           .update({ contact_email_type: 'not_found' }).eq('id', lead.id);

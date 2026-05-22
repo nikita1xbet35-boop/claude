@@ -6099,7 +6099,7 @@ const SERVICE_DISPLAY_AUTOMAT = {
 };
 
 async function loadAutomatTab() {
-  await Promise.all([
+  await Promise.allSettled([
     loadAutomatServices(),
     loadAutomatToday(),
     loadAutomatTrend(),
@@ -6474,8 +6474,10 @@ const KW_BRAND_COLORS = { '1xbet': '#7B61FF', '1xcasino': '#10b981', 'luckypari'
 const KW_BRAND_LABELS = { '1xbet': '1xBet', '1xcasino': '1xCasino', 'luckypari': 'LuckyPari' };
 
 async function loadAutomatKeywords() {
-  const { data } = await sb.from('search_presets').select('*').eq('is_default', false).order('created_at');
-  kwCustomPresets = data || [];
+  try {
+    const { data } = await sb.from('search_presets').select('*').eq('is_default', false).order('created_at');
+    kwCustomPresets = data || [];
+  } catch (_) { kwCustomPresets = []; }
   renderKwContent();
 }
 
