@@ -57,8 +57,10 @@ export default {
     }
 
     if (cron === '*/15 * * * *') {
-      // Autonomous lead search (rotates GEOs) + rolling queue top-up
-      await call('cron-search', {});
+      // find-and-queue: full pipeline (SerpAPI → contact → lead insert)
+      // cron-search:    calls auto-search as secondary breadth source
+      // Both run in parallel; generate-queue runs after to schedule new leads
+      await Promise.all([call('find-and-queue', {}), call('cron-search', {})]);
       await call('generate-queue', {});
       return;
     }

@@ -2200,6 +2200,54 @@
       </div>
     </div>
 
+    <!-- ── Section 5: Keyword Presets ────────────────────────────────────── -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);font-family:var(--font-mono);letter-spacing:.5px;text-transform:uppercase;">Ключи автопоиска</div>
+        <button id="kw-run-btn" onclick="runFindAndQueue()"
+          style="padding:5px 14px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);font-size:11px;font-family:var(--font-mono);border-radius:6px;cursor:pointer;transition:all .15s;"
+          onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text2)'">
+          ▶ Запустить поиск
+        </button>
+      </div>
+      <!-- Brand tabs -->
+      <div style="display:flex;gap:6px;margin-bottom:16px;" id="kw-brand-tabs">
+        <button class="kw-tab" data-brand="1xbet" onclick="switchKwBrand('1xbet')"
+          style="padding:5px 14px;border-radius:20px;font-size:11px;font-family:var(--font-mono);border:1px solid #7B61FF40;background:#7B61FF18;color:#7B61FF;cursor:pointer;transition:all .15s;">1xBet</button>
+        <button class="kw-tab" data-brand="1xcasino" onclick="switchKwBrand('1xcasino')"
+          style="padding:5px 14px;border-radius:20px;font-size:11px;font-family:var(--font-mono);border:1px solid var(--border2);background:var(--bg3);color:var(--text3);cursor:pointer;transition:all .15s;">1xCasino</button>
+        <button class="kw-tab" data-brand="luckypari" onclick="switchKwBrand('luckypari')"
+          style="padding:5px 14px;border-radius:20px;font-size:11px;font-family:var(--font-mono);border:1px solid var(--border2);background:var(--bg3);color:var(--text3);cursor:pointer;transition:all .15s;">LuckyPari</button>
+      </div>
+      <!-- Presets list -->
+      <div id="kw-content" style="margin-bottom:16px;">
+        <div style="color:var(--text3);font-size:12px;font-family:var(--font-mono);">Загрузка...</div>
+      </div>
+      <!-- Add new preset -->
+      <div style="padding-top:16px;border-top:1px solid var(--border);">
+        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.4px;text-transform:uppercase;margin-bottom:10px;">Новый пресет</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <input id="kw-new-name" placeholder="Название пресета"
+            style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:8px 10px;border-radius:7px;outline:none;">
+          <input id="kw-new-geo" placeholder="GEO (напр. NG, BD, TR)"
+            style="background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:8px 10px;border-radius:7px;outline:none;">
+        </div>
+        <textarea id="kw-new-keys" rows="4"
+          placeholder="Ключевые слова — каждый с новой строки:&#10;best betting sites Nigeria&#10;football prediction Nigeria&#10;sports tipster Nigeria"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:8px 10px;border-radius:7px;outline:none;resize:vertical;margin-bottom:10px;box-sizing:border-box;"></textarea>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">
+            Бренд: <span id="kw-new-brand-label" style="color:var(--accent2);">1xBet</span>
+          </div>
+          <button onclick="addKwPreset()"
+            style="padding:8px 20px;background:var(--accent);color:#fff;border:none;font-size:12px;font-family:var(--font-mono);font-weight:600;border-radius:8px;cursor:pointer;transition:background .15s;"
+            onmouseover="this.style.background='var(--accent2)'" onmouseout="this.style.background='var(--accent)'">
+            Добавить
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -6051,12 +6099,12 @@ const SERVICE_DISPLAY_AUTOMAT = {
 };
 
 async function loadAutomatTab() {
-  // Run all sections in parallel
   await Promise.all([
     loadAutomatServices(),
     loadAutomatToday(),
     loadAutomatTrend(),
     loadAutomatErrorLog(),
+    loadAutomatKeywords(),
   ]);
 }
 
@@ -6415,6 +6463,157 @@ async function runProcessQueue() {
     btn.style.color = 'var(--text2)';
     btn.style.borderColor = 'var(--border2)';
   }, 4000);
+}
+
+// ── Section 5: Keyword Presets ───────────────────────────────────────────
+
+let kwActiveBrand = '1xbet';
+let kwCustomPresets = [];
+
+const KW_BRAND_COLORS = { '1xbet': '#7B61FF', '1xcasino': '#10b981', 'luckypari': '#f97316' };
+const KW_BRAND_LABELS = { '1xbet': '1xBet', '1xcasino': '1xCasino', 'luckypari': 'LuckyPari' };
+
+async function loadAutomatKeywords() {
+  const { data } = await sb.from('search_presets').select('*').eq('is_default', false).order('created_at');
+  kwCustomPresets = data || [];
+  renderKwContent();
+}
+
+function switchKwBrand(brand) {
+  kwActiveBrand = brand;
+  document.querySelectorAll('.kw-tab').forEach(btn => {
+    const b = btn.dataset.brand;
+    const c = KW_BRAND_COLORS[b] || 'var(--accent)';
+    if (b === brand) {
+      btn.style.cssText = `padding:5px 14px;border-radius:20px;font-size:11px;font-family:var(--font-mono);border:1px solid ${c}40;background:${c}18;color:${c};cursor:pointer;transition:all .15s;`;
+    } else {
+      btn.style.cssText = 'padding:5px 14px;border-radius:20px;font-size:11px;font-family:var(--font-mono);border:1px solid var(--border2);background:var(--bg3);color:var(--text3);cursor:pointer;transition:all .15s;';
+    }
+  });
+  const lbl = document.getElementById('kw-new-brand-label');
+  if (lbl) lbl.textContent = KW_BRAND_LABELS[brand] || brand;
+  renderKwContent();
+}
+
+function renderKwContent() {
+  const el = document.getElementById('kw-content');
+  if (!el) return;
+
+  const defaults = (BRAND_PRESETS[kwActiveBrand] || []);
+  const custom   = kwCustomPresets.filter(p => !p.brand || p.brand === kwActiveBrand);
+  let html = '';
+
+  if (defaults.length > 0) {
+    html += `<div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.4px;text-transform:uppercase;margin-bottom:8px;">Дефолтные</div>`;
+    html += `<div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px;">`;
+    for (const p of defaults) {
+      const preview = p.keywords.slice(0, 2).join(' · ') + (p.keywords.length > 2 ? ` +${p.keywords.length - 2}` : '');
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;color:var(--text);font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.name}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${preview}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <span style="padding:2px 7px;border-radius:4px;background:var(--bg4);font-size:10px;color:var(--text3);font-family:var(--font-mono);">${p.keywords.length} ключей</span>
+          <span style="padding:2px 7px;border-radius:4px;background:var(--bg4);font-size:10px;color:var(--text3);font-family:var(--font-mono);">${p.geo}</span>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (custom.length > 0) {
+    html += `<div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.4px;text-transform:uppercase;margin-bottom:8px;">Пользовательские</div>`;
+    html += `<div style="display:flex;flex-direction:column;gap:5px;">`;
+    for (const p of custom) {
+      const kws = Array.isArray(p.keywords) ? p.keywords : [];
+      const preview = kws.slice(0, 2).join(' · ') + (kws.length > 2 ? ` +${kws.length - 2}` : '');
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg3);border:1px solid var(--accent)25;border-radius:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;color:var(--text);font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.name}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${preview}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;align-items:center;">
+          <span style="padding:2px 7px;border-radius:4px;background:var(--bg4);font-size:10px;color:var(--text3);font-family:var(--font-mono);">${kws.length} ключей</span>
+          ${p.geo ? `<span style="padding:2px 7px;border-radius:4px;background:var(--bg4);font-size:10px;color:var(--text3);font-family:var(--font-mono);">${p.geo}</span>` : ''}
+          <button onclick="deleteKwPreset(${p.id})" title="Удалить"
+            style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:15px;padding:0 2px;line-height:1;transition:color .15s;"
+            onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text3)'">×</button>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (defaults.length === 0 && custom.length === 0) {
+    html = `<div style="color:var(--text3);font-size:12px;font-family:var(--font-mono);padding:8px 0;">Нет пресетов для этого бренда</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+async function addKwPreset() {
+  const name = (document.getElementById('kw-new-name').value || '').trim();
+  const geo  = (document.getElementById('kw-new-geo').value  || '').trim();
+  const raw  = (document.getElementById('kw-new-keys').value || '').trim();
+  if (!name || !raw) { showError('Введи название и ключевые слова'); return; }
+  const keywords = raw.split('\n').map(k => k.trim()).filter(k => k.length > 0);
+  if (keywords.length === 0) { showError('Добавь хотя бы один ключ'); return; }
+
+  // Try inserting with brand column first, fall back without it
+  let inserted = null;
+  const { data: d1, error: e1 } = await sb.from('search_presets')
+    .insert([{ name, keywords, geo, brand: kwActiveBrand, is_default: false }]).select().single();
+  if (!e1) {
+    inserted = d1;
+  } else {
+    const { data: d2, error: e2 } = await sb.from('search_presets')
+      .insert([{ name, keywords, geo, is_default: false }]).select().single();
+    if (e2) { showError('Ошибка: ' + e2.message); return; }
+    inserted = d2 ? { ...d2, brand: kwActiveBrand } : null;
+  }
+
+  if (inserted) kwCustomPresets.push(inserted);
+  document.getElementById('kw-new-name').value = '';
+  document.getElementById('kw-new-keys').value = '';
+  document.getElementById('kw-new-geo').value  = '';
+  renderKwContent();
+}
+
+async function deleteKwPreset(id) {
+  const { error } = await sb.from('search_presets').delete().eq('id', id);
+  if (!error) {
+    kwCustomPresets = kwCustomPresets.filter(p => p.id !== id);
+    renderKwContent();
+  }
+}
+
+async function runFindAndQueue() {
+  const btn = document.getElementById('kw-run-btn');
+  if (!btn || btn.disabled) return;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Поиск...';
+  try {
+    const res = await fetch(FUNCTIONS_URL + '/find-and-queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
+      body: JSON.stringify({}),
+    });
+    const d = await res.json();
+    if (d.skipped) {
+      btn.textContent = '— ' + (d.reason || 'пропущено');
+    } else {
+      btn.textContent = `✅ Сохранено: ${d.saved || 0}, с контактом: ${d.contacts || 0}`;
+      btn.style.color = 'var(--green)';
+      setTimeout(() => loadAutomatToday(), 1500);
+    }
+  } catch (e) {
+    btn.textContent = '✗ Ошибка сети';
+    btn.style.color = 'var(--red)';
+  }
+  btn.disabled = false;
+  setTimeout(() => { btn.textContent = orig; btn.style.color = 'var(--text2)'; }, 5000);
 }
 
 // ══════════════════════════════════════════

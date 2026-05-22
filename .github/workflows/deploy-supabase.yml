@@ -17,45 +17,52 @@ jobs:
         with:
           version: latest
 
+      # Add brand column to search_presets if it doesn't exist yet
+      - name: Run DB migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"ALTER TABLE public.search_presets ADD COLUMN IF NOT EXISTS brand TEXT DEFAULT NULL;"}' \
+            && echo "Migration OK" || echo "Migration skipped (column may already exist)"
+
       - name: Prepare function directories
         run: |
           mkdir -p supabase/functions/extract-contacts
           mkdir -p supabase/functions/generate-queue
           mkdir -p supabase/functions/process-queue
           mkdir -p supabase/functions/cron-search
+          mkdir -p supabase/functions/find-and-queue
           cp edge-functions/extract-contacts.ts supabase/functions/extract-contacts/index.ts
           cp edge-functions/generate-queue.ts   supabase/functions/generate-queue/index.ts
           cp edge-functions/process-queue.ts    supabase/functions/process-queue/index.ts
           cp edge-functions/cron-search.ts      supabase/functions/cron-search/index.ts
+          cp edge-functions/find-and-queue.ts   supabase/functions/find-and-queue/index.ts
 
       - name: Deploy extract-contacts
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          supabase functions deploy extract-contacts \
-            --project-ref lxsyrserfuighwxuymgb \
-            --no-verify-jwt
+        run: supabase functions deploy extract-contacts --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
       - name: Deploy generate-queue
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          supabase functions deploy generate-queue \
-            --project-ref lxsyrserfuighwxuymgb \
-            --no-verify-jwt
+        run: supabase functions deploy generate-queue --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
       - name: Deploy process-queue
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          supabase functions deploy process-queue \
-            --project-ref lxsyrserfuighwxuymgb \
-            --no-verify-jwt
+        run: supabase functions deploy process-queue --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
       - name: Deploy cron-search
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          supabase functions deploy cron-search \
-            --project-ref lxsyrserfuighwxuymgb \
-            --no-verify-jwt
+        run: supabase functions deploy cron-search --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
+
+      - name: Deploy find-and-queue
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy find-and-queue --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
