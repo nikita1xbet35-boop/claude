@@ -192,11 +192,14 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 4. Fetch pending queue items due now
+    // 4. Fetch pending + retryable-failed queue items due now.
+    //    'failed' items (retry_count < MAX_RETRIES) are included so they get
+    //    a second chance after transient errors (e.g. wrong credentials fixed).
     const { data: queueItems, error: queueErr } = await supabase
       .from('send_queue')
       .select('*')
-      .eq('status', 'pending')
+      .in('status', ['pending', 'failed'])
+      .lt('retry_count', MAX_RETRIES)
       .lte('scheduled_at', now.toISOString())
       .order('scheduled_at', { ascending: true })
       .limit(BATCH_SIZE);
