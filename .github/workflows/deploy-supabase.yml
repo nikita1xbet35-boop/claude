@@ -73,3 +73,14 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase functions deploy admin-reset --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
+
+      - name: Auto-unpause system after deploy
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          sleep 5
+          curl -sf -X POST \
+            "https://lxsyrserfuighwxuymgb.supabase.co/functions/v1/admin-reset" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            && echo "System unpaused + queue reset OK" || echo "admin-reset call failed (non-fatal)"

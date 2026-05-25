@@ -177,27 +177,22 @@ Deno.serve(async (req: Request) => {
       { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  const isLP      = account === 'lp';
-  const gmailUser = isLP ? Deno.env.get('GMAIL_USER_LP')   : Deno.env.get('GMAIL_USER_MAIN');
-  const gmailPass = isLP ? Deno.env.get('GMAIL_PASS_LP')   : Deno.env.get('GMAIL_PASS_MAIN');
-
-  const userKey = isLP ? 'GMAIL_USER_LP'  : 'GMAIL_USER_MAIN';
-  const passKey = isLP ? 'GMAIL_PASS_LP'  : 'GMAIL_PASS_MAIN';
+  // LP account disabled — always use main credentials regardless of `account` param
+  const gmailUser = Deno.env.get('GMAIL_USER_MAIN');
+  const gmailPass = Deno.env.get('GMAIL_PASS_MAIN');
 
   if (!gmailUser || !gmailPass) {
-    return new Response(JSON.stringify({ error: `Gmail credentials not configured: ${!gmailUser ? userKey : passKey} is empty` }),
+    return new Response(JSON.stringify({ error: 'GMAIL_USER_MAIN or GMAIL_PASS_MAIN is not set in Supabase Secrets' }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  // Detect placeholder / unset values so the error is obvious in logs.
   if (gmailPass === 'default' || gmailPass.length < 8) {
     return new Response(JSON.stringify({
-      error: `${passKey} looks like a placeholder ("${gmailPass.slice(0,6)}..."). Set a real Gmail App Password in Supabase Secrets.`,
+      error: `GMAIL_PASS_MAIN looks like a placeholder ("${gmailPass.slice(0,6)}..."). Set a real Gmail App Password in Supabase Secrets.`,
     }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  // ASCII-only sender names — no em-dashes, no RFC 2047 encoding needed.
-  const senderName = isLP ? 'Andreas - LuckyPari' : 'Nick - 1xPartners';
+  const senderName = 'Nick - 1xPartners';
 
   try {
     await smtpSend({
