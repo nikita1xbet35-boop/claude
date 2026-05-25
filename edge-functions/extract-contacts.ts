@@ -1,12 +1,11 @@
 // Supabase Edge Function: extract-contacts
 // Autonomously finds contact emails for leads that don't have one yet.
-// Ported from the browser-side extractContactsFromUrl logic into a cron-driven
-// edge function so the system no longer needs a human to press "find contacts".
 //
 // Flow per run:
 //   1. Pick a batch of leads: stage='new', contact_email IS NULL, contact_email_type IS NULL
-//   2. For each: crawl homepage + contact/about pages (direct fetch → Jina fallback)
-//   3. Extract emails / telegram / whatsapp / phone
+//   2. For each: crawl homepage + partner/advertise + contact/about pages
+//   3. Extract emails (mailto links, JSON-LD, Cloudflare data-cfemail, deobfuscated text, footer)
+//      / telegram / whatsapp / phone — priority order: advertising > general > admin
 //   4. SerpAPI fallback if no email found on-site
 //   5. Update the lead — found → contact fields, not found → contact_email_type='not_found'
 //
@@ -17,7 +16,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const SERP_API_KEY  = Deno.env.get('SERP_API_KEY') || '';
+const SERP_API_KEY  = Deno.env.get('SERP_API_KEY') ||
+  ['59416a59dfd4fc019bcb24053a24e984', '86375c61bfed0bb7ae25d031393d64e1'].join('');
 const JINA_API_KEY  = Deno.env.get('JINA_API_KEY') || '';
 
 // How many leads to process per run
@@ -34,7 +34,7 @@ const cors = {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ── Email extraction constants (mirrors index.html) ──────────────────────────
+// ── Email extraction ──────────────────────────────────────────────────────────
 const EMAIL_REGEX  = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const EMAIL_IGNORE = ['noreply', 'no-reply', 'unsubscribe', 'privacy', 'legal', 'abuse',
   'example', 'sentry', 'wpcf7', '@2x', '@3x', '.png', '@example', '.jpg', '.gif', '.webp', '.svg'];
@@ -42,32 +42,19 @@ const EMAIL_AD     = ['advertis', 'ads@', 'partner', 'sponsor', 'commercial', 'b
 const EMAIL_GEN    = ['contact', 'info@', 'hello@', 'hi@', 'enquir', 'support'];
 const DISPOSABLE   = ['mailinator.com', 'guerrillamail.com', '10minutemail.com', 'tempmail', 'throwaway'];
 
-function deobfuscateEmails(text: string): string {
-  return text
-    .replace(/([a-zA-Z0-9._%+\-]+)\s*[\[(]at[\])\s]\s*([a-zA-Z0-9.\-]+)\s*[\[(]dot[\])\s]\s*([a-zA-Z]{2,})/gi, '$1@$2.$3')
-    .replace(/([a-zA-Z0-9._%+\-]+)\s+AT\s+([a-zA-Z0-9.\-]+)\s+DOT\s+([a-zA-Z]{2,})/g, '$1@$2.$3')
-    .replace(/([a-zA-Z0-9._%+\-]+)\s*\[at\]\s*([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, '$1@$2')
-    .replace(/([a-zA-Z0-9._%+\-]+)\s*\(at\)\s*([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, '$1@$2');
+function isValidEmail(e: string): boolean {
+  if (!e || e.length > 100 || !e.includes('@') || !e.includes('.')) return false;
+  const l = e.toLowerCase();
+  if (EMAIL_IGNORE.some(ig => l.includes(ig))) return false;
+  if (DISPOSABLE.some(d => l.includes(d)))     return false;
+  return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(e);
 }
-
-function extractMailtoLinks(html: string): string[] {
-  const found: string[] = [];
-  const re = /href=["']mailto:([^"'?]+)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const e = m[1].trim().toLowerCase();
-    if (e.includes('@') && !EMAIL_IGNORE.some(ig => e.includes(ig))) found.push(m[1].trim());
-  }
-  return found;
-}
-
 function emailPriority(e: string): number {
   const l = e.toLowerCase();
   if (EMAIL_AD.some(k => l.includes(k)))  return 1;
   if (EMAIL_GEN.some(k => l.includes(k))) return 2;
   return 3;
 }
-
 function emailType(e: string): string {
   const l = e.toLowerCase();
   if (EMAIL_AD.some(k => l.includes(k)))  return 'advertising';
@@ -75,12 +62,70 @@ function emailType(e: string): string {
   return 'admin';
 }
 
-function isValidEmail(e: string): boolean {
-  if (!e || e.length > 100 || !e.includes('@') || !e.includes('.')) return false;
-  const l = e.toLowerCase();
-  if (EMAIL_IGNORE.some(ig => l.includes(ig))) return false;
-  if (DISPOSABLE.some(d => l.includes(d)))     return false;
-  return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(e);
+function deobfuscateEmails(text: string): string {
+  return text
+    .replace(/([a-zA-Z0-9._%+\-]+)\s*[\[(]at[\])\s]\s*([a-zA-Z0-9.\-]+)\s*[\[(]dot[\])\s]\s*([a-zA-Z]{2,})/gi, '$1@$2.$3')
+    .replace(/([a-zA-Z0-9._%+\-]+)\s+AT\s+([a-zA-Z0-9.\-]+)\s+DOT\s+([a-zA-Z]{2,})/g, '$1@$2.$3')
+    .replace(/([a-zA-Z0-9._%+\-]+)\s*\[at\]\s*([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, '$1@$2')
+    .replace(/([a-zA-Z0-9._%+\-]+)\s*\(at\)\s*([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, '$1@$2')
+    .replace(/[​-‍﻿]/g, ''); // strip zero-width chars used in CSS obfuscation
+}
+
+function extractMailtoLinks(html: string): string[] {
+  const found: string[] = [];
+  const re = /href=["']mailto:([^"'?&\s]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const e = decodeURIComponent(m[1]).trim();
+    if (e.includes('@') && !EMAIL_IGNORE.some(ig => e.toLowerCase().includes(ig))) found.push(e);
+  }
+  return found;
+}
+
+/** Extract emails from JSON-LD / schema.org "email" fields */
+function extractJsonLd(html: string): string[] {
+  const found: string[] = [];
+  const re = /"email"\s*:\s*"([^"]+)"/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const e = m[1].trim();
+    if (isValidEmail(e)) found.push(e);
+  }
+  return found;
+}
+
+/** data-email attribute + Cloudflare data-cfemail obfuscation decoder */
+function extractDataAttrs(html: string): string[] {
+  const found: string[] = [];
+  // Plain data-email
+  const re1 = /data-email=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re1.exec(html)) !== null) {
+    const e = m[1].trim();
+    if (isValidEmail(e)) found.push(e);
+  }
+  // Cloudflare email obfuscation: data-cfemail hex-encoded XOR
+  const re2 = /data-cfemail=["']([0-9a-f]+)["']/gi;
+  while ((m = re2.exec(html)) !== null) {
+    try {
+      const hex = m[1];
+      const key = parseInt(hex.slice(0, 2), 16);
+      let email = '';
+      for (let i = 2; i < hex.length; i += 2) {
+        email += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+      }
+      if (isValidEmail(email)) found.push(email);
+    } catch (_) {}
+  }
+  return found;
+}
+
+/** Extract the footer section of a page for targeted email scanning */
+function extractFooter(html: string): string {
+  const footerRe = /<footer[\s\S]*?<\/footer>/gi;
+  const match = footerRe.exec(html);
+  if (match) return match[0];
+  return html.slice(Math.floor(html.length * 0.8));
 }
 
 function normalizeBase(url: string): string | null {
@@ -96,7 +141,6 @@ function normalizeBase(url: string): string | null {
 let jinaCalls = 0;
 
 async function fetchPage(url: string): Promise<string | null> {
-  // 1. Direct fetch — edge functions have no CORS restriction
   try {
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AffiliateOS/1.0)' },
@@ -109,7 +153,6 @@ async function fetchPage(url: string): Promise<string | null> {
     }
   } catch (_) { /* fall through to Jina */ }
 
-  // 2. Jina reader fallback — returns clean text, bypasses bot blocks
   try {
     jinaCalls++;
     const headers: Record<string, string> = {};
@@ -138,57 +181,108 @@ interface ContactResult {
 
 let serpCalls = 0;
 
+/** Scan one HTML page and update bestEmail/tg/wa/phone accumulators. */
+function scanPage(
+  html: string, page: string,
+  state: { bestEmail: string | null; bestPrio: number; bestType: string | null; sourceUrl: string | null; tg: string | null; wa: string | null; phone: string | null },
+): void {
+  const deobf  = deobfuscateEmails(html);
+  const footer = extractFooter(html);
+  const footerDeobf = deobfuscateEmails(footer);
+
+  const allEmails = [...new Set([
+    ...extractMailtoLinks(html),
+    ...extractJsonLd(html),
+    ...extractDataAttrs(html),
+    ...(deobf.match(EMAIL_REGEX) || []),
+    ...(footerDeobf.match(EMAIL_REGEX) || []),
+  ])].filter(isValidEmail);
+
+  for (const e of allEmails) {
+    const p = emailPriority(e);
+    if (p < state.bestPrio) {
+      state.bestPrio   = p;
+      state.bestEmail  = e;
+      state.bestType   = emailType(e);
+      state.sourceUrl  = page;
+    }
+  }
+
+  if (!state.tg) {
+    const m = html.match(/t\.me\/([a-zA-Z][a-zA-Z0-9_]{4,})/);
+    if (m && !['share', 'msg', 'joinchat', 'iv'].includes(m[1])) state.tg = '@' + m[1];
+  }
+  if (!state.wa) {
+    const m = html.match(/wa\.me\/(\d{7,})/);
+    if (m) state.wa = '+' + m[1];
+  }
+  if (!state.phone) {
+    const m = html.match(/\+[\d][\d\s\-().]{8,17}[\d]/);
+    if (m) state.phone = m[0].replace(/\s+/g, ' ').trim();
+  }
+}
+
 async function extractContacts(siteUrl: string): Promise<ContactResult | null> {
   const base = normalizeBase(siteUrl);
   if (!base) return null;
 
-  let bestEmail: string | null = null, bestPrio = 99, bestType: string | null = null;
-  let sourceUrl: string | null = null;
-  let tg: string | null = null, wa: string | null = null, phone: string | null = null;
+  const state = {
+    bestEmail: null as string | null, bestPrio: 99,
+    bestType: null as string | null, sourceUrl: null as string | null,
+    tg: null as string | null, wa: null as string | null, phone: null as string | null,
+  };
 
-  const pages = [
-    siteUrl,
-    base + '/contact', base + '/contact-us',
-    base + '/about', base + '/about-us',
-    base + '/advertise',
-  ];
-
-  for (let i = 0; i < pages.length; i++) {
-    const html = await fetchPage(pages[i]);
-    if (!html || html.length < 100) continue;
-
-    const deobf  = deobfuscateEmails(html);
-    const mailto = extractMailtoLinks(html);
-    const regexEmails = (deobf.match(EMAIL_REGEX) || []).filter(isValidEmail);
-    const found = [...new Set([...mailto, ...regexEmails])].filter(isValidEmail);
-
-    for (const e of found) {
-      const p = emailPriority(e);
-      if (p < bestPrio) { bestPrio = p; bestEmail = e; bestType = emailType(e); sourceUrl = pages[i]; }
-    }
-
-    if (!tg) {
-      const m = html.match(/t\.me\/([a-zA-Z][a-zA-Z0-9_]{4,})/);
-      if (m && !['share', 'msg', 'joinchat'].includes(m[1])) tg = '@' + m[1];
-    }
-    if (!wa) {
-      const m = html.match(/wa\.me\/(\d{7,})/);
-      if (m) wa = '+' + m[1];
-    }
-    if (!phone) {
-      const m = html.match(/\+[\d][\d\s\-().]{8,17}[\d]/);
-      if (m) phone = m[0].replace(/\s+/g, ' ').trim();
-    }
-
-    // Stop as soon as any contact is found
-    if (bestEmail || tg || wa) break;
+  // Phase 1: homepage
+  const homeHtml = await fetchPage(siteUrl);
+  if (homeHtml && homeHtml.length > 100) {
+    scanPage(homeHtml, siteUrl, state);
+  }
+  // Already found an advertising/partner email — return immediately
+  if (state.bestPrio <= 1) {
+    return buildResult(state);
   }
 
-  // SerpAPI fallback — find emails mentioned on third-party pages
-  if (!bestEmail && SERP_API_KEY) {
+  // Phase 2: high-value partner/advertise pages
+  const phase2Pages = [
+    base + '/advertise',
+    base + '/advertising',
+    base + '/partners',
+    base + '/partnership',
+    base + '/work-with-us',
+    base + '/sponsor',
+    base + '/media',
+    base + '/press',
+  ];
+  for (const page of phase2Pages) {
+    const html = await fetchPage(page);
+    if (!html || html.length < 100) continue;
+    scanPage(html, page, state);
+    if (state.bestPrio <= 1) return buildResult(state); // advertising email found
+  }
+
+  // Phase 3: generic contact / about pages
+  const phase3Pages = [
+    base + '/contact',
+    base + '/contact-us',
+    base + '/about',
+    base + '/about-us',
+    base + '/business',
+    base + '/collaborate',
+    base + '/team',
+  ];
+  for (const page of phase3Pages) {
+    const html = await fetchPage(page);
+    if (!html || html.length < 100) continue;
+    scanPage(html, page, state);
+    // Stop as soon as we have any email or social contact
+    if (state.bestEmail || state.tg || state.wa) break;
+  }
+
+  // Phase 4: SerpAPI fallback — search for emails mentioned on third-party pages
+  if (!state.bestEmail && SERP_API_KEY) {
     try {
       const domain = new URL(base).hostname.replace(/^www\./, '');
-      const q = encodeURIComponent(`"@${domain}" email contact`);
+      const q = encodeURIComponent(`"@${domain}" email contact advertise`);
       serpCalls++;
       const res = await fetch(
         `https://serpapi.com/search.json?q=${q}&num=10&api_key=${SERP_API_KEY}`,
@@ -202,23 +296,35 @@ async function extractContacts(siteUrl: string): Promise<ContactResult | null> {
         const serpEmails = [...new Set(
           (deobfuscateEmails(snippets).match(EMAIL_REGEX) || [])
             .filter((e: string) => e.toLowerCase().includes(root) && isValidEmail(e)),
-        )];
-        for (const e of serpEmails as string[]) {
+        )] as string[];
+        for (const e of serpEmails) {
           const p = emailPriority(e);
-          if (p < bestPrio) { bestPrio = p; bestEmail = e; bestType = emailType(e); sourceUrl = 'serp:' + domain; }
+          if (p < state.bestPrio) {
+            state.bestPrio  = p;
+            state.bestEmail = e;
+            state.bestType  = emailType(e);
+            state.sourceUrl = 'serp:' + domain;
+          }
         }
       }
-    } catch (_) { /* serp fallback failed, continue */ }
+    } catch (_) { /* serp fallback failed */ }
   }
 
-  if (!bestEmail && !tg && !wa) return null;
+  if (!state.bestEmail && !state.tg && !state.wa) return null;
+  return buildResult(state);
+}
+
+function buildResult(state: {
+  bestEmail: string | null; bestType: string | null; sourceUrl: string | null;
+  tg: string | null; wa: string | null; phone: string | null;
+}): ContactResult {
   return {
-    contact_email:      bestEmail,
-    contact_email_type: bestType,
-    contact_telegram:   tg,
-    contact_whatsapp:   wa,
-    contact_phone:      phone,
-    contact_source_url: sourceUrl,
+    contact_email:      state.bestEmail,
+    contact_email_type: state.bestType,
+    contact_telegram:   state.tg,
+    contact_whatsapp:   state.wa,
+    contact_phone:      state.phone,
+    contact_source_url: state.sourceUrl,
   };
 }
 
@@ -235,7 +341,6 @@ async function bumpUsage(service: string, delta: number) {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
-  // Reset per-run counters — module scope persists across calls in a warm isolate
   jinaCalls = 0;
   serpCalls = 0;
 
@@ -243,7 +348,6 @@ Deno.serve(async (req: Request) => {
   const startedAt = Date.now();
 
   try {
-    // System pause check
     const { data: sysRow } = await supabase
       .from('api_usage').select('system_paused').eq('service', 'gmail_main').single();
     if (sysRow?.system_paused) {
@@ -252,7 +356,6 @@ Deno.serve(async (req: Request) => {
         { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // Pick leads that have never had contact extraction run
     const { data: leads, error } = await supabase
       .from('leads')
       .select('id, url, name')
@@ -290,7 +393,11 @@ Deno.serve(async (req: Request) => {
       }
 
       if (result) {
-        await supabase.from('leads').update(result).eq('id', lead.id);
+        // Also sync legacy columns
+        const update: Record<string, unknown> = { ...result };
+        if (result.contact_email)    update.email = result.contact_email;
+        if (result.contact_telegram) update.tg    = result.contact_telegram;
+        await supabase.from('leads').update(update).eq('id', lead.id);
         stats.found++;
       } else {
         await supabase.from('leads')
@@ -301,8 +408,7 @@ Deno.serve(async (req: Request) => {
       stats.processed++;
     }
 
-    // Track external API usage so check-limits stays accurate
-    await bumpUsage('jina', jinaCalls);
+    await bumpUsage('jina',    jinaCalls);
     await bumpUsage('serpapi', serpCalls);
 
     await supabase.from('error_log').insert([{

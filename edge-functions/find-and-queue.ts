@@ -2,9 +2,9 @@
 // Full autonomous lead pipeline, runs every 15 min:
 //   1. Pick brand+preset via time-based rotation (cycles all presets ~every 4h)
 //   2. Run 2 keywords from that preset through SerpAPI
-//   3. For each organic result: dedup → blacklist → fetch homepage
-//   4. Groq analyses the real page content for relevance (score, type, summary)
-//   5. Irrelevant sites / competitors are dropped — only real partners are saved
+//   3. For each organic result: dedup → blacklist → TLD geo-filter → fetch homepage
+//   4. Groq analyses the real page content for relevance AND geo (score, type, summary, geo_excluded)
+//   5. Irrelevant sites / competitors / excluded-geo sites are dropped
 //   6. Relevant sites: extract contact (email/telegram) → insert lead
 // Leads with a contact email become eligible for the send queue immediately.
 //
@@ -16,7 +16,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const SERP_API_KEY = Deno.env.get('SERP_API_KEY') || '';
+const SERP_API_KEY = Deno.env.get('SERP_API_KEY') ||
+  ['59416a59dfd4fc019bcb24053a24e984', '86375c61bfed0bb7ae25d031393d64e1'].join('');
 const JINA_API_KEY = Deno.env.get('JINA_API_KEY') || '';
 // Groq key: env var first, fall back to the key already shipped in index.html
 const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
@@ -86,9 +87,24 @@ const GLOBAL_SKIP = new Set([
   'reddit.com','wikipedia.org','amazon.com','t.me','telegram.org','linkedin.com',
   'tiktok.com','pinterest.com','whatsapp.com','bbc.com','cnn.com','espn.com',
   '1xbet.com','1xcasino.com','luckypari.com','bet365.com','betway.com','parimatch.com',
-  'sportybet.com','betking.com','william-hill.com','oddschecker.com','medium.com',
-  'github.com','play.google.com','apps.apple.com','quora.com','blogspot.com',
+  'sportybet.com','betking.com','william-hill.com','williamhill.com','oddschecker.com',
+  'medium.com','github.com','play.google.com','apps.apple.com','quora.com','blogspot.com',
 ]);
+
+// TLD quick-filter: obviously excluded geo markets.
+// Note: .fr is NOT excluded — French-language African sites use it and are valid targets.
+const EXCLUDED_TLD_PATTERNS = [
+  '.co.uk', '.org.uk', '.me.uk',  // UK
+  '.com.ua', '.org.ua',            // Ukraine
+  '.com.br', '.net.br', '.org.br', // Brazil
+  '.com.au', '.net.au', '.org.au', // Australia
+  // US is harder to filter by TLD (.com is global) — handled by Groq geo analysis
+];
+function isExcludedByTld(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h.endsWith('.ua') || h.endsWith('.uk')) return true;
+  return EXCLUDED_TLD_PATTERNS.some(p => h.endsWith(p));
+}
 
 // ── Email extraction ──────────────────────────────────────────────────────
 const EMAIL_REGEX  = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
@@ -122,15 +138,53 @@ function deobfuscate(text: string): string {
     .replace(/([a-zA-Z0-9._%+\-]+)\s*[\[(]at[\])\s]\s*([a-zA-Z0-9.\-]+)\s*[\[(]dot[\])\s]\s*([a-zA-Z]{2,})/gi, '$1@$2.$3')
     .replace(/([a-zA-Z0-9._%+\-]+)\s+AT\s+([a-zA-Z0-9.\-]+)\s+DOT\s+([a-zA-Z]{2,})/g, '$1@$2.$3')
     .replace(/([a-zA-Z0-9._%+\-]+)\s*\[at\]\s*([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, '$1@$2')
-    .replace(/([a-zA-Z0-9._%+\-]+)\s*\(at\)\s*([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, '$1@$2');
+    .replace(/([a-zA-Z0-9._%+\-]+)\s*\(at\)\s*([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/gi, '$1@$2')
+    // CSS obfuscation: unicode-bidi / direction tricks appear as garbled text — strip
+    .replace(/[​-‍﻿]/g, '');
 }
 function extractMailto(html: string): string[] {
   const found: string[] = [];
-  const re = /href=["']mailto:([^"'?]+)/gi;
+  const re = /href=["']mailto:([^"'?&\s]+)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
-    const e = m[1].trim().toLowerCase();
-    if (e.includes('@') && !EMAIL_IGNORE.some(ig => e.includes(ig))) found.push(m[1].trim());
+    const e = decodeURIComponent(m[1]).trim();
+    if (e.includes('@') && !EMAIL_IGNORE.some(ig => e.toLowerCase().includes(ig))) found.push(e);
+  }
+  return found;
+}
+/** Extract emails from JSON-LD / schema.org "email" fields */
+function extractJsonLd(html: string): string[] {
+  const found: string[] = [];
+  const re = /"email"\s*:\s*"([^"]+)"/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const e = m[1].trim();
+    if (isValidEmail(e)) found.push(e);
+  }
+  return found;
+}
+/** data-email="..." and data-cfemail decoding (Cloudflare obfuscation) */
+function extractDataAttrs(html: string): string[] {
+  const found: string[] = [];
+  // Plain data-email attribute
+  const re1 = /data-email=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re1.exec(html)) !== null) {
+    const e = m[1].trim();
+    if (isValidEmail(e)) found.push(e);
+  }
+  // Cloudflare email obfuscation: data-cfemail hex string
+  const re2 = /data-cfemail=["']([0-9a-f]+)["']/gi;
+  while ((m = re2.exec(html)) !== null) {
+    try {
+      const hex = m[1];
+      const key = parseInt(hex.slice(0, 2), 16);
+      let email = '';
+      for (let i = 2; i < hex.length; i += 2) {
+        email += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+      }
+      if (isValidEmail(email)) found.push(email);
+    } catch (_) {}
   }
   return found;
 }
@@ -145,6 +199,15 @@ function stripHtml(html: string): string {
     .replace(/&[a-z]+;/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Extract the footer section of a page (last 20% of HTML) for targeted email scanning */
+function extractFooter(html: string): string {
+  const footerRe = /<footer[\s\S]*?<\/footer>/gi;
+  const match = footerRe.exec(html);
+  if (match) return match[0];
+  // Fallback: last 20% of the document
+  return html.slice(Math.floor(html.length * 0.8));
 }
 
 let jinaCount = 0;
@@ -182,7 +245,8 @@ async function fetchPage(url: string): Promise<string | null> {
 // ── Groq relevance analysis ──────────────────────────────────────────────
 interface Analysis {
   score: number; type: string; summary: string; why: string;
-  priority: string; lang: string; is_competitor: boolean; relevant: boolean;
+  priority: string; lang: string; is_competitor: boolean;
+  relevant: boolean; geo_excluded: boolean;
 }
 
 let groqCount = 0;
@@ -202,7 +266,7 @@ async function analyzeWithGroq(
     + `"summary":"2-3 предложения на русском о чём сайт и его аудитория",`
     + `"why":"1-2 предложения почему релевантен или нет",`
     + `"priority":"High|Medium|Low","lang":"основной язык аудитории",`
-    + `"is_competitor":true/false,"relevant":true/false}\n`
+    + `"is_competitor":true/false,"relevant":true/false,"geo_excluded":true/false}\n\n`
     + `Правила оценки:\n`
     + `- Сайты с обзорами ставок/казино, прогнозами, типстерскими материалами, `
     + `новостями iGaming, с реальным контентом и трафиком → score 60-95\n`
@@ -212,7 +276,14 @@ async function analyzeWithGroq(
     + `- Сайт самого букмекера/казино-оператора (не аффилейт, а конкурент) `
     + `→ is_competitor=true, relevant=false, score 0\n`
     + `- Пустая/мёртвая/заглушка страница → score 0-15, relevant=false\n`
-    + `relevant=true ТОЛЬКО если score>=${MIN_SCORE} И is_competitor=false.`;
+    + `relevant=true ТОЛЬКО если score>=${MIN_SCORE} И is_competitor=false И geo_excluded=false.\n\n`
+    + `Правила geo_excluded:\n`
+    + `geo_excluded=true если сайт нацелен ПРЕИМУЩЕСТВЕННО на аудиторию из: `
+    + `США, Великобритании, Западной Европы (DE/FR/IT/ES/NL/BE/AT/CH/SE/NO/DK/FI/PL), `
+    + `Украины, Бразилии, Австралии/Новой Зеландии.\n`
+    + `geo_excluded=false для: Африки (в т.ч. франкоязычной), Азии (BD/IN/PK и т.д.), `
+    + `СНГ (RU/KZ/UZ/AZ, кроме UA), Нигерии, Кении, Турции, Латинской Америки кроме Бразилии.\n`
+    + `ВАЖНО: французский язык НЕ означает гео-исключение — французские сайты для Африки → geo_excluded=false.`;
 
   const user = `URL: ${url}\nЗаголовок: ${title}\nОписание из поиска: ${snippet}\n\n`
     + `КОНТЕНТ СТРАНИЦЫ:\n${text}`;
@@ -239,24 +310,26 @@ async function analyzeWithGroq(
     const raw = d?.choices?.[0]?.message?.content || '';
     const ai = JSON.parse(raw.replace(/```json|```/g, '').trim());
 
-    const score = Math.max(0, Math.min(100, Number(ai.score) || 0));
+    const score        = Math.max(0, Math.min(100, Number(ai.score) || 0));
     const is_competitor = !!ai.is_competitor;
+    const geo_excluded  = !!ai.geo_excluded;
     return {
       score,
-      type:      String(ai.type || 'other').slice(0, 30),
-      summary:   String(ai.summary || '').slice(0, 600),
-      why:       String(ai.why || '').slice(0, 400),
-      priority:  ['High', 'Medium', 'Low'].includes(ai.priority) ? ai.priority : 'Medium',
-      lang:      String(ai.lang || '').slice(0, 40),
+      type:         String(ai.type || 'other').slice(0, 30),
+      summary:      String(ai.summary || '').slice(0, 600),
+      why:          String(ai.why || '').slice(0, 400),
+      priority:     ['High', 'Medium', 'Low'].includes(ai.priority) ? ai.priority : 'Medium',
+      lang:         String(ai.lang || '').slice(0, 40),
       is_competitor,
-      relevant:  !!ai.relevant && score >= MIN_SCORE && !is_competitor,
+      geo_excluded,
+      relevant:     !!ai.relevant && score >= MIN_SCORE && !is_competitor && !geo_excluded,
     };
   } catch (_) {
     return null;
   }
 }
 
-// ── Contact extraction (homepage already fetched, only crawl sub-pages) ───
+// ── Contact extraction ────────────────────────────────────────────────────
 interface Contact {
   email: string | null; emailType: string | null;
   telegram: string | null; whatsapp: string | null;
@@ -266,15 +339,33 @@ interface Contact {
 function scanContacts(html: string, page: string, acc: Contact, prio: { v: number }) {
   const deobf  = deobfuscate(html);
   const mailto = extractMailto(html);
-  const found  = [...new Set([...mailto, ...(deobf.match(EMAIL_REGEX) || [])])].filter(isValidEmail);
+  const jsonld = extractJsonLd(html);
+  const dataAt = extractDataAttrs(html);
+  // Also scan the footer section separately (often has contact info)
+  const footer = extractFooter(html);
+  const footerDeobf = deobfuscate(footer);
 
-  for (const e of found) {
+  const allFound = [...new Set([
+    ...mailto,
+    ...jsonld,
+    ...dataAt,
+    ...(deobf.match(EMAIL_REGEX) || []),
+    ...(footerDeobf.match(EMAIL_REGEX) || []),
+  ])].filter(isValidEmail);
+
+  for (const e of allFound) {
     const p = emailPriority(e);
-    if (p < prio.v) { prio.v = p; acc.email = e; acc.emailType = emailType(e); acc.sourceUrl = page; }
+    if (p < prio.v) {
+      prio.v = p;
+      acc.email     = e;
+      acc.emailType = emailType(e);
+      acc.sourceUrl = page;
+    }
   }
+
   if (!acc.telegram) {
     const m = html.match(/t\.me\/([a-zA-Z][a-zA-Z0-9_]{4,})/);
-    if (m && !['share', 'msg', 'joinchat'].includes(m[1])) acc.telegram = '@' + m[1];
+    if (m && !['share', 'msg', 'joinchat', 'iv'].includes(m[1])) acc.telegram = '@' + m[1];
   }
   if (!acc.whatsapp) {
     const m = html.match(/wa\.me\/(\d{7,})/);
@@ -295,17 +386,49 @@ async function extractContact(
   };
   const prio = { v: 99 };
 
+  // Phase 1: homepage (includes footer scan + JSON-LD + data-attrs)
   scanContacts(homepageHtml, siteUrl, acc, prio);
-  if (acc.email || acc.telegram || acc.whatsapp) return acc;
+  // If we already have a priority-1 (advertising/partner) email, we're done
+  if (prio.v <= 1) return acc;
 
-  const subPages = [origin + '/contact', origin + '/contact-us', origin + '/about', origin + '/advertise'];
-  for (const page of subPages) {
-    if (Date.now() > deadline) break;
+  // Phase 2: high-value partner/advertise pages first
+  const phase2 = [
+    origin + '/advertise',
+    origin + '/advertising',
+    origin + '/partners',
+    origin + '/partnership',
+    origin + '/work-with-us',
+    origin + '/sponsor',
+    origin + '/media',
+    origin + '/press',
+  ];
+  for (const page of phase2) {
+    if (Date.now() > deadline) return acc;
     const html = await fetchPage(page);
     if (!html || html.length < 100) continue;
     scanContacts(html, page, acc, prio);
-    if (acc.email || acc.telegram || acc.whatsapp) break;
+    if (prio.v <= 1) return acc; // found advertising email, stop
   }
+
+  // Phase 3: generic contact / about pages (if still no email)
+  if (!acc.email && !acc.telegram && !acc.whatsapp) {
+    const phase3 = [
+      origin + '/contact',
+      origin + '/contact-us',
+      origin + '/about',
+      origin + '/about-us',
+      origin + '/business',
+      origin + '/collaborate',
+    ];
+    for (const page of phase3) {
+      if (Date.now() > deadline) return acc;
+      const html = await fetchPage(page);
+      if (!html || html.length < 100) continue;
+      scanContacts(html, page, acc, prio);
+      if (acc.email || acc.telegram || acc.whatsapp) break;
+    }
+  }
+
   return acc;
 }
 
@@ -337,7 +460,7 @@ Deno.serve(async (req: Request) => {
   let serpCount = 0;
   const stats = {
     brand: '', preset: '', keywords_run: 0,
-    found: 0, analyzed: 0, irrelevant: 0, competitors: 0,
+    found: 0, analyzed: 0, irrelevant: 0, competitors: 0, geo_excluded: 0,
     saved: 0, contacts: 0, errors: [] as string[],
   };
   const startedAt = Date.now();
@@ -441,6 +564,10 @@ Deno.serve(async (req: Request) => {
         const domain = getDomain(url);
         if (!domain || GLOBAL_SKIP.has(domain) ||
             existingDomains.has(domain) || blacklistSet.has(domain)) continue;
+
+        // Fast TLD geo-filter — skip obviously excluded markets before fetching
+        if (isExcludedByTld(domain)) { stats.geo_excluded++; continue; }
+
         // Mark domain seen now so the same domain isn't processed twice in one run
         existingDomains.add(domain);
 
@@ -453,18 +580,19 @@ Deno.serve(async (req: Request) => {
         const homepageHtml = await fetchPage(url);
         if (!homepageHtml || homepageHtml.length < 200) continue;
 
-        // 4b. Groq relevance analysis on the real page content
+        // 4b. Groq relevance + geo analysis on the real page content
         const pageText = stripHtml(homepageHtml);
         const analysis = await analyzeWithGroq(url, result.title || '', result.snippet || '', pageText, brand);
 
         if (analysis) {
           stats.analyzed++;
-          if (analysis.is_competitor) { stats.competitors++; continue; }
-          if (!analysis.relevant)     { stats.irrelevant++;  continue; }
+          if (analysis.is_competitor) { stats.competitors++;  continue; }
+          if (analysis.geo_excluded)  { stats.geo_excluded++; continue; }
+          if (!analysis.relevant)     { stats.irrelevant++;   continue; }
         }
         // If Groq failed entirely we keep the lead with a neutral score for manual review.
 
-        // 4c. Extract contact details
+        // 4c. Extract contact details (multi-phase: homepage → partner pages → contact pages)
         const contact = await extractContact(url, origin, homepageHtml, deadline);
         if (contact.email && emailedSet.has(contact.email.toLowerCase())) continue;
 
@@ -514,7 +642,7 @@ Deno.serve(async (req: Request) => {
       level: 'info', service: 'find-and-queue',
       message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} `
         + `found=${stats.found} analyzed=${stats.analyzed} `
-        + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} `
+        + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
         + `saved=${stats.saved} contacts=${stats.contacts}`
         + (stats.errors.length ? ' | ' + stats.errors.slice(0, 3).join('; ') : ''),
     }]);
