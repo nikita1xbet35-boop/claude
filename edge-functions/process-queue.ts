@@ -112,16 +112,24 @@ async function generateMessage(
   }
 }
 
+// Strip non-ASCII so subject headers never need RFC 2047 encoding.
+// leadName can be a Cyrillic/CJK site name — keep only printable ASCII.
+function toAsciiSafe(s: string): string {
+  return s.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 // send_queue.id is BIGSERIAL (integer) — use modulo directly for subject variant
 function buildSubject(itemId: number, leadName: string, brand: string): string {
   const variant      = itemId % 4;
   const brandDisplay = brand === '1xcasino' ? '1xCasino' : '1xBet';
-  const sitename     = leadName || 'your site';
+  // Use ASCII-safe site name; fall back to domain-hint or generic label.
+  const rawName  = leadName || 'your site';
+  const sitename = toAsciiSafe(rawName) || 'your site';
   switch (variant) {
-    case 0:  return `${brandDisplay} × ${sitename} — partnership`;
-    case 1:  return `${sitename} × ${brandDisplay} — partnership`;
-    case 2:  return `Partnership inquiry — ${sitename} × ${brandDisplay}`;
-    default: return `${brandDisplay} for ${sitename} — quick chat?`;
+    case 0:  return `${brandDisplay} x ${sitename} - partnership`;
+    case 1:  return `${sitename} x ${brandDisplay} - partnership`;
+    case 2:  return `Partnership inquiry - ${sitename} x ${brandDisplay}`;
+    default: return `${brandDisplay} for ${sitename} - quick chat?`;
   }
 }
 
