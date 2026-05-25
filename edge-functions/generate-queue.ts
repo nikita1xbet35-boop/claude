@@ -189,7 +189,7 @@ Deno.serve(async (req: Request) => {
       inserts.push({
         lead_id:       l.id,
         brand:         l.brand,
-        gmail_account: l.brand === 'luckypari' ? 'lp' : 'main',
+        gmail_account: 'main', // LP account disabled — all sends via main
         scheduled_at:  new Date(cursor).toISOString(),
         status:        'pending',
       });

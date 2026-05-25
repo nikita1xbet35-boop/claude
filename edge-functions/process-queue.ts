@@ -65,9 +65,9 @@ async function sendAlert(level: string, service: string, message: string) {
 async function generateMessage(
   lead: Record<string, unknown>, brand: string, account: string,
 ): Promise<string | null> {
-  const partnerBrand = brand === '1xcasino' ? '1xCasino'
-                     : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
-  const managerName  = account === 'lp' ? 'Andreas' : 'Nick';
+  // LP account disabled — always send as Nick / 1xBet or 1xCasino
+  const partnerBrand = brand === '1xcasino' ? '1xCasino' : '1xBet';
+  const managerName  = 'Nick';
 
   const prompt = `You are ${managerName}, an affiliate manager at ${partnerBrand} `
     + `(betting / iGaming). Write a short first-touch outreach email in English to a `
@@ -216,8 +216,9 @@ Deno.serve(async (req: Request) => {
     for (const item of queueItems) {
       stats.processed++;
 
-      const account    = item.gmail_account as string;
-      const usageService = account === 'lp' ? 'gmail_lp' : 'gmail_main';
+      // LP account disabled — route everything through main
+      const account    = 'main';
+      const usageService = 'gmail_main';
 
       // Per-account daily quota
       if (!(account in accountQuotaCache)) {
@@ -261,10 +262,8 @@ Deno.serve(async (req: Request) => {
       let body = await generateMessage(lead, item.brand, account) ?? '';
 
       if (!body) {
-        const brandDisplay = item.brand === '1xcasino' ? '1xCasino'
-                           : item.brand === 'luckypari' ? 'LuckyPari' : '1xBet';
-        const managerName  = account === 'lp' ? 'Andreas' : 'Nick';
-        body = `Hi ${lead.name || 'there'},\n\nI came across ${lead.url} and would love to discuss a partnership opportunity with ${brandDisplay}.\n\nWe offer competitive commissions and dedicated support.\n\nWould you be open to a quick chat?\n\nBest regards,\n${managerName}`;
+        const brandDisplay = item.brand === '1xcasino' ? '1xCasino' : '1xBet';
+        body = `Hi ${lead.name || 'there'},\n\nI came across ${lead.url} and would love to discuss a partnership opportunity with ${brandDisplay}.\n\nWe offer competitive commissions and dedicated support.\n\nWould you be open to a quick chat?\n\nBest regards,\nNick`;
       }
 
       // Send
@@ -323,7 +322,7 @@ Deno.serve(async (req: Request) => {
             .update({ system_paused: true })
             .eq('service', 'gmail_main');
           await logError('critical', 'process-queue',
-            `CREDENTIAL ERROR — system auto-paused. Fix ${account === 'lp' ? 'GMAIL_PASS_LP' : 'GMAIL_PASS_MAIN'} in Supabase Secrets, then un-pause. Error: ${msg}`);
+            `CREDENTIAL ERROR — system auto-paused. Fix GMAIL_PASS_MAIN in Supabase Secrets, then call /functions/v1/admin-reset. Error: ${msg}`);
           stats.reason = 'auto-paused: credential error';
           return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
         }

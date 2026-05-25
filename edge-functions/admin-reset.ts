@@ -28,7 +28,14 @@ Deno.serve(async (req: Request) => {
       .eq('service', 'gmail_main');
     if (pauseErr) throw new Error(`un-pause failed: ${pauseErr.message}`);
 
-    // 2. Reset failed + skipped queue items back to pending
+    // 2. Switch all LP queue items to main account (LP disabled)
+    await supabase
+      .from('send_queue')
+      .update({ gmail_account: 'main' })
+      .eq('gmail_account', 'lp')
+      .in('status', ['pending', 'failed', 'skipped']);
+
+    // 3. Reset failed + skipped queue items back to pending
     const { data: resetData, error: resetErr } = await supabase
       .from('send_queue')
       .update({ status: 'pending', retry_count: 0, error: null })
@@ -38,18 +45,18 @@ Deno.serve(async (req: Request) => {
 
     const resetCount = resetData?.length ?? 0;
 
-    // 3. Log the action
+    // 4. Log the action
     await supabase.from('error_log').insert([{
       level: 'info',
       service: 'admin-reset',
-      message: `System unpaused. Reset ${resetCount} failed/skipped queue items to pending.`,
+      message: `System unpaused. LP→main migrated. Reset ${resetCount} failed/skipped items to pending.`,
     }]);
 
     return new Response(JSON.stringify({
       success: true,
       system_paused: false,
       queue_items_reset: resetCount,
-      message: `System is now active. ${resetCount} items reset to pending. Sending will resume on next process-queue tick.`,
+      message: `System is now active. LP→main migrated. ${resetCount} items reset to pending. Sending resumes on next process-queue tick.`,
     }), { headers: { ...cors, 'Content-Type': 'application/json' } });
 
   } catch (e: any) {
