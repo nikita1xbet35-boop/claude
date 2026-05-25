@@ -189,11 +189,10 @@ Deno.serve(async (req: Request) => {
       cursor += randInterval();
     }
 
-    // 2. New leads continue after both the overdue burst and any future items.
-    const latestFuture = futurePending.reduce(
-      (max, p) => Math.max(max, new Date(p.scheduled_at as string).getTime()), 0,
-    );
-    cursor = advance(Math.max(cursor, latestFuture + randInterval()));
+    // 2. New leads are inserted starting from the current cursor (near now+90s),
+    //    NOT appended after the latest future item. Future items keep their stable
+    //    times and will interleave naturally — process-queue picks by scheduled_at ASC.
+    //    This eliminates long gaps when future items happen to be far away.
     for (const l of newLeads) {
       cursor = advance(cursor);
       if (cursor >= workEndMs) break;

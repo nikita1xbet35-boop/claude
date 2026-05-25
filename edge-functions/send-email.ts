@@ -69,11 +69,18 @@ async function smtpSend(cfg: {
   // Wrap buffer so we can read line-by-line across chunks.
   let pending = '';
 
+  // Hard 30-second deadline for the entire SMTP conversation.
+  const deadline = Date.now() + 30_000;
+  function checkDeadline() {
+    if (Date.now() > deadline) throw new Error('SMTP timeout: conversation took >30s');
+  }
+
   const conn = await Deno.connectTls({ hostname: cfg.hostname, port: cfg.port });
 
   async function readReply(): Promise<{ code: string; text: string }> {
     const lines: string[] = [];
     while (true) {
+      checkDeadline();
       // Consume buffered data first.
       while (true) {
         const nl = pending.indexOf('\n');
@@ -86,11 +93,16 @@ async function smtpSend(cfg: {
           return { code: last.slice(0, 3), text: lines.join(' | ') };
         }
       }
-      // Need more data.
+      // Need more data — use a short read timeout so checkDeadline stays active.
       const chunk = new Uint8Array(4096);
-      const n     = await conn.read(chunk);
+      const readPromise = conn.read(chunk);
+      const n = await Promise.race([
+        readPromise,
+        new Promise<null>((_, rej) =>
+          setTimeout(() => rej(new Error('SMTP read timeout')), 8_000)),
+      ]);
       if (n === null) throw new Error('SMTP connection closed unexpectedly');
-      pending += dec.decode(chunk.subarray(0, n));
+      pending += dec.decode(chunk.subarray(0, n as number));
     }
   }
 
