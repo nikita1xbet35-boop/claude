@@ -314,6 +314,20 @@ Deno.serve(async (req: Request) => {
         const d      = sendResult.data as Record<string, unknown> | null;
         const detail = d ? JSON.stringify(d).slice(0, 300) : 'empty response';
         const msg    = (d?.error as string) ?? (d?.message as string) ?? `send-email non-OK: ${detail}`;
+
+        // Credential errors (535 / placeholder) → pause system immediately so we
+        // don't burn through all retry counts before the secret is fixed.
+        const isCredErr = msg.includes('535') || msg.includes('placeholder') || msg.includes('not configured');
+        if (isCredErr) {
+          await supabase.from('api_usage')
+            .update({ system_paused: true })
+            .eq('service', 'gmail_main');
+          await logError('critical', 'process-queue',
+            `CREDENTIAL ERROR — system auto-paused. Fix ${account === 'lp' ? 'GMAIL_PASS_LP' : 'GMAIL_PASS_MAIN'} in Supabase Secrets, then un-pause. Error: ${msg}`);
+          stats.reason = 'auto-paused: credential error';
+          return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
+        }
+
         await logError('error', 'process-queue', `send-email failed item ${item.id} to=${lead.contact_email}: ${msg}`, item.lead_id);
         const permanent = await markFailed(item, msg);
         if (permanent) {

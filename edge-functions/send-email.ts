@@ -181,10 +181,19 @@ Deno.serve(async (req: Request) => {
   const gmailUser = isLP ? Deno.env.get('GMAIL_USER_LP')   : Deno.env.get('GMAIL_USER_MAIN');
   const gmailPass = isLP ? Deno.env.get('GMAIL_PASS_LP')   : Deno.env.get('GMAIL_PASS_MAIN');
 
+  const userKey = isLP ? 'GMAIL_USER_LP'  : 'GMAIL_USER_MAIN';
+  const passKey = isLP ? 'GMAIL_PASS_LP'  : 'GMAIL_PASS_MAIN';
+
   if (!gmailUser || !gmailPass) {
-    const missing = isLP ? 'GMAIL_USER_LP / GMAIL_PASS_LP' : 'GMAIL_USER_MAIN / GMAIL_PASS_MAIN';
-    return new Response(JSON.stringify({ error: `Gmail credentials not configured: ${missing}` }),
+    return new Response(JSON.stringify({ error: `Gmail credentials not configured: ${!gmailUser ? userKey : passKey} is empty` }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
+  // Detect placeholder / unset values so the error is obvious in logs.
+  if (gmailPass === 'default' || gmailPass.length < 8) {
+    return new Response(JSON.stringify({
+      error: `${passKey} looks like a placeholder ("${gmailPass.slice(0,6)}..."). Set a real Gmail App Password in Supabase Secrets.`,
+    }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
   // ASCII-only sender names — no em-dashes, no RFC 2047 encoding needed.
