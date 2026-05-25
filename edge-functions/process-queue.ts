@@ -21,6 +21,33 @@ const cors = {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// GEO exclusion — mirrors the filter in find-and-queue so old leads are caught too
+const EXCLUDED_TLDS = [
+  '.co.uk', '.org.uk', '.me.uk',
+  '.com.ua', '.org.ua',
+  '.com.br', '.net.br', '.org.br',
+  '.com.au', '.net.au', '.org.au',
+  '.co.nz', '.com.nz',
+];
+const EXCLUDED_CC_TLDS = ['.uk', '.ua', '.br', '.au', '.nz'];
+// European ccTLDs
+const EU_TLDS = ['.de','.fr','.it','.es','.nl','.be','.at','.ch','.se','.no','.dk','.fi','.pl','.pt','.cz','.hu','.ro','.bg','.hr','.sk','.si','.lt','.lv','.ee','.gr','.ie','.lu','.mt','.cy'];
+
+function isGeoExcluded(url: string): boolean {
+  if (!url) return false;
+  let hostname = '';
+  try { hostname = new URL(url).hostname.toLowerCase(); }
+  catch (_) { hostname = url.toLowerCase(); }
+  // Remove www.
+  const h = hostname.replace(/^www\./, '');
+  if (EXCLUDED_TLDS.some(t => h.endsWith(t))) return true;
+  const parts = h.split('.');
+  const tld = '.' + parts[parts.length - 1];
+  if (EXCLUDED_CC_TLDS.includes(tld)) return true;
+  if (EU_TLDS.includes(tld)) return true;
+  return false;
+}
+
 function toGMT3(date: Date) {
   const gmt3 = new Date(date.getTime() + 3 * 60 * 60 * 1000);
   return {
@@ -113,24 +140,61 @@ async function generateMessage(
 }
 
 // Strip non-ASCII so subject headers never need RFC 2047 encoding.
-// leadName can be a Cyrillic/CJK site name — keep only printable ASCII.
 function toAsciiSafe(s: string): string {
   return s.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
 }
 
-// send_queue.id is BIGSERIAL (integer) — use modulo directly for subject variant
-function buildSubject(itemId: number, leadName: string, brand: string): string {
-  const variant      = itemId % 4;
-  const brandDisplay = brand === '1xcasino' ? '1xCasino' : '1xBet';
-  // Use ASCII-safe site name; fall back to domain-hint or generic label.
-  const rawName  = leadName || 'your site';
-  const sitename = toAsciiSafe(rawName) || 'your site';
-  switch (variant) {
-    case 0:  return `${brandDisplay} x ${sitename} - partnership`;
-    case 1:  return `${sitename} x ${brandDisplay} - partnership`;
-    case 2:  return `Partnership inquiry - ${sitename} x ${brandDisplay}`;
-    default: return `${brandDisplay} for ${sitename} - quick chat?`;
+/**
+ * Extract a clean short company name from the lead.
+ * lead.name is often a full SEO page title like
+ *   "New Betting Sites (May 2026) 77 Best & Newest UK..."
+ * We want just "New Betting Sites" or fall back to the domain.
+ */
+function cleanSiteName(leadName: string, leadUrl: string): string {
+  // Try to get hostname as fallback
+  let domain = '';
+  try {
+    const h = new URL(leadUrl).hostname.replace(/^www\./, '');
+    // Convert domain to title: "gooners-guide.com" → "Gooners Guide"
+    domain = h.split('.')[0]
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  } catch (_) { /* ignore */ }
+
+  if (!leadName) return domain || 'your site';
+
+  const ascii = toAsciiSafe(leadName);
+  if (!ascii) return domain || 'your site';
+
+  // Remove common SEO noise patterns:
+  // - years: (May 2026), 2026, 2025
+  // - ordinals/counts: "77 Best", "Top 10"
+  // - trailing review words
+  let cleaned = ascii
+    .replace(/\([^)]*\d{4}[^)]*\)/g, '')          // (May 2026), (2026)
+    .replace(/\b(19|20)\d{2}\b/g, '')              // standalone years
+    .replace(/\b\d+\s+(best|top|new|latest|newest|great)\b/gi, '') // "77 Best"
+    .replace(/\b(top|best|new|latest|newest)\s+\d+\b/gi, '')       // "Top 10"
+    .replace(/[-|:,–]\s*(review|guide|list|sportsbook|bookmaker|casino|betting|sites?|bonus|offers?|ratings?|pros?|cons?|vs\.?|comparison|roundup|overview|news|tips?|blog|analysis|rankings?).*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // If it got too short after cleaning, fall back to domain
+  if (cleaned.length < 3) return domain || 'your site';
+
+  // Truncate to 40 chars at a word boundary
+  if (cleaned.length > 40) {
+    cleaned = cleaned.slice(0, 40).replace(/\s+\S*$/, '').trim();
   }
+
+  return cleaned || domain || 'your site';
+}
+
+// Fixed single template: "1xBet x [Name] - partnership" (clean, professional)
+function buildSubject(leadName: string, leadUrl: string, brand: string): string {
+  const brandDisplay = brand === '1xcasino' ? '1xCasino' : '1xBet';
+  const sitename     = cleanSiteName(leadName, leadUrl);
+  return `${brandDisplay} x ${sitename} - partnership`;
 }
 
 async function markFailed(item: Record<string, unknown>, errMsg: string): Promise<boolean> {
@@ -256,7 +320,19 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      const subject = buildSubject(item.id as number, lead.name, item.brand);
+      // Skip leads from excluded GEOs — catches old leads that predated the geo filter
+      if (isGeoExcluded(lead.url || '')) {
+        await supabase.from('send_queue')
+          .update({ status: 'skipped', error: 'geo excluded (EU/UK/UA/BR/AU)' })
+          .eq('id', item.id);
+        await supabase.from('leads')
+          .update({ stage: 'excluded' })
+          .eq('id', lead.id);
+        stats.skipped++;
+        continue;
+      }
+
+      const subject = buildSubject(lead.name, lead.url || '', item.brand);
 
       // Generate a personalised email body with Groq; fall back to a template.
       let body = await generateMessage(lead, item.brand, account) ?? '';
