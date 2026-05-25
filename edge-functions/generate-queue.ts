@@ -68,8 +68,6 @@ Deno.serve(async (req: Request) => {
     const tomorrowMidnightUTC = new Date(todayMidnightUTC.getTime() + 24 * 60 * 60 * 1000);
     const workStartMs = new Date(`${todayStr}T09:00:00+03:00`).getTime();
     const workEndMs   = new Date(`${todayStr}T18:00:00+03:00`).getTime();
-    const lunchStart  = new Date(`${todayStr}T13:00:00+03:00`).getTime();
-    const lunchEnd    = new Date(`${todayStr}T14:00:00+03:00`).getTime();
 
     // After the work day — nothing to schedule today
     if (nowMs >= workEndMs) {
@@ -174,16 +172,9 @@ Deno.serve(async (req: Request) => {
     const updates: Array<{ id: number; scheduled_at: string }> = [];
     const inserts: Array<Record<string, unknown>> = [];
 
-    // Advance cursor past lunch / clamp to the working window.
-    const advance = (c: number): number => {
-      if (c >= lunchStart && c < lunchEnd) c = lunchEnd;
-      return c;
-    };
-
     // 1. Overdue items fire first — densely from now+delay.
-    let cursor = advance(Math.max(nowMs + START_DELAY_MS, workStartMs));
+    let cursor = Math.max(nowMs + START_DELAY_MS, workStartMs);
     for (const p of overduePending) {
-      cursor = advance(cursor);
       if (cursor >= workEndMs) break;
       updates.push({ id: p.id as number, scheduled_at: new Date(cursor).toISOString() });
       cursor += randInterval();
@@ -194,7 +185,6 @@ Deno.serve(async (req: Request) => {
     //    times and will interleave naturally — process-queue picks by scheduled_at ASC.
     //    This eliminates long gaps when future items happen to be far away.
     for (const l of newLeads) {
-      cursor = advance(cursor);
       if (cursor >= workEndMs) break;
       inserts.push({
         lead_id:       l.id,

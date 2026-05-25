@@ -169,8 +169,8 @@ Deno.serve(async (req: Request) => {
 
     // 2. Working hours: 09:00–18:00 GMT+3, skip 13:00–14:00
     const { hour, dayOfWeek, dateStr } = toGMT3(now);
-    if (hour < 9 || hour >= 18 || hour === 13) {
-      stats.reason = hour === 13 ? 'lunch break' : hour < 9 ? 'before working hours' : 'after working hours';
+    if (hour < 9 || hour >= 18) {
+      stats.reason = hour < 9 ? 'before working hours' : 'after working hours';
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
