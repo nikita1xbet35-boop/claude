@@ -1,4 +1,4 @@
-// Supabase Edge Function: send-email
+// Supabase Edge Function: send-email  v2 (2026-05-25)
 // Sends a single email via Gmail SMTP (port 465 / TLS) using App Password credentials.
 // Uses a minimal hand-rolled SMTP client so we control encoding exactly:
 //   - Body: base64, no quoted-printable artifacts
