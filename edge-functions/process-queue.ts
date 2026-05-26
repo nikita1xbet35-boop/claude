@@ -5,8 +5,6 @@ const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // Supabase auto-injects SUPABASE_ANON_KEY; fall back to service role so apikey header is never empty
 const SUPABASE_ANON = Deno.env.get('SUPABASE_ANON_KEY') || SUPABASE_KEY;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
-const GROQ_API_KEY  = Deno.env.get('GROQ_API_KEY') ||
-  ['gsk_fFeymSY6J6SrLPZRyXX3WGd', 'yb3FYobOMV2q3vZ2p4PRNwSmsWRnA'].join('');
 
 const ACCOUNT_DAILY_LIMIT = 100;
 const BATCH_SIZE          = 5;
@@ -101,56 +99,48 @@ async function sendAlert(level: string, service: string, message: string) {
   await callFunction('send-alert', { level, service, message });
 }
 
-// Generate a personalised outreach email with Groq, using the relevance
-// analysis (summary / why) that find-and-queue stored on the lead.
-async function generateMessage(
-  lead: Record<string, unknown>, brand: string, account: string,
-): Promise<string | null> {
-  // LP account disabled — always send as Nick / 1xBet or 1xCasino
-  const partnerBrand = brand === '1xcasino' ? '1xCasino' : '1xBet';
-  const managerName  = 'Nick';
+// GEO code → country name for email templates
+const GEO_NAMES: Record<string, string> = {
+  ID: 'Indonesia', BD: 'Bangladesh', IN: 'India', CI: "Côte d'Ivoire",
+  EG: 'Egypt', MY: 'Malaysia', UZ: 'Uzbekistan', NP: 'Nepal',
+  PK: 'Pakistan', TR: 'Turkey', AR: 'Argentina', CL: 'Chile',
+  PH: 'Philippines', BF: 'Burkina Faso', SN: 'Senegal', CM: 'Cameroun',
+  MA: 'Morocco', VN: 'Vietnam', MM: 'Myanmar', ZA: 'South Africa',
+  NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', TZ: 'Tanzania',
+  // fallbacks for other stored geo values
+  'Africa FR': 'West Africa', 'CIS': 'the region', 'Global': 'the region',
+};
 
-  const prompt = `You are ${managerName}, an affiliate manager at ${partnerBrand} `
-    + `(betting / iGaming). Write a short first-touch outreach email in English to a `
-    + `potential affiliate partner.\n\n`
-    + `Partner data:\n`
-    + `- Name: ${lead.name || 'their site'}\n`
-    + `- Website: ${lead.url || ''}\n`
-    + `- Type: ${lead.type || 'affiliate site'}\n`
-    + `- GEO: ${lead.geo || ''}\n`
-    + `- What the site is about: ${lead.summary || 'an iGaming-related audience'}\n`
-    + `- Why they fit: ${lead.why || ''}\n\n`
-    + `Requirements:\n`
-    + `- 3-5 sentences, no more\n`
-    + `- Friendly, professional, not pushy\n`
-    + `- Reference their site specifically so it is clear you actually looked at it\n`
-    + `- Propose discussing a RevShare partnership\n`
-    + `- Do NOT mention specific numbers or percentages\n`
-    + `- End with the signature line: "Best regards,\\n${managerName}"\n`
-    + `- Output ONLY the email body text — no subject line, no extra commentary`;
+function geoName(geoCode: string): string {
+  if (!geoCode) return 'the region';
+  return GEO_NAMES[geoCode.trim().toUpperCase()] || GEO_NAMES[geoCode.trim()] || geoCode;
+}
 
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + GROQ_API_KEY,
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.5,
-        max_tokens: 400,
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!res.ok) return null;
-    const d = await res.json();
-    const text = (d?.choices?.[0]?.message?.content || '').trim();
-    return text.length > 30 ? text : null;
-  } catch (_) {
-    return null;
+/** Build the outreach email body from a fixed template. No Groq needed. */
+function buildEmailBody(lead: Record<string, unknown>, brand: string): string {
+  const siteName = cleanSiteName(lead.name as string, lead.url as string || '');
+  const country  = geoName(lead.geo as string || '');
+  const is1xCasino = brand === '1xcasino';
+
+  if (is1xCasino) {
+    return `Hi ${siteName} team,\n`
+      + `Nick from 1xCasino here.\n\n`
+      + `Saw ${siteName} while reviewing top affiliate platforms in ${country} — the kind of project we look to partner with directly in this market.\n\n`
+      + `1xCasino is one of the strongest casino brands across ${country}, and we run a clean RevShare model — up to 55% for top GEOs, from day one. No admin fee, no hidden commissions, no test month gates. Individual terms calibrated to your audience.\n\n`
+      + `Worth a quick chat?\n\n`
+      + `— Nick\n`
+      + `1xCasino Partners\n`
+      + `Telegram: @aff_manager_xbet`;
   }
+
+  return `Hi ${siteName} team,\n`
+    + `Nick from 1xBet here.\n\n`
+    + `Saw ${siteName} while reviewing top affiliate platforms in ${country} — the kind of project we look to partner with directly in this market.\n\n`
+    + `1xBet is one of the leading sports betting brands across ${country} and the broader region. A direct partnership would mean clean RevShare on traffic you're already generating, no admin fee, no hidden commissions, individual terms calibrated to your audience and scale.\n\n`
+    + `Worth a quick chat?\n\n`
+    + `— Nick\n`
+    + `1xBet Partners\n`
+    + `Telegram: @aff_manager_xbet`;
 }
 
 // Strip non-ASCII so subject headers never need RFC 2047 encoding.
@@ -204,11 +194,11 @@ function cleanSiteName(leadName: string, leadUrl: string): string {
   return cleaned || domain || 'your site';
 }
 
-// Fixed single template: "1xBet x [Name] - partnership" (clean, professional)
+// Subject exactly as per template: "1xBet × [Сайт] — partnership"
 function buildSubject(leadName: string, leadUrl: string, brand: string): string {
   const brandDisplay = brand === '1xcasino' ? '1xCasino' : '1xBet';
   const sitename     = cleanSiteName(leadName, leadUrl);
-  return `${brandDisplay} x ${sitename} - partnership`;
+  return `${brandDisplay} × ${sitename} — partnership`;
 }
 
 async function markFailed(item: Record<string, unknown>, errMsg: string): Promise<boolean> {
@@ -347,14 +337,7 @@ Deno.serve(async (req: Request) => {
       }
 
       const subject = buildSubject(lead.name, lead.url || '', item.brand);
-
-      // Generate a personalised email body with Groq; fall back to a template.
-      let body = await generateMessage(lead, item.brand, account) ?? '';
-
-      if (!body) {
-        const brandDisplay = item.brand === '1xcasino' ? '1xCasino' : '1xBet';
-        body = `Hi ${lead.name || 'there'},\n\nI came across ${lead.url} and would love to discuss a partnership opportunity with ${brandDisplay}.\n\nWe offer competitive commissions and dedicated support.\n\nWould you be open to a quick chat?\n\nBest regards,\nNick`;
-      }
+      const body    = buildEmailBody(lead, item.brand);
 
       // Send
       let sendResult: { ok: boolean; data: unknown };
