@@ -94,15 +94,19 @@ Deno.serve(async (req: Request) => {
     const workStartMs = new Date(`${todayStr}T09:00:00+03:00`).getTime();
     const workEndMs   = new Date(`${todayStr}T18:00:00+03:00`).getTime();
 
-    // After the work day — nothing to schedule today
-    if (nowMs >= workEndMs) {
-      return new Response(JSON.stringify({ generated: 0, repacked: 0, skipped: true, reason: 'after working hours' }),
-        { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
-
     const dayOfWeek    = nowGMT3.getUTCDay();
     const isWeekend    = dayOfWeek === 0 || dayOfWeek === 6;
     const dailyTarget  = isWeekend ? WEEKEND_TARGET : WEEKDAY_TARGET;
+
+    // After the work day — nothing to schedule today
+    if (nowMs >= workEndMs) {
+      return new Response(JSON.stringify({
+        generated: 0, repacked: 0, skipped: true,
+        reason: 'after working hours',
+        date: todayStr,
+        is_weekend: isWeekend,
+      }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
 
     // How many were already sent today
     const { count: sentToday } = await supabase
@@ -113,8 +117,18 @@ Deno.serve(async (req: Request) => {
 
     const capacity = dailyTarget - (sentToday ?? 0);
     if (capacity <= 0) {
-      return new Response(JSON.stringify({ generated: 0, repacked: 0, skipped: true, reason: 'daily target reached' }),
-        { headers: { ...cors, 'Content-Type': 'application/json' } });
+      await supabase.from('error_log').insert([{
+        level: 'info', service: 'generate-queue',
+        message: `Daily target reached: sent ${sentToday ?? 0}/${dailyTarget} today (${todayStr}, ${isWeekend ? 'weekend' : 'weekday'})`,
+      }]);
+      return new Response(JSON.stringify({
+        generated: 0, repacked: 0, skipped: true,
+        reason: 'daily target reached',
+        sent_today: sentToday ?? 0,
+        target: dailyTarget,
+        date: todayStr,
+        is_weekend: isWeekend,
+      }), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
     // All still-pending queue items

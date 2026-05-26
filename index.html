@@ -6213,6 +6213,13 @@ async function loadAutomatToday() {
     const bounces       = emails.filter(e => e.bounced).length;
     const bounceRate    = emailsSent > 0 ? ((bounces / emailsSent) * 100).toFixed(1) : '0.0';
 
+    // Daily target (100 weekday / 30 weekend)
+    const dayOfWeek     = nowGMT3.getUTCDay();
+    const isWeekendNow  = dayOfWeek === 0 || dayOfWeek === 6;
+    const dailyTarget   = isWeekendNow ? 30 : 100;
+    const pct           = Math.min(100, Math.round((emailsSent / dailyTarget) * 100));
+    const sentLabel     = `${emailsSent}/${dailyTarget} (${pct}%)`;
+
     // Brand breakdown
     const brands = {};
     emails.forEach(e => { brands[e.brand] = (brands[e.brand] || 0) + 1; });
@@ -6224,16 +6231,18 @@ async function loadAutomatToday() {
       ? new Date(queueItems[0].scheduled_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' })
       : '—';
 
-    const statCard = (label, value, sub) => `
+    const statCard = (label, value, sub, accent) => `
       <div style="background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:14px 16px;">
         <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.4px;text-transform:uppercase;margin-bottom:6px;">${label}</div>
-        <div style="font-size:22px;font-weight:700;color:var(--text);font-family:var(--font-mono);">${value}</div>
+        <div style="font-size:22px;font-weight:700;color:${accent || 'var(--text)'};font-family:var(--font-mono);">${value}</div>
         ${sub ? `<div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-top:4px;">${sub}</div>` : ''}
       </div>`;
 
+    const sentColor = emailsSent >= dailyTarget ? 'var(--green)' : emailsSent > 0 ? 'var(--accent)' : 'var(--text)';
+
     cards.innerHTML = [
       statCard('Лидов найдено', leadsFound, `с контактом: ${leadsWithContact}`),
-      statCard('Писем отправлено', emailsSent, brandBreakdown),
+      statCard('Писем отправлено', sentLabel, brandBreakdown, sentColor),
       statCard('Баунсы', bounces, `${bounceRate}%`),
     ].join('');
 
@@ -6400,8 +6409,17 @@ async function runGenerateQueue() {
     });
     const data = await res.json();
     if (data.skipped) {
-      btn.textContent = '— ' + (data.reason || 'пропущено');
-      btn.style.color = 'var(--text3)';
+      if (data.reason === 'daily target reached') {
+        btn.textContent = `✅ День выполнен: ${data.sent_today || '?'}/${data.target || 100} отправлено`;
+        btn.style.color = 'var(--green)';
+        btn.style.borderColor = 'var(--green)';
+      } else if (data.reason === 'after working hours') {
+        btn.textContent = '🌙 Вне рабочего времени (09–18 GMT+3)';
+        btn.style.color = 'var(--text3)';
+      } else {
+        btn.textContent = '— ' + (data.reason || 'пропущено');
+        btn.style.color = 'var(--text3)';
+      }
     } else if (data.generated > 0 || data.repacked > 0) {
       btn.textContent = '✅ +' + (data.generated || 0) + ' новых, очередь ' + ((data.generated || 0) + (data.repacked || 0));
       btn.style.color = 'var(--green)';
