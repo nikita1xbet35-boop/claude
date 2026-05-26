@@ -35,11 +35,18 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const EMAIL_RE   = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
 const DISPOSABLE = ['mailinator.com', 'guerrillamail.com', '10minutemail.com', 'tempmail', 'throwaway'];
+const PLACEHOLDERS = [
+  'youremail','your-email','your_email','yourname','your-name',
+  'email@email','test@test','user@user','name@name',
+  'demo@','sample@','placeholder','changeme','username@',
+  'admin@example','info@example','user@example','test@example',
+];
 
 function isSendableEmail(e: string | null): boolean {
   if (!e) return false;
   const l = e.toLowerCase();
-  if (DISPOSABLE.some(d => l.includes(d))) return false;
+  if (DISPOSABLE.some(d => l.includes(d)))  return false;
+  if (PLACEHOLDERS.some(p => l.includes(p))) return false;
   return EMAIL_RE.test(e);
 }
 

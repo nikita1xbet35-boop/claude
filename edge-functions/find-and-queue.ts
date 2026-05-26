@@ -128,6 +128,13 @@ function isExcludedByTld(hostname: string): boolean {
 const EMAIL_REGEX  = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const EMAIL_IGNORE = ['noreply','no-reply','unsubscribe','privacy','legal','abuse',
   'example','sentry','wpcf7','@2x','@3x','.png','@example','.jpg','.gif','.webp','.svg'];
+// Placeholder/demo emails that look real but aren't
+const EMAIL_PLACEHOLDERS = [
+  'youremail','your-email','your_email','yourname','your-name',
+  'email@email','test@test','user@user','name@name',
+  'demo@','sample@','placeholder','changeme','username@',
+  'admin@example','info@example','user@example','test@example',
+];
 const EMAIL_AD  = ['advertis','ads@','partner','sponsor','commercial','business','collab','media@','marketing'];
 const EMAIL_GEN = ['contact','info@','hello@','hi@','enquir','support'];
 const DISPOSABLE = ['mailinator.com','guerrillamail.com','10minutemail.com','tempmail','throwaway'];
@@ -135,8 +142,9 @@ const DISPOSABLE = ['mailinator.com','guerrillamail.com','10minutemail.com','tem
 function isValidEmail(e: string): boolean {
   if (!e || e.length > 100 || !e.includes('@') || !e.includes('.')) return false;
   const l = e.toLowerCase();
-  if (EMAIL_IGNORE.some(ig => l.includes(ig))) return false;
-  if (DISPOSABLE.some(d => l.includes(d)))     return false;
+  if (EMAIL_IGNORE.some(ig => l.includes(ig)))       return false;
+  if (EMAIL_PLACEHOLDERS.some(p => l.includes(p)))   return false;
+  if (DISPOSABLE.some(d => l.includes(d)))           return false;
   return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(e);
 }
 function emailPriority(e: string): number {

@@ -316,9 +316,17 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      if (!lead.contact_email) {
+      const EMAIL_PLACEHOLDERS_PQ = [
+        'youremail','your-email','your_email','yourname','your-name',
+        'email@email','test@test','user@user','demo@','sample@','placeholder','changeme',
+        'admin@example','info@example','user@example','test@example',
+      ];
+      const emailLower = (lead.contact_email || '').toLowerCase();
+      const isPlaceholder = EMAIL_PLACEHOLDERS_PQ.some(p => emailLower.includes(p));
+
+      if (!lead.contact_email || isPlaceholder) {
         await supabase.from('send_queue')
-          .update({ status: 'skipped', error: 'no contact email' })
+          .update({ status: 'skipped', error: isPlaceholder ? `placeholder email: ${lead.contact_email}` : 'no contact email' })
           .eq('id', item.id);
         stats.skipped++;
         continue;
