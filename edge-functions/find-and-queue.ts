@@ -246,7 +246,6 @@ function extractFooter(html: string): string {
   // Fallback: last 20% of the document
   return html.slice(Math.floor(html.length * 0.8));
 }
-}
 
 let jinaCount = 0;
 
