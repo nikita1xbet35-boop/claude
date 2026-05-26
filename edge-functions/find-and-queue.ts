@@ -42,42 +42,60 @@ interface Preset { id: string; name: string; geo: string; keywords: string[]; br
 
 const DEFAULT_PRESETS: Record<string, Preset[]> = {
   '1xbet': [
-    { id:'1xb-franco-seo', name:'Francophone Africa — SEO/Review', geo:'Africa FR',
-      keywords:["meilleur site de paris sportifs","meilleurs bookmakers en ligne","comparatif paris sportifs","avis bookmaker","pronostics football Afrique","site de paris Sénégal","site de paris Côte d'Ivoire","site de paris Cameroun"] },
-    { id:'1xb-franco-tips', name:'Francophone Africa — Tipsters', geo:'Africa FR',
-      keywords:["pronostics foot telegram","canal telegram paris sportifs","tipster football français","pronostiqueur telegram"] },
-    { id:'1xb-bd-seo', name:'Bangladesh — SEO/Review', geo:'BD',
-      keywords:["best betting site Bangladesh","cricket betting review bd","online betting bangladesh","best bookmaker bangladesh"] },
-    { id:'1xb-bd-tips', name:'Bangladesh — Tipsters', geo:'BD',
-      keywords:["cricket prediction telegram","bpl prediction","ipl tips bangladesh","cricket betting tips bd"] },
-    { id:'1xb-uz-ru', name:'Uzbekistan — RU speaking', geo:'UZ',
-      keywords:["ставки на спорт Узбекистан","прогнозы на футбол Ташкент","капперы Узбекистан","беттинг обзор Узбекистан"] },
-    { id:'1xb-ng', name:'Nigeria — Sports Betting', geo:'NG',
-      keywords:["best betting sites Nigeria","football prediction Nigeria","sports tipster Nigeria","bookmakers review Nigeria"] },
-    { id:'1xb-ke', name:'Kenya — Sports Betting', geo:'KE',
-      keywords:["best betting sites Kenya","football prediction Kenya","betting review Kenya","sports tips Kenya"] },
+    { id:'1xb-id', name:'Indonesia', geo:'ID',
+      keywords:['situs taruhan bola terbaik','prediksi bola akurat','bandar judi online review','agen taruhan bola terpercaya','tips taruhan olahraga indonesia','prediksi liga 1 indonesia','review situs bola','bandar online terbaik'] },
+    { id:'1xb-bd', name:'Bangladesh', geo:'BD',
+      keywords:['cricket prediction site bangladesh','bpl betting tips review','সেরা বাজির সাইট','ক্রিকেট প্রেডিকশন','betting site review bangladesh','bd cricket tips blog','bangladesh sports betting guide','online betting bd review'] },
+    { id:'1xb-in', name:'India', geo:'IN',
+      keywords:['cricket prediction website india','ipl betting tips blog','best fantasy cricket app review','india sports betting guide','satta tips website','cricket betting strategy india','hindi betting tips','indian sportsbook review'] },
+    { id:'1xb-ci', name:'Côte d\'Ivoire', geo:'CI',
+      keywords:['pronostics football Côte d\'Ivoire','site de paris sportifs Abidjan','meilleur bookmaker CIV','pronostiqueur ivoirien telegram','paris sportifs Afrique de l\'Ouest','tipster francophone Afrique','analyse foot Côte d\'Ivoire','pronos foot CIV'] },
+    { id:'1xb-eg', name:'Egypt', geo:'EG',
+      keywords:['أفضل مواقع المراهنات مصر','توقعات كرة القدم مصر','egypt sports betting review','arabic betting tips site','مراهنات رياضية مصر','prediction site egypt football','arabic football tipster','موقع رهان مصر'] },
+    { id:'1xb-my', name:'Malaysia', geo:'MY',
+      keywords:['laman judi bola terbaik malaysia','ramalan bola malaysia','bandar online malaysia review','betting tips malaysia','online sportsbook malaysia','analisis bola malaysia','judi online malaysia review','laman taruhan malaysia'] },
+    { id:'1xb-uz', name:'Uzbekistan', geo:'UZ',
+      keywords:['ставки на спорт Узбекистан обзор','прогнозы футбол Ташкент','капперы Узбекистан telegram','букмекерские конторы Узбекистан','обзор ставок UZ','sport tikish bashoratlari','футбол прогноз Узбекистан','sport bashoratlari UZ'] },
+    { id:'1xb-np', name:'Nepal', geo:'NP',
+      keywords:['cricket prediction nepal','betting tips nepal site','sports betting nepal review','nepali football tips','nepal sportsbook guide','online betting nepal','nepali cricket tipster','nepal sports tips blog'] },
+    { id:'1xb-pk', name:'Pakistan', geo:'PK',
+      keywords:['cricket prediction pakistan','psl betting tips','pakistan sports betting blog','urdu cricket tips site','pakistan cricket prediction','betting tips pakistan','pakistan football tips','karachi betting site review'] },
+    { id:'1xb-tr', name:'Turkey', geo:'TR',
+      keywords:['bahis tahminleri sitesi','güvenilir iddaa tahminleri','maç tahmin sitesi turkiye','canlı bahis tahmin','bahis analiz blog turkiye','futbol tahmin sitesi','süper lig bahis tahminleri','türk bahis incelemesi'] },
   ],
   '1xcasino': [
-    { id:'1xc-global', name:'Casino — Global English', geo:'Global',
-      keywords:["best online casino review","casino bonus site","slot review blog","aviator prediction site","crash game tips","live casino review"] },
-    { id:'1xc-aviator', name:'Aviator / Crash Games', geo:'Global',
-      keywords:["aviator game signals","aviator prediction telegram","jetx tips","lucky jet signals","crash game review site"] },
-    { id:'1xc-ng', name:'Nigeria — Casino', geo:'NG',
-      keywords:["best casino Nigeria","online casino Nigeria","aviator Nigeria","casino bonus Nigeria"] },
-    { id:'1xc-cis-ru', name:'CIS — Casino Russian', geo:'CIS',
-      keywords:["лучшие онлайн казино","обзор казино","авиатор прогнозы","казино бонусы без депозита"] },
-    { id:'1xc-tr', name:'Turkey — Casino', geo:'TR',
-      keywords:["en iyi casino siteleri","online casino inceleme","aviator tahmin","casino bonusu"] },
+    { id:'1xc-ar', name:'Argentina', geo:'AR',
+      keywords:['mejores casinos online argentina','reseñas casino argentina','aviator predicción argentina','bono casino argentina','ruleta online argentina review','slots argentina blog','casino en vivo argentina','aviator estrategia español'] },
+    { id:'1xc-cl', name:'Chile', geo:'CL',
+      keywords:['mejores casinos online chile','casino chile reseñas','aviator chile predicción','bono casino chileno','slots online chile review','casino en vivo chile','ruleta online chile','aviator estrategia chile'] },
+    { id:'1xc-ph', name:'Philippines', geo:'PH',
+      keywords:['best online casino philippines review','casino bonus philippines','aviator philippines prediction','slots review philippines','pinoy casino blog','philippine sportsbook casino','filipino casino tips','online gambling philippines guide'] },
+    { id:'1xc-pk', name:'Pakistan', geo:'PK',
+      keywords:['online casino pakistan review','aviator pakistan prediction','casino bonus pakistan','slots review pakistan','karachi casino online','crash game tips pakistan','urdu casino site','pakistani online casino guide'] },
+    { id:'1xc-in', name:'India', geo:'IN',
+      keywords:['online casino india review','aviator india prediction','teen patti review site','andar bahar online review','casino bonus india site','indian slots review','hindi casino blog','crash game tips india'] },
+    { id:'1xc-bf', name:'Burkina Faso', geo:'BF',
+      keywords:['casino en ligne Burkina Faso','meilleur casino Ouagadougou','aviator Burkina prediction','bonus casino Burkina','machines à sous Burkina','casino francophone Afrique','slots Burkina Faso','roulette en ligne Burkina'] },
+    { id:'1xc-ci', name:'Côte d\'Ivoire', geo:'CI',
+      keywords:['casino en ligne Côte d\'Ivoire','meilleur casino Abidjan','aviator Côte d\'Ivoire','bonus casino CIV','machines à sous Côte d\'Ivoire','slots online Abidjan','casino francophone CIV','crash game Côte d\'Ivoire'] },
+    { id:'1xc-sn', name:'Senegal', geo:'SN',
+      keywords:['casino en ligne Sénégal','meilleur casino Dakar','aviator Sénégal prediction','bonus casino sénégalais','slots Sénégal review','machines à sous Dakar','casino francophone Sénégal','roulette en ligne Sénégal'] },
+    { id:'1xc-cm', name:'Cameroun', geo:'CM',
+      keywords:['casino en ligne Cameroun','meilleur casino Douala','aviator Cameroun prediction','bonus casino camerounais','slots Cameroun review','casino francophone Yaoundé','machines à sous Cameroun','crash game Cameroun'] },
+    { id:'1xc-ma', name:'Morocco', geo:'MA',
+      keywords:['casino en ligne Maroc','aviator Maroc prediction','bonus casino marocain','أفضل كازينو على الإنترنت المغرب','slots Maroc review','machines à sous Maroc','كازينو أونلاين المغرب','moroccan online casino blog'] },
+    { id:'1xc-vn', name:'Vietnam', geo:'VN',
+      keywords:['casino online việt nam review','nhà cái uy tín','aviator dự đoán việt nam','slots vietnam review','casino trực tuyến đánh giá','nhà cái casino vietnam','bonus casino vietnam','trang đánh bạc trực tuyến'] },
+    { id:'1xc-mm', name:'Myanmar', geo:'MM',
+      keywords:['online casino myanmar review','aviator myanmar prediction','myanmar casino blog','slots myanmar review','casino bonus myanmar','burmese casino site','online gambling myanmar guide','myanmar sportsbook casino'] },
+    { id:'1xc-za', name:'South Africa', geo:'ZA',
+      keywords:['best online casino south africa review','aviator south africa prediction','casino bonus south africa','slots review south africa','crash game tips SA','rand casino review','south african casino blog','online gambling SA guide'] },
   ],
   'luckypari': [
-    { id:'lp-new-bet', name:'New Betting Sites — Global', geo:'Global',
-      keywords:["new betting sites 2025","new bookmaker review","alternative betting sites","best new sportsbook"] },
-    { id:'lp-new-casino', name:'New Casino — Global', geo:'Global',
-      keywords:["new casino 2025","best new online casino","new casino bonus","casino comparison new"] },
-    { id:'lp-franco', name:'Francophone Africa — New Brand', geo:'Africa FR',
-      keywords:["nouveau site de paris","nouveau bookmaker","nouveau casino en ligne"] },
-    { id:'lp-ru', name:'CIS — Новые бренды', geo:'CIS',
-      keywords:["новые букмекеры","новые казино","рейтинг букмекеров новые"] },
+    { id:'lp-in', name:'India — Mixed', geo:'IN',
+      keywords:['cricket prediction website india','online casino india review','ipl betting tips blog','aviator india prediction','sports betting india guide','casino bonus india site'] },
+    { id:'lp-bd', name:'Bangladesh — Mixed', geo:'BD',
+      keywords:['cricket prediction site bangladesh','online casino bangladesh','bpl betting tips review','casino bonus bangladesh'] },
   ],
 };
 
@@ -209,17 +227,6 @@ function extractFooter(html: string): string {
   // Fallback: last 20% of the document
   return html.slice(Math.floor(html.length * 0.8));
 }
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&[a-z]+;/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 let jinaCount = 0;
@@ -258,7 +265,7 @@ async function fetchPage(url: string): Promise<string | null> {
 interface Analysis {
   score: number; type: string; summary: string; why: string;
   priority: string; lang: string; is_competitor: boolean;
-  relevant: boolean; geo_excluded: boolean;
+  is_operator: boolean; relevant: boolean; geo_excluded: boolean;
 }
 
 let groqCount = 0;
@@ -270,35 +277,27 @@ async function analyzeWithGroq(
                      : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
   const text = pageText.slice(0, 6000);
 
-  const sys = `Ты опытный affiliate analyst для ${partnerBrand} (betting/iGaming вертикаль). `
-    + `Тебе дают реальный контент страницы сайта. Оцени его как потенциального аффилейт-партнёра `
-    + `(сайт который может рекламировать наш бренд за комиссию). `
-    + `Отвечай ТОЛЬКО валидным JSON, без markdown:\n`
-    + `{"score":число 0-100,"type":"review|tipster|news|directory|blog|streamer|other",`
-    + `"summary":"2-3 предложения на русском о чём сайт и его аудитория",`
-    + `"why":"1-2 предложения почему релевантен или нет",`
-    + `"priority":"High|Medium|Low","lang":"основной язык аудитории",`
-    + `"is_competitor":true/false,"relevant":true/false,"geo_excluded":true/false}\n\n`
-    + `Правила оценки:\n`
-    + `- Сайты с обзорами ставок/казино, прогнозами, типстерскими материалами, `
-    + `новостями iGaming, с реальным контентом и трафиком → score 60-95\n`
-    + `- Тематика гемблинга есть, но контента мало / сайт слабый → score 30-55\n`
-    + `- Сайт НЕ про гемблинг (обычные новости, магазин, корпоративный, блог не в теме) `
-    + `→ score 0-25, relevant=false\n`
-    + `- Сайт самого букмекера/казино-оператора (не аффилейт, а конкурент) `
-    + `→ is_competitor=true, relevant=false, score 0\n`
-    + `- Пустая/мёртвая/заглушка страница → score 0-15, relevant=false\n`
-    + `relevant=true ТОЛЬКО если score>=${MIN_SCORE} И is_competitor=false И geo_excluded=false.\n\n`
-    + `Правила geo_excluded:\n`
-    + `geo_excluded=true если сайт нацелен ПРЕИМУЩЕСТВЕННО на аудиторию из: `
-    + `США, Великобритании, Западной Европы (DE/FR/IT/ES/NL/BE/AT/CH/SE/NO/DK/FI/PL), `
-    + `Украины, Бразилии, Австралии/Новой Зеландии.\n`
-    + `geo_excluded=false для: Африки (в т.ч. франкоязычной), Азии (BD/IN/PK и т.д.), `
-    + `СНГ (RU/KZ/UZ/AZ, кроме UA), Нигерии, Кении, Турции, Латинской Америки кроме Бразилии.\n`
-    + `ВАЖНО: французский язык НЕ означает гео-исключение — французские сайты для Африки → geo_excluded=false.`;
+  const sys = `You qualify websites as affiliate partners for ${partnerBrand}.\n\n`
+    + `Brand context:\n`
+    + `- 1xBet: sports betting partner (tipsters, sports review, prediction sites)\n`
+    + `- 1xCasino: online casino/slots/crash partner (review sites, slot blogs, aviator/crash content)\n`
+    + `- LuckyPari: mixed (any iGaming content, treat as fresh brand)\n\n`
+    + `Return ONLY JSON:\n`
+    + `{"score":0-100,"type":"review|tipster|media|aggregator|blog|other",`
+    + `"summary":"1 sentence","why":"1 sentence — why fits or not",`
+    + `"priority":"High|Medium|Low","lang":"language code",`
+    + `"is_competitor":true/false,"relevant":true/false,"geo_excluded":true/false,"is_operator":true/false}\n\n`
+    + `Scoring:\n`
+    + `- 80-95: active site, content matches brand, contacts likely, target GEO\n`
+    + `- 60-79: matches but quality unclear or partial fit\n`
+    + `- 30-59: tangential, mixed signals\n`
+    + `- 0-29: not iGaming, dead, irrelevant\n\n`
+    + `Set is_operator=true if the site IS a casino/sportsbook (not a partner).\n`
+    + `Set is_competitor=true if it's a 1xBet/1xCasino/LuckyPari competitor brand.\n`
+    + `Set geo_excluded=true ONLY for: USA, UK, Western Europe, Ukraine, Brazil, Australia.\n`
+    + `Set relevant=false if is_operator OR is_competitor OR geo_excluded OR score<${MIN_SCORE}.`;
 
-  const user = `URL: ${url}\nЗаголовок: ${title}\nОписание из поиска: ${snippet}\n\n`
-    + `КОНТЕНТ СТРАНИЦЫ:\n${text}`;
+  const user = `URL: ${url}\nTitle: ${title}\nSnippet: ${snippet}\n\nPage content:\n${text}`;
 
   try {
     groqCount++;
@@ -311,8 +310,8 @@ async function analyzeWithGroq(
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
-        temperature: 0.2,
-        max_tokens: 600,
+        temperature: 0.1,
+        max_tokens: 300,
         response_format: { type: 'json_object' },
       }),
       signal: AbortSignal.timeout(22_000),
@@ -324,17 +323,19 @@ async function analyzeWithGroq(
 
     const score        = Math.max(0, Math.min(100, Number(ai.score) || 0));
     const is_competitor = !!ai.is_competitor;
+    const is_operator   = !!ai.is_operator;
     const geo_excluded  = !!ai.geo_excluded;
     return {
       score,
       type:         String(ai.type || 'other').slice(0, 30),
-      summary:      String(ai.summary || '').slice(0, 600),
-      why:          String(ai.why || '').slice(0, 400),
+      summary:      String(ai.summary || '').slice(0, 400),
+      why:          String(ai.why || '').slice(0, 200),
       priority:     ['High', 'Medium', 'Low'].includes(ai.priority) ? ai.priority : 'Medium',
       lang:         String(ai.lang || '').slice(0, 40),
       is_competitor,
+      is_operator,
       geo_excluded,
-      relevant:     !!ai.relevant && score >= MIN_SCORE && !is_competitor && !geo_excluded,
+      relevant:     !!ai.relevant && score >= MIN_SCORE && !is_competitor && !is_operator && !geo_excluded,
     };
   } catch (_) {
     return null;
@@ -598,7 +599,7 @@ Deno.serve(async (req: Request) => {
 
         if (analysis) {
           stats.analyzed++;
-          if (analysis.is_competitor) { stats.competitors++;  continue; }
+          if (analysis.is_competitor || analysis.is_operator) { stats.competitors++; continue; }
           if (analysis.geo_excluded)  { stats.geo_excluded++; continue; }
           if (!analysis.relevant)     { stats.irrelevant++;   continue; }
         }
