@@ -320,9 +320,13 @@ Deno.serve(async (req: Request) => {
         'youremail','your-email','your_email','yourname','your-name',
         'email@email','test@test','user@user','demo@','sample@','placeholder','changeme',
         'admin@example','info@example','user@example','test@example',
+        'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
       ];
+      const PLACEHOLDER_LOCAL_PQ = new Set(['email','mail','test','user','name','demo','sample']);
       const emailLower = (lead.contact_email || '').toLowerCase();
-      const isPlaceholder = EMAIL_PLACEHOLDERS_PQ.some(p => emailLower.includes(p));
+      const emailLocal = emailLower.split('@')[0];
+      const isPlaceholder = EMAIL_PLACEHOLDERS_PQ.some(p => emailLower.includes(p))
+                         || PLACEHOLDER_LOCAL_PQ.has(emailLocal);
 
       if (!lead.contact_email || isPlaceholder) {
         await supabase.from('send_queue')

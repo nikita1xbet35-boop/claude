@@ -134,7 +134,18 @@ const EMAIL_PLACEHOLDERS = [
   'email@email','test@test','user@user','name@name',
   'demo@','sample@','placeholder','changeme','username@',
   'admin@example','info@example','user@example','test@example',
+  // "email@domain.com", "mail@domain.com", "email@site.com" — generic template patterns
+  'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
 ];
+// Also catch local-part == "email" or "mail" with any domain (e.g. email@anything.com)
+const EMAIL_PLACEHOLDER_LOCAL = new Set(['email','mail','test','user','name','demo','sample','info123','admin123']);
+function isPlaceholderEmail(e: string): boolean {
+  const l = e.toLowerCase();
+  if (EMAIL_PLACEHOLDERS.some(p => l.includes(p))) return true;
+  const local = l.split('@')[0];
+  if (EMAIL_PLACEHOLDER_LOCAL.has(local)) return true;
+  return false;
+}
 const EMAIL_AD  = ['advertis','ads@','partner','sponsor','commercial','business','collab','media@','marketing'];
 const EMAIL_GEN = ['contact','info@','hello@','hi@','enquir','support'];
 const DISPOSABLE = ['mailinator.com','guerrillamail.com','10minutemail.com','tempmail','throwaway'];
@@ -142,9 +153,9 @@ const DISPOSABLE = ['mailinator.com','guerrillamail.com','10minutemail.com','tem
 function isValidEmail(e: string): boolean {
   if (!e || e.length > 100 || !e.includes('@') || !e.includes('.')) return false;
   const l = e.toLowerCase();
-  if (EMAIL_IGNORE.some(ig => l.includes(ig)))       return false;
-  if (EMAIL_PLACEHOLDERS.some(p => l.includes(p)))   return false;
-  if (DISPOSABLE.some(d => l.includes(d)))           return false;
+  if (EMAIL_IGNORE.some(ig => l.includes(ig))) return false;
+  if (isPlaceholderEmail(l))                   return false;
+  if (DISPOSABLE.some(d => l.includes(d)))     return false;
   return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(e);
 }
 function emailPriority(e: string): number {

@@ -40,13 +40,17 @@ const PLACEHOLDERS = [
   'email@email','test@test','user@user','name@name',
   'demo@','sample@','placeholder','changeme','username@',
   'admin@example','info@example','user@example','test@example',
+  'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
 ];
+const PLACEHOLDER_LOCAL = new Set(['email','mail','test','user','name','demo','sample','info123','admin123']);
 
 function isSendableEmail(e: string | null): boolean {
   if (!e) return false;
   const l = e.toLowerCase();
-  if (DISPOSABLE.some(d => l.includes(d)))  return false;
+  if (DISPOSABLE.some(d => l.includes(d)))   return false;
   if (PLACEHOLDERS.some(p => l.includes(p))) return false;
+  const local = l.split('@')[0];
+  if (PLACEHOLDER_LOCAL.has(local))          return false;
   return EMAIL_RE.test(e);
 }
 
