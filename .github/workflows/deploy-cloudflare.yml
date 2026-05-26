@@ -1,0 +1,22 @@
+name: Deploy Cloudflare Worker + Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'worker.js'
+      - 'wrangler.jsonc'
+      - '_headers'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
