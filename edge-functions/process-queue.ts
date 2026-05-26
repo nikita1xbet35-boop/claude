@@ -21,7 +21,7 @@ const cors = {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// GEO exclusion — mirrors the filter in find-and-queue so old leads are caught too
+// GEO exclusion — hard blacklist by TLD + geo field. Catches old leads that predated the filter.
 const EXCLUDED_TLDS = [
   '.co.uk', '.org.uk', '.me.uk',
   '.com.ua', '.org.ua',
@@ -29,16 +29,30 @@ const EXCLUDED_TLDS = [
   '.com.au', '.net.au', '.org.au',
   '.co.nz', '.com.nz',
 ];
-const EXCLUDED_CC_TLDS = ['.uk', '.ua', '.br', '.au', '.nz'];
-// European ccTLDs
+const EXCLUDED_CC_TLDS = ['.uk', '.ua', '.br', '.au', '.nz', '.us'];
 const EU_TLDS = ['.de','.fr','.it','.es','.nl','.be','.at','.ch','.se','.no','.dk','.fi','.pl','.pt','.cz','.hu','.ro','.bg','.hr','.sk','.si','.lt','.lv','.ee','.gr','.ie','.lu','.mt','.cy'];
 
-function isGeoExcluded(url: string): boolean {
+// Keywords that indicate excluded GEOs (for .com sites where TLD is neutral)
+const EXCLUDED_GEO_KEYWORDS = [
+  'united states', 'united kingdom', 'ukraine', 'brazil', 'australia', 'new zealand',
+  'usa', 'uk ', ' uk', 'u.s.', 'u.k.', ' us ', 'america',
+  'germany', 'france', 'italy', 'spain', 'netherlands', 'belgium', 'austria',
+  'switzerland', 'sweden', 'norway', 'denmark', 'finland', 'poland', 'portugal',
+  'czech', 'hungary', 'romania', 'bulgaria', 'croatia', 'slovakia', 'slovenia',
+  'lithuania', 'latvia', 'estonia', 'greece', 'ireland', 'luxembourg',
+];
+
+function isGeoExcluded(url: string, geoField?: string): boolean {
+  // Check geo field first (most reliable — set by Groq during lead analysis)
+  if (geoField) {
+    const g = geoField.toLowerCase();
+    if (EXCLUDED_GEO_KEYWORDS.some(k => g.includes(k))) return true;
+  }
+
   if (!url) return false;
   let hostname = '';
   try { hostname = new URL(url).hostname.toLowerCase(); }
   catch (_) { hostname = url.toLowerCase(); }
-  // Remove www.
   const h = hostname.replace(/^www\./, '');
   if (EXCLUDED_TLDS.some(t => h.endsWith(t))) return true;
   const parts = h.split('.');
@@ -320,8 +334,8 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      // Skip leads from excluded GEOs — catches old leads that predated the geo filter
-      if (isGeoExcluded(lead.url || '')) {
+      // Skip leads from excluded GEOs — URL TLD + geo field check
+      if (isGeoExcluded(lead.url || '', lead.geo || '')) {
         await supabase.from('send_queue')
           .update({ status: 'skipped', error: 'geo excluded (EU/UK/UA/BR/AU)' })
           .eq('id', item.id);

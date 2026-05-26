@@ -43,6 +43,26 @@ function isSendableEmail(e: string | null): boolean {
   return EMAIL_RE.test(e);
 }
 
+// GEO blacklist — same logic as process-queue so nothing slips through
+const GQ_EXCLUDED_TLDS = [
+  '.co.uk','.org.uk','.me.uk','.com.ua','.org.ua',
+  '.com.br','.net.br','.org.br','.com.au','.net.au','.org.au',
+  '.co.nz','.com.nz',
+];
+const GQ_EXCL_CC  = ['.uk','.ua','.br','.au','.nz','.us'];
+const GQ_EU_TLDS  = ['.de','.fr','.it','.es','.nl','.be','.at','.ch','.se','.no','.dk','.fi','.pl','.pt','.cz','.hu','.ro','.bg','.hr','.sk','.si','.lt','.lv','.ee','.gr','.ie','.lu','.mt','.cy'];
+const GQ_GEO_KW   = ['united states','united kingdom','ukraine','brazil','australia','new zealand','usa','u.s.','u.k.','america','germany','france','italy','spain','netherlands','belgium','austria','switzerland','sweden','norway','denmark','finland','poland','portugal','czech','hungary','romania','bulgaria','croatia'];
+
+function isGeoExcludedGQ(url: string, geo?: string): boolean {
+  if (geo) { const g = geo.toLowerCase(); if (GQ_GEO_KW.some(k => g.includes(k))) return true; }
+  if (!url) return false;
+  let h = '';
+  try { h = new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return false; }
+  if (GQ_EXCLUDED_TLDS.some(t => h.endsWith(t))) return true;
+  const tld = '.' + h.split('.').pop()!;
+  return GQ_EXCL_CC.includes(tld) || GQ_EU_TLDS.includes(tld);
+}
+
 function randInterval(): number {
   return MIN_INTERVAL_MS + Math.floor(Math.random() * (MAX_INTERVAL_MS - MIN_INTERVAL_MS));
 }
@@ -137,18 +157,23 @@ Deno.serve(async (req: Request) => {
     let newLeads: Array<{ id: string; brand: string }> = [];
 
     if (newQuota > 0) {
-      // Emails contacted in the last 30 days — dedup by address (spec §9)
+      // 1. Emails contacted in the last 30 days — dedup by address
       const thirtyDaysAgo = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString();
       const { data: recentSent } = await supabase
-        .from('email_log').select('email').gt('sent_at', thirtyDaysAgo);
+        .from('email_log').select('email, lead_id').gt('sent_at', thirtyDaysAgo);
       const emailedSet = new Set(
         (recentSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
       );
+      // Also dedup by lead_id — prevents duplicates even if contact email changed
+      const sentLeadIds = new Set(
+        (recentSent || []).map((r: any) => r.lead_id).filter(Boolean),
+      );
+
       const queuedLeadIds = new Set(livePending.map(p => p.lead_id));
 
       const { data: candidates, error: leadsErr } = await supabase
         .from('leads')
-        .select('id, brand, contact_email')
+        .select('id, brand, contact_email, url, geo')
         .eq('stage', 'new')
         .not('contact_email', 'is', null)
         .neq('contact_email', '')
@@ -159,8 +184,10 @@ Deno.serve(async (req: Request) => {
       for (const l of (candidates || [])) {
         if (newLeads.length >= newQuota) break;
         if (queuedLeadIds.has(l.id)) continue;
+        if (sentLeadIds.has(l.id)) continue;                          // dedup by lead_id
         if (!isSendableEmail(l.contact_email)) continue;
-        if (emailedSet.has(l.contact_email.toLowerCase())) continue;
+        if (emailedSet.has(l.contact_email.toLowerCase())) continue;  // dedup by email
+        if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;     // geo blacklist
         newLeads.push({ id: l.id, brand: l.brand });
       }
     }
