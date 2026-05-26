@@ -35,12 +35,43 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const EMAIL_RE   = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
 const DISPOSABLE = ['mailinator.com', 'guerrillamail.com', '10minutemail.com', 'tempmail', 'throwaway'];
+const PLACEHOLDERS = [
+  'youremail','your-email','your_email','yourname','your-name',
+  'email@email','test@test','user@user','name@name',
+  'demo@','sample@','placeholder','changeme','username@',
+  'admin@example','info@example','user@example','test@example',
+  'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
+];
+const PLACEHOLDER_LOCAL = new Set(['email','test','demo','sample','info123','admin123','example','noreply','donotreply','postmaster','mailer']);
 
 function isSendableEmail(e: string | null): boolean {
   if (!e) return false;
   const l = e.toLowerCase();
-  if (DISPOSABLE.some(d => l.includes(d))) return false;
+  if (DISPOSABLE.some(d => l.includes(d)))   return false;
+  if (PLACEHOLDERS.some(p => l.includes(p))) return false;
+  const local = l.split('@')[0];
+  if (PLACEHOLDER_LOCAL.has(local))          return false;
   return EMAIL_RE.test(e);
+}
+
+// GEO blacklist — same logic as process-queue so nothing slips through
+const GQ_EXCLUDED_TLDS = [
+  '.co.uk','.org.uk','.me.uk','.com.ua','.org.ua',
+  '.com.br','.net.br','.org.br','.com.au','.net.au','.org.au',
+  '.co.nz','.com.nz',
+];
+const GQ_EXCL_CC  = ['.uk','.ua','.br','.au','.nz','.us'];
+const GQ_EU_TLDS  = ['.de','.fr','.it','.es','.nl','.be','.at','.ch','.se','.no','.dk','.fi','.pl','.pt','.cz','.hu','.ro','.bg','.hr','.sk','.si','.lt','.lv','.ee','.gr','.ie','.lu','.mt','.cy'];
+const GQ_GEO_KW   = ['united states','united kingdom','ukraine','brazil','australia','new zealand','usa','u.s.','u.k.','america','germany','france','italy','spain','netherlands','belgium','austria','switzerland','sweden','norway','denmark','finland','poland','portugal','czech','hungary','romania','bulgaria','croatia'];
+
+function isGeoExcludedGQ(url: string, geo?: string): boolean {
+  if (geo) { const g = geo.toLowerCase(); if (GQ_GEO_KW.some(k => g.includes(k))) return true; }
+  if (!url) return false;
+  let h = '';
+  try { h = new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return false; }
+  if (GQ_EXCLUDED_TLDS.some(t => h.endsWith(t))) return true;
+  const tld = '.' + h.split('.').pop()!;
+  return GQ_EXCL_CC.includes(tld) || GQ_EU_TLDS.includes(tld);
 }
 
 function randInterval(): number {
@@ -55,21 +86,13 @@ Deno.serve(async (req: Request) => {
     const nowGMT3 = new Date(nowMs + 3 * 60 * 60 * 1000);
     const todayStr = nowGMT3.toISOString().slice(0, 10);
 
-    // System pause check
-    const { data: sysRow } = await supabase
-      .from('api_usage').select('system_paused').eq('service', 'gmail_main').single();
-    if (sysRow?.system_paused) {
-      return new Response(JSON.stringify({ generated: 0, repacked: 0, skipped: true, reason: 'system paused' }),
-        { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
+    // generate-queue never pauses — queue prep is always safe (process-queue is the gatekeeper)
 
     // GMT+3 day boundaries / working window (as UTC instants)
     const todayMidnightUTC    = new Date(`${todayStr}T00:00:00+03:00`);
     const tomorrowMidnightUTC = new Date(todayMidnightUTC.getTime() + 24 * 60 * 60 * 1000);
     const workStartMs = new Date(`${todayStr}T09:00:00+03:00`).getTime();
     const workEndMs   = new Date(`${todayStr}T18:00:00+03:00`).getTime();
-    const lunchStart  = new Date(`${todayStr}T13:00:00+03:00`).getTime();
-    const lunchEnd    = new Date(`${todayStr}T14:00:00+03:00`).getTime();
 
     // After the work day — nothing to schedule today
     if (nowMs >= workEndMs) {
@@ -139,18 +162,23 @@ Deno.serve(async (req: Request) => {
     let newLeads: Array<{ id: string; brand: string }> = [];
 
     if (newQuota > 0) {
-      // Emails contacted in the last 30 days — dedup by address (spec §9)
+      // 1. Emails contacted in the last 30 days — dedup by address
       const thirtyDaysAgo = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString();
       const { data: recentSent } = await supabase
-        .from('email_log').select('email').gt('sent_at', thirtyDaysAgo);
+        .from('email_log').select('email, lead_id').gt('sent_at', thirtyDaysAgo);
       const emailedSet = new Set(
         (recentSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
       );
+      // Also dedup by lead_id — prevents duplicates even if contact email changed
+      const sentLeadIds = new Set(
+        (recentSent || []).map((r: any) => r.lead_id).filter(Boolean),
+      );
+
       const queuedLeadIds = new Set(livePending.map(p => p.lead_id));
 
       const { data: candidates, error: leadsErr } = await supabase
         .from('leads')
-        .select('id, brand, contact_email')
+        .select('id, brand, contact_email, url, geo')
         .eq('stage', 'new')
         .not('contact_email', 'is', null)
         .neq('contact_email', '')
@@ -161,8 +189,10 @@ Deno.serve(async (req: Request) => {
       for (const l of (candidates || [])) {
         if (newLeads.length >= newQuota) break;
         if (queuedLeadIds.has(l.id)) continue;
+        if (sentLeadIds.has(l.id)) continue;                          // dedup by lead_id
         if (!isSendableEmail(l.contact_email)) continue;
-        if (emailedSet.has(l.contact_email.toLowerCase())) continue;
+        if (emailedSet.has(l.contact_email.toLowerCase())) continue;  // dedup by email
+        if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;     // geo blacklist
         newLeads.push({ id: l.id, brand: l.brand });
       }
     }
@@ -174,33 +204,24 @@ Deno.serve(async (req: Request) => {
     const updates: Array<{ id: number; scheduled_at: string }> = [];
     const inserts: Array<Record<string, unknown>> = [];
 
-    // Advance cursor past lunch / clamp to the working window.
-    const advance = (c: number): number => {
-      if (c >= lunchStart && c < lunchEnd) c = lunchEnd;
-      return c;
-    };
-
     // 1. Overdue items fire first — densely from now+delay.
-    let cursor = advance(Math.max(nowMs + START_DELAY_MS, workStartMs));
+    let cursor = Math.max(nowMs + START_DELAY_MS, workStartMs);
     for (const p of overduePending) {
-      cursor = advance(cursor);
       if (cursor >= workEndMs) break;
       updates.push({ id: p.id as number, scheduled_at: new Date(cursor).toISOString() });
       cursor += randInterval();
     }
 
-    // 2. New leads continue after both the overdue burst and any future items.
-    const latestFuture = futurePending.reduce(
-      (max, p) => Math.max(max, new Date(p.scheduled_at as string).getTime()), 0,
-    );
-    cursor = advance(Math.max(cursor, latestFuture + randInterval()));
+    // 2. New leads are inserted starting from the current cursor (near now+90s),
+    //    NOT appended after the latest future item. Future items keep their stable
+    //    times and will interleave naturally — process-queue picks by scheduled_at ASC.
+    //    This eliminates long gaps when future items happen to be far away.
     for (const l of newLeads) {
-      cursor = advance(cursor);
       if (cursor >= workEndMs) break;
       inserts.push({
         lead_id:       l.id,
         brand:         l.brand,
-        gmail_account: l.brand === 'luckypari' ? 'lp' : 'main',
+        gmail_account: 'main', // LP account disabled — all sends via main
         scheduled_at:  new Date(cursor).toISOString(),
         status:        'pending',
       });

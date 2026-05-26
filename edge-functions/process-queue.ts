@@ -5,8 +5,6 @@ const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // Supabase auto-injects SUPABASE_ANON_KEY; fall back to service role so apikey header is never empty
 const SUPABASE_ANON = Deno.env.get('SUPABASE_ANON_KEY') || SUPABASE_KEY;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
-const GROQ_API_KEY  = Deno.env.get('GROQ_API_KEY') ||
-  ['gsk_fFeymSY6J6SrLPZRyXX3WGd', 'yb3FYobOMV2q3vZ2p4PRNwSmsWRnA'].join('');
 
 const ACCOUNT_DAILY_LIMIT = 100;
 const BATCH_SIZE          = 5;
@@ -20,6 +18,47 @@ const cors = {
 };
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// GEO exclusion — hard blacklist by TLD + geo field. Catches old leads that predated the filter.
+const EXCLUDED_TLDS = [
+  '.co.uk', '.org.uk', '.me.uk',
+  '.com.ua', '.org.ua',
+  '.com.br', '.net.br', '.org.br',
+  '.com.au', '.net.au', '.org.au',
+  '.co.nz', '.com.nz',
+];
+const EXCLUDED_CC_TLDS = ['.uk', '.ua', '.br', '.au', '.nz', '.us'];
+const EU_TLDS = ['.de','.fr','.it','.es','.nl','.be','.at','.ch','.se','.no','.dk','.fi','.pl','.pt','.cz','.hu','.ro','.bg','.hr','.sk','.si','.lt','.lv','.ee','.gr','.ie','.lu','.mt','.cy'];
+
+// Keywords that indicate excluded GEOs (for .com sites where TLD is neutral)
+const EXCLUDED_GEO_KEYWORDS = [
+  'united states', 'united kingdom', 'ukraine', 'brazil', 'australia', 'new zealand',
+  'usa', 'uk ', ' uk', 'u.s.', 'u.k.', ' us ', 'america',
+  'germany', 'france', 'italy', 'spain', 'netherlands', 'belgium', 'austria',
+  'switzerland', 'sweden', 'norway', 'denmark', 'finland', 'poland', 'portugal',
+  'czech', 'hungary', 'romania', 'bulgaria', 'croatia', 'slovakia', 'slovenia',
+  'lithuania', 'latvia', 'estonia', 'greece', 'ireland', 'luxembourg',
+];
+
+function isGeoExcluded(url: string, geoField?: string): boolean {
+  // Check geo field first (most reliable — set by Groq during lead analysis)
+  if (geoField) {
+    const g = geoField.toLowerCase();
+    if (EXCLUDED_GEO_KEYWORDS.some(k => g.includes(k))) return true;
+  }
+
+  if (!url) return false;
+  let hostname = '';
+  try { hostname = new URL(url).hostname.toLowerCase(); }
+  catch (_) { hostname = url.toLowerCase(); }
+  const h = hostname.replace(/^www\./, '');
+  if (EXCLUDED_TLDS.some(t => h.endsWith(t))) return true;
+  const parts = h.split('.');
+  const tld = '.' + parts[parts.length - 1];
+  if (EXCLUDED_CC_TLDS.includes(tld)) return true;
+  if (EU_TLDS.includes(tld)) return true;
+  return false;
+}
 
 function toGMT3(date: Date) {
   const gmt3 = new Date(date.getTime() + 3 * 60 * 60 * 1000);
@@ -60,77 +99,106 @@ async function sendAlert(level: string, service: string, message: string) {
   await callFunction('send-alert', { level, service, message });
 }
 
-// Generate a personalised outreach email with Groq, using the relevance
-// analysis (summary / why) that find-and-queue stored on the lead.
-async function generateMessage(
-  lead: Record<string, unknown>, brand: string, account: string,
-): Promise<string | null> {
-  const partnerBrand = brand === '1xcasino' ? '1xCasino'
-                     : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
-  const managerName  = account === 'lp' ? 'Andreas' : 'Nick';
+// GEO code → country name for email templates
+const GEO_NAMES: Record<string, string> = {
+  ID: 'Indonesia', BD: 'Bangladesh', IN: 'India', CI: "Côte d'Ivoire",
+  EG: 'Egypt', MY: 'Malaysia', UZ: 'Uzbekistan', NP: 'Nepal',
+  PK: 'Pakistan', TR: 'Turkey', AR: 'Argentina', CL: 'Chile',
+  PH: 'Philippines', BF: 'Burkina Faso', SN: 'Senegal', CM: 'Cameroun',
+  MA: 'Morocco', VN: 'Vietnam', MM: 'Myanmar', ZA: 'South Africa',
+  NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', TZ: 'Tanzania',
+  // fallbacks for other stored geo values
+  'Africa FR': 'West Africa', 'CIS': 'the region', 'Global': 'the region',
+};
 
-  const prompt = `You are ${managerName}, an affiliate manager at ${partnerBrand} `
-    + `(betting / iGaming). Write a short first-touch outreach email in English to a `
-    + `potential affiliate partner.\n\n`
-    + `Partner data:\n`
-    + `- Name: ${lead.name || 'their site'}\n`
-    + `- Website: ${lead.url || ''}\n`
-    + `- Type: ${lead.type || 'affiliate site'}\n`
-    + `- GEO: ${lead.geo || ''}\n`
-    + `- What the site is about: ${lead.summary || 'an iGaming-related audience'}\n`
-    + `- Why they fit: ${lead.why || ''}\n\n`
-    + `Requirements:\n`
-    + `- 3-5 sentences, no more\n`
-    + `- Friendly, professional, not pushy\n`
-    + `- Reference their site specifically so it is clear you actually looked at it\n`
-    + `- Propose discussing a RevShare partnership\n`
-    + `- Do NOT mention specific numbers or percentages\n`
-    + `- End with the signature line: "Best regards,\\n${managerName}"\n`
-    + `- Output ONLY the email body text — no subject line, no extra commentary`;
+function geoName(geoCode: string): string {
+  if (!geoCode) return 'the region';
+  return GEO_NAMES[geoCode.trim().toUpperCase()] || GEO_NAMES[geoCode.trim()] || geoCode;
+}
 
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + GROQ_API_KEY,
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.5,
-        max_tokens: 400,
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!res.ok) return null;
-    const d = await res.json();
-    const text = (d?.choices?.[0]?.message?.content || '').trim();
-    return text.length > 30 ? text : null;
-  } catch (_) {
-    return null;
+/** Build the outreach email body from a fixed template. No Groq needed. */
+function buildEmailBody(lead: Record<string, unknown>, brand: string): string {
+  const siteName = cleanSiteName(lead.name as string, lead.url as string || '');
+  const country  = geoName(lead.geo as string || '');
+  const is1xCasino = brand === '1xcasino';
+
+  if (is1xCasino) {
+    return `Hi ${siteName} team,\n`
+      + `Nick from 1xCasino here.\n\n`
+      + `Saw ${siteName} while reviewing top affiliate platforms in ${country} — the kind of project we look to partner with directly in this market.\n\n`
+      + `1xCasino is one of the strongest casino brands across ${country}, and we run a clean RevShare model — up to 55% for top GEOs, from day one. No admin fee, no hidden commissions, no test month gates. Individual terms calibrated to your audience.\n\n`
+      + `Worth a quick chat?\n\n`
+      + `— Nick\n`
+      + `1xCasino Partners\n`
+      + `Telegram: @aff_manager_xbet`;
   }
+
+  return `Hi ${siteName} team,\n`
+    + `Nick from 1xBet here.\n\n`
+    + `Saw ${siteName} while reviewing top affiliate platforms in ${country} — the kind of project we look to partner with directly in this market.\n\n`
+    + `1xBet is one of the leading sports betting brands across ${country} and the broader region. A direct partnership would mean clean RevShare on traffic you're already generating, no admin fee, no hidden commissions, individual terms calibrated to your audience and scale.\n\n`
+    + `Worth a quick chat?\n\n`
+    + `— Nick\n`
+    + `1xBet Partners\n`
+    + `Telegram: @aff_manager_xbet`;
 }
 
 // Strip non-ASCII so subject headers never need RFC 2047 encoding.
-// leadName can be a Cyrillic/CJK site name — keep only printable ASCII.
 function toAsciiSafe(s: string): string {
   return s.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
 }
 
-// send_queue.id is BIGSERIAL (integer) — use modulo directly for subject variant
-function buildSubject(itemId: number, leadName: string, brand: string): string {
-  const variant      = itemId % 4;
-  const brandDisplay = brand === '1xcasino' ? '1xCasino' : '1xBet';
-  // Use ASCII-safe site name; fall back to domain-hint or generic label.
-  const rawName  = leadName || 'your site';
-  const sitename = toAsciiSafe(rawName) || 'your site';
-  switch (variant) {
-    case 0:  return `${brandDisplay} x ${sitename} - partnership`;
-    case 1:  return `${sitename} x ${brandDisplay} - partnership`;
-    case 2:  return `Partnership inquiry - ${sitename} x ${brandDisplay}`;
-    default: return `${brandDisplay} for ${sitename} - quick chat?`;
+/**
+ * Extract a clean short company name from the lead.
+ * lead.name is often a full SEO page title like
+ *   "New Betting Sites (May 2026) 77 Best & Newest UK..."
+ * We want just "New Betting Sites" or fall back to the domain.
+ */
+function cleanSiteName(leadName: string, leadUrl: string): string {
+  // Try to get hostname as fallback
+  let domain = '';
+  try {
+    const h = new URL(leadUrl).hostname.replace(/^www\./, '');
+    // Convert domain to title: "gooners-guide.com" → "Gooners Guide"
+    domain = h.split('.')[0]
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  } catch (_) { /* ignore */ }
+
+  if (!leadName) return domain || 'your site';
+
+  const ascii = toAsciiSafe(leadName);
+  if (!ascii) return domain || 'your site';
+
+  // Remove common SEO noise patterns:
+  // - years: (May 2026), 2026, 2025
+  // - ordinals/counts: "77 Best", "Top 10"
+  // - trailing review words
+  let cleaned = ascii
+    .replace(/\([^)]*\d{4}[^)]*\)/g, '')          // (May 2026), (2026)
+    .replace(/\b(19|20)\d{2}\b/g, '')              // standalone years
+    .replace(/\b\d+\s+(best|top|new|latest|newest|great)\b/gi, '') // "77 Best"
+    .replace(/\b(top|best|new|latest|newest)\s+\d+\b/gi, '')       // "Top 10"
+    .replace(/[-|:,–]\s*(review|guide|list|sportsbook|bookmaker|casino|betting|sites?|bonus|offers?|ratings?|pros?|cons?|vs\.?|comparison|roundup|overview|news|tips?|blog|analysis|rankings?).*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // If it got too short after cleaning, fall back to domain
+  if (cleaned.length < 3) return domain || 'your site';
+
+  // Truncate to 40 chars at a word boundary
+  if (cleaned.length > 40) {
+    cleaned = cleaned.slice(0, 40).replace(/\s+\S*$/, '').trim();
   }
+
+  return cleaned || domain || 'your site';
+}
+
+// Subject exactly as per template: "1xBet × [Сайт] — partnership"
+function buildSubject(leadName: string, leadUrl: string, brand: string): string {
+  const brandDisplay = brand === '1xcasino' ? '1xCasino' : '1xBet';
+  const sitename     = cleanSiteName(leadName, leadUrl);
+  return `${brandDisplay} × ${sitename} — partnership`;
 }
 
 async function markFailed(item: Record<string, unknown>, errMsg: string): Promise<boolean> {
@@ -152,25 +220,13 @@ Deno.serve(async (req: Request) => {
   try {
     const now = new Date();
 
-    // 1. System pause check
-    const { data: gmailUsage, error: usageErr } = await supabase
-      .from('api_usage')
-      .select('paused, system_paused')
-      .eq('service', 'gmail_main')
-      .single();
-
-    if (usageErr && usageErr.code !== 'PGRST116') {
-      throw new Error(`api_usage query failed: ${usageErr.message}`);
-    }
-    if (gmailUsage?.system_paused || gmailUsage?.paused) {
-      stats.reason = 'system paused';
-      return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
+    // Pause logic removed entirely — system is self-healing.
+    // Individual failures mark items as failed/skipped; system keeps running.
 
     // 2. Working hours: 09:00–18:00 GMT+3, skip 13:00–14:00
     const { hour, dayOfWeek, dateStr } = toGMT3(now);
-    if (hour < 9 || hour >= 18 || hour === 13) {
-      stats.reason = hour === 13 ? 'lunch break' : hour < 9 ? 'before working hours' : 'after working hours';
+    if (hour < 9 || hour >= 18) {
+      stats.reason = hour < 9 ? 'before working hours' : 'after working hours';
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
@@ -192,11 +248,14 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 4. Fetch pending queue items due now
+    // 4. Fetch pending + retryable-failed queue items due now.
+    //    'failed' items (retry_count < MAX_RETRIES) are included so they get
+    //    a second chance after transient errors (e.g. wrong credentials fixed).
     const { data: queueItems, error: queueErr } = await supabase
       .from('send_queue')
       .select('*')
-      .eq('status', 'pending')
+      .in('status', ['pending', 'failed'])
+      .lt('retry_count', MAX_RETRIES)
       .lte('scheduled_at', now.toISOString())
       .order('scheduled_at', { ascending: true })
       .limit(BATCH_SIZE);
@@ -213,8 +272,9 @@ Deno.serve(async (req: Request) => {
     for (const item of queueItems) {
       stats.processed++;
 
-      const account    = item.gmail_account as string;
-      const usageService = account === 'lp' ? 'gmail_lp' : 'gmail_main';
+      // LP account disabled — route everything through main
+      const account    = 'main';
+      const usageService = 'gmail_main';
 
       // Per-account daily quota
       if (!(account in accountQuotaCache)) {
@@ -244,25 +304,40 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      if (!lead.contact_email) {
+      const EMAIL_PLACEHOLDERS_PQ = [
+        'youremail','your-email','your_email','yourname','your-name',
+        'email@email','test@test','user@user','demo@','sample@','placeholder','changeme',
+        'admin@example','info@example','user@example','test@example',
+        'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
+      ];
+      const PLACEHOLDER_LOCAL_PQ = new Set(['email','test','demo','sample','example','noreply','donotreply','postmaster','mailer']);
+      const emailLower = (lead.contact_email || '').toLowerCase();
+      const emailLocal = emailLower.split('@')[0];
+      const isPlaceholder = EMAIL_PLACEHOLDERS_PQ.some(p => emailLower.includes(p))
+                         || PLACEHOLDER_LOCAL_PQ.has(emailLocal);
+
+      if (!lead.contact_email || isPlaceholder) {
         await supabase.from('send_queue')
-          .update({ status: 'skipped', error: 'no contact email' })
+          .update({ status: 'skipped', error: isPlaceholder ? `placeholder email: ${lead.contact_email}` : 'no contact email' })
           .eq('id', item.id);
         stats.skipped++;
         continue;
       }
 
-      const subject = buildSubject(item.id as number, lead.name, item.brand);
-
-      // Generate a personalised email body with Groq; fall back to a template.
-      let body = await generateMessage(lead, item.brand, account) ?? '';
-
-      if (!body) {
-        const brandDisplay = item.brand === '1xcasino' ? '1xCasino'
-                           : item.brand === 'luckypari' ? 'LuckyPari' : '1xBet';
-        const managerName  = account === 'lp' ? 'Andreas' : 'Nick';
-        body = `Hi ${lead.name || 'there'},\n\nI came across ${lead.url} and would love to discuss a partnership opportunity with ${brandDisplay}.\n\nWe offer competitive commissions and dedicated support.\n\nWould you be open to a quick chat?\n\nBest regards,\n${managerName}`;
+      // Skip leads from excluded GEOs — URL TLD + geo field check
+      if (isGeoExcluded(lead.url || '', lead.geo || '')) {
+        await supabase.from('send_queue')
+          .update({ status: 'skipped', error: 'geo excluded (EU/UK/UA/BR/AU)' })
+          .eq('id', item.id);
+        await supabase.from('leads')
+          .update({ stage: 'excluded' })
+          .eq('id', lead.id);
+        stats.skipped++;
+        continue;
       }
+
+      const subject = buildSubject(lead.name, lead.url || '', item.brand);
+      const body    = buildEmailBody(lead, item.brand);
 
       // Send
       let sendResult: { ok: boolean; data: unknown };
@@ -311,6 +386,10 @@ Deno.serve(async (req: Request) => {
         const d      = sendResult.data as Record<string, unknown> | null;
         const detail = d ? JSON.stringify(d).slice(0, 300) : 'empty response';
         const msg    = (d?.error as string) ?? (d?.message as string) ?? `send-email non-OK: ${detail}`;
+
+        // No auto-pause anymore — that just made the system get stuck.
+        // Just mark this item as failed; if credentials are broken,
+        // a few items get skipped but the system keeps trying.
         await logError('error', 'process-queue', `send-email failed item ${item.id} to=${lead.contact_email}: ${msg}`, item.lead_id);
         const permanent = await markFailed(item, msg);
         if (permanent) {

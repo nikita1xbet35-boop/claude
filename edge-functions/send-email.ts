@@ -1,4 +1,4 @@
-// Supabase Edge Function: send-email
+// Supabase Edge Function: send-email  v2 (2026-05-25)
 // Sends a single email via Gmail SMTP (port 465 / TLS) using App Password credentials.
 // Uses a minimal hand-rolled SMTP client so we control encoding exactly:
 //   - Body: base64, no quoted-printable artifacts
@@ -69,11 +69,18 @@ async function smtpSend(cfg: {
   // Wrap buffer so we can read line-by-line across chunks.
   let pending = '';
 
+  // Hard 30-second deadline for the entire SMTP conversation.
+  const deadline = Date.now() + 30_000;
+  function checkDeadline() {
+    if (Date.now() > deadline) throw new Error('SMTP timeout: conversation took >30s');
+  }
+
   const conn = await Deno.connectTls({ hostname: cfg.hostname, port: cfg.port });
 
   async function readReply(): Promise<{ code: string; text: string }> {
     const lines: string[] = [];
     while (true) {
+      checkDeadline();
       // Consume buffered data first.
       while (true) {
         const nl = pending.indexOf('\n');
@@ -86,11 +93,16 @@ async function smtpSend(cfg: {
           return { code: last.slice(0, 3), text: lines.join(' | ') };
         }
       }
-      // Need more data.
+      // Need more data — use a short read timeout so checkDeadline stays active.
       const chunk = new Uint8Array(4096);
-      const n     = await conn.read(chunk);
+      const readPromise = conn.read(chunk);
+      const n = await Promise.race([
+        readPromise,
+        new Promise<null>((_, rej) =>
+          setTimeout(() => rej(new Error('SMTP read timeout')), 8_000)),
+      ]);
       if (n === null) throw new Error('SMTP connection closed unexpectedly');
-      pending += dec.decode(chunk.subarray(0, n));
+      pending += dec.decode(chunk.subarray(0, n as number));
     }
   }
 
@@ -165,18 +177,22 @@ Deno.serve(async (req: Request) => {
       { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  const isLP      = account === 'lp';
-  const gmailUser = isLP ? Deno.env.get('GMAIL_USER_LP')   : Deno.env.get('GMAIL_USER_MAIN');
-  const gmailPass = isLP ? Deno.env.get('GMAIL_PASS_LP')   : Deno.env.get('GMAIL_PASS_MAIN');
+  // LP account disabled — always use main credentials regardless of `account` param
+  const gmailUser = Deno.env.get('GMAIL_USER_MAIN');
+  const gmailPass = Deno.env.get('GMAIL_PASS_MAIN');
 
   if (!gmailUser || !gmailPass) {
-    const missing = isLP ? 'GMAIL_USER_LP / GMAIL_PASS_LP' : 'GMAIL_USER_MAIN / GMAIL_PASS_MAIN';
-    return new Response(JSON.stringify({ error: `Gmail credentials not configured: ${missing}` }),
+    return new Response(JSON.stringify({ error: 'GMAIL_USER_MAIN or GMAIL_PASS_MAIN is not set in Supabase Secrets' }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  // ASCII-only sender names — no em-dashes, no RFC 2047 encoding needed.
-  const senderName = isLP ? 'Andreas - LuckyPari' : 'Nick - 1xPartners';
+  if (gmailPass === 'default' || gmailPass.length < 8) {
+    return new Response(JSON.stringify({
+      error: `GMAIL_PASS_MAIN looks like a placeholder ("${gmailPass.slice(0,6)}..."). Set a real Gmail App Password in Supabase Secrets.`,
+    }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
+  const senderName = 'Nick - 1xPartners';
 
   try {
     await smtpSend({
