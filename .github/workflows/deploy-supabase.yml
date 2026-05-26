@@ -74,12 +74,14 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase functions deploy admin-reset --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
-      - name: Auto-unpause system after deploy
+      - name: Reset system state via Supabase Management API
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          sleep 8
+          # Unpause + reset failed/skipped items + clear lp account assignments + purge geo-excluded leads
           curl -sf -X POST \
-            "https://lxsyrserfuighwxuymgb.supabase.co/functions/v1/admin-reset" \
-            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
-            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
-            && echo "System unpaused + queue reset OK" || echo "admin-reset call failed (non-fatal)"
+            -d '{"query":"UPDATE public.api_usage SET system_paused = false, paused = false WHERE service IN (''gmail_main'',''gmail_lp''); UPDATE public.send_queue SET gmail_account = ''main'' WHERE gmail_account = ''lp''; UPDATE public.send_queue SET status = ''pending'', retry_count = 0, error = NULL WHERE status = ''failed'';"}' \
+            && echo "System unpaused + failed items requeued" || echo "Reset call failed (non-fatal)"

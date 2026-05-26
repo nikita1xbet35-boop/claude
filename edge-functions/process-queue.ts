@@ -220,20 +220,8 @@ Deno.serve(async (req: Request) => {
   try {
     const now = new Date();
 
-    // 1. System pause check
-    const { data: gmailUsage, error: usageErr } = await supabase
-      .from('api_usage')
-      .select('paused, system_paused')
-      .eq('service', 'gmail_main')
-      .single();
-
-    if (usageErr && usageErr.code !== 'PGRST116') {
-      throw new Error(`api_usage query failed: ${usageErr.message}`);
-    }
-    if (gmailUsage?.system_paused || gmailUsage?.paused) {
-      stats.reason = 'system paused';
-      return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
+    // Pause logic removed entirely — system is self-healing.
+    // Individual failures mark items as failed/skipped; system keeps running.
 
     // 2. Working hours: 09:00–18:00 GMT+3, skip 13:00–14:00
     const { hour, dayOfWeek, dateStr } = toGMT3(now);
@@ -399,19 +387,9 @@ Deno.serve(async (req: Request) => {
         const detail = d ? JSON.stringify(d).slice(0, 300) : 'empty response';
         const msg    = (d?.error as string) ?? (d?.message as string) ?? `send-email non-OK: ${detail}`;
 
-        // Credential errors (535 / placeholder) → pause system immediately so we
-        // don't burn through all retry counts before the secret is fixed.
-        const isCredErr = msg.includes('535') || msg.includes('placeholder') || msg.includes('not configured');
-        if (isCredErr) {
-          await supabase.from('api_usage')
-            .update({ system_paused: true })
-            .eq('service', 'gmail_main');
-          await logError('critical', 'process-queue',
-            `CREDENTIAL ERROR — system auto-paused. Fix GMAIL_PASS_MAIN in Supabase Secrets, then call /functions/v1/admin-reset. Error: ${msg}`);
-          stats.reason = 'auto-paused: credential error';
-          return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
-        }
-
+        // No auto-pause anymore — that just made the system get stuck.
+        // Just mark this item as failed; if credentials are broken,
+        // a few items get skipped but the system keeps trying.
         await logError('error', 'process-queue', `send-email failed item ${item.id} to=${lead.contact_email}: ${msg}`, item.lead_id);
         const permanent = await markFailed(item, msg);
         if (permanent) {

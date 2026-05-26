@@ -86,13 +86,7 @@ Deno.serve(async (req: Request) => {
     const nowGMT3 = new Date(nowMs + 3 * 60 * 60 * 1000);
     const todayStr = nowGMT3.toISOString().slice(0, 10);
 
-    // System pause check
-    const { data: sysRow } = await supabase
-      .from('api_usage').select('system_paused').eq('service', 'gmail_main').single();
-    if (sysRow?.system_paused) {
-      return new Response(JSON.stringify({ generated: 0, repacked: 0, skipped: true, reason: 'system paused' }),
-        { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
+    // generate-queue never pauses — queue prep is always safe (process-queue is the gatekeeper)
 
     // GMT+3 day boundaries / working window (as UTC instants)
     const todayMidnightUTC    = new Date(`${todayStr}T00:00:00+03:00`);

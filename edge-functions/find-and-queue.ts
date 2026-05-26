@@ -498,13 +498,7 @@ Deno.serve(async (req: Request) => {
   const deadline  = startedAt + TIME_BUDGET_MS;
 
   try {
-    // 1. System pause check
-    const { data: sysRow } = await supabase
-      .from('api_usage').select('system_paused').eq('service', 'gmail_main').single();
-    if (sysRow?.system_paused) {
-      return new Response(JSON.stringify({ skipped: true, reason: 'system paused' }),
-        { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
+    // find-and-queue never pauses — finding new leads is always valuable
     if (!SERP_API_KEY) {
       return new Response(JSON.stringify({ skipped: true, reason: 'SERP_API_KEY not configured' }),
         { headers: { ...cors, 'Content-Type': 'application/json' } });
