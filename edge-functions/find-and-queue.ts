@@ -138,7 +138,7 @@ const EMAIL_PLACEHOLDERS = [
   'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
 ];
 // Also catch local-part == "email" or "mail" with any domain (e.g. email@anything.com)
-const EMAIL_PLACEHOLDER_LOCAL = new Set(['email','mail','test','user','name','demo','sample','info123','admin123','example','noreply','donotreply','postmaster','mailer','webmaster']);
+const EMAIL_PLACEHOLDER_LOCAL = new Set(['email','mail','test','user','name','demo','sample','info123','admin123','example','noreply','donotreply','postmaster','mailer']);
 function isPlaceholderEmail(e: string): boolean {
   const l = e.toLowerCase();
   if (EMAIL_PLACEHOLDERS.some(p => l.includes(p))) return true;

@@ -42,7 +42,7 @@ const PLACEHOLDERS = [
   'admin@example','info@example','user@example','test@example',
   'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
 ];
-const PLACEHOLDER_LOCAL = new Set(['email','mail','test','user','name','demo','sample','info123','admin123','example','noreply','donotreply','postmaster','mailer','webmaster']);
+const PLACEHOLDER_LOCAL = new Set(['email','mail','test','user','name','demo','sample','info123','admin123','example','noreply','donotreply','postmaster','mailer']);
 
 function isSendableEmail(e: string | null): boolean {
   if (!e) return false;

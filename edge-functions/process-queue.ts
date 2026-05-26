@@ -322,7 +322,7 @@ Deno.serve(async (req: Request) => {
         'admin@example','info@example','user@example','test@example',
         'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
       ];
-      const PLACEHOLDER_LOCAL_PQ = new Set(['email','mail','test','user','name','demo','sample','example','noreply','donotreply','postmaster','mailer','webmaster']);
+      const PLACEHOLDER_LOCAL_PQ = new Set(['email','mail','test','user','name','demo','sample','example','noreply','donotreply','postmaster','mailer']);
       const emailLower = (lead.contact_email || '').toLowerCase();
       const emailLocal = emailLower.split('@')[0];
       const isPlaceholder = EMAIL_PLACEHOLDERS_PQ.some(p => emailLower.includes(p))
