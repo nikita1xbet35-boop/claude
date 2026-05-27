@@ -101,12 +101,25 @@ const DEFAULT_PRESETS: Record<string, Preset[]> = {
 
 // Domains that are clearly not affiliate targets
 const GLOBAL_SKIP = new Set([
+  // Social / general
   'google.com','youtube.com','facebook.com','twitter.com','x.com','instagram.com',
   'reddit.com','wikipedia.org','amazon.com','t.me','telegram.org','linkedin.com',
   'tiktok.com','pinterest.com','whatsapp.com','bbc.com','cnn.com','espn.com',
-  '1xbet.com','1xcasino.com','luckypari.com','bet365.com','betway.com','parimatch.com',
-  'sportybet.com','betking.com','william-hill.com','williamhill.com','oddschecker.com',
   'medium.com','github.com','play.google.com','apps.apple.com','quora.com','blogspot.com',
+  // Our own brands
+  '1xbet.com','1xcasino.com','luckypari.com','1xpartners.com',
+  // Known sportsbook / casino operators — never contact them as affiliates
+  'bet365.com','betway.com','parimatch.com','sportybet.com','betking.com',
+  'william-hill.com','williamhill.com','paddypower.com','ladbrokes.com','coral.co.uk',
+  'bwin.com','unibet.com','888casino.com','888sport.com','betfair.com','pokerstars.com',
+  'draftkings.com','fanduel.com','betonline.com','bovada.lv','mybookie.ag',
+  'melbet.com','22bet.com','mostbet.com','pinup.casino','pin-up.casino',
+  'stake.com','mystake.com','rollbit.com','bc.game','cloudbet.com',
+  'bitstarz.com','bitcasino.io','mbitcasino.com','rocketpot.io','n1casino.com',
+  'casinodays.com','jackpotcity.com','spinaway.com','casumo.com','leovegas.com',
+  'betsson.com','nordicbet.com','betsafe.com','rizk.com','dunder.com',
+  'marathonbet.com','fonbet.com','winline.ru','ligastavok.ru','bk-leon.ru',
+  'oddschecker.com','oddsportal.com','flashscore.com','livescore.com',
 ]);
 
 // TLD quick-filter: obviously excluded geo markets.
@@ -310,7 +323,11 @@ async function analyzeWithGroq(
     + `- 60-79: matches but quality unclear or partial fit\n`
     + `- 30-59: tangential, mixed signals\n`
     + `- 0-29: not iGaming, dead, irrelevant\n\n`
-    + `Set is_operator=true if the site IS a casino/sportsbook (not a partner).\n`
+    + `OPERATORS (is_operator=true): sites that ARE a casino/sportsbook themselves — they accept player bets/deposits.\n`
+    + `Examples of operators: stake.com, mystake.com, bc.game, betway.com, 1xbet.com, bet365.com, bitstarz.com, rollbit.com, cloudbet.com, casumo.com, leovegas.com.\n`
+    + `PARTNERS (is_operator=false): sites that REVIEW, COMPARE, PREDICT, or BLOG about betting/casino — they send traffic TO operators.\n`
+    + `Examples of partners: tipster blogs, casino review sites, prediction sites, sports analysis blogs, slot review sites, aviator strategy sites.\n`
+    + `If the site has its own deposit/withdrawal/registration button → is_operator=true.\n`
     + `Set is_competitor=true if it's a 1xBet/1xCasino/LuckyPari competitor brand.\n`
     + `Set geo_excluded=true ONLY for: USA, UK, Western Europe, Ukraine, Brazil, Australia.\n`
     + `Set relevant=false if is_operator OR is_competitor OR geo_excluded OR score<${MIN_SCORE}.`;
@@ -610,13 +627,14 @@ Deno.serve(async (req: Request) => {
         const pageText = stripHtml(homepageHtml);
         const analysis = await analyzeWithGroq(url, result.title || '', result.snippet || '', pageText, brand);
 
-        if (analysis) {
-          stats.analyzed++;
-          if (analysis.is_competitor || analysis.is_operator) { stats.competitors++; continue; }
-          if (analysis.geo_excluded)  { stats.geo_excluded++; continue; }
-          if (!analysis.relevant)     { stats.irrelevant++;   continue; }
-        }
-        // If Groq failed entirely we keep the lead with a neutral score for manual review.
+        // Groq MUST succeed — if it failed we skip the lead rather than risk adding
+        // operators/competitors that Groq would have caught.
+        if (!analysis) { stats.irrelevant++; continue; }
+
+        stats.analyzed++;
+        if (analysis.is_competitor || analysis.is_operator) { stats.competitors++; continue; }
+        if (analysis.geo_excluded)  { stats.geo_excluded++; continue; }
+        if (!analysis.relevant)     { stats.irrelevant++;   continue; }
 
         // 4c. Extract contact details (multi-phase: homepage → partner pages → contact pages)
         const contact = await extractContact(url, origin, homepageHtml, deadline);
