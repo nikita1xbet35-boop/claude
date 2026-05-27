@@ -272,6 +272,15 @@ Deno.serve(async (req: Request) => {
     for (const item of queueItems) {
       stats.processed++;
 
+      // LuckyPari brand disabled — skip any luckypari queue items permanently
+      if (item.brand === 'luckypari') {
+        await supabase.from('send_queue')
+          .update({ status: 'skipped', error: 'luckypari brand disabled' })
+          .eq('id', item.id);
+        stats.skipped++;
+        continue;
+      }
+
       // LP account disabled — route everything through main
       const account    = 'main';
       const usageService = 'gmail_main';

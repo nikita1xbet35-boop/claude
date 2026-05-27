@@ -523,7 +523,7 @@ Deno.serve(async (req: Request) => {
 
     // 2. Determine brand + preset for this 15-min slot
     const slotIndex = Math.floor(Date.now() / (15 * 60 * 1000));
-    const BRANDS    = ['1xbet', '1xcasino', 'luckypari'] as const;
+    const BRANDS    = ['1xbet', '1xcasino'] as const; // luckypari disabled — no active email account
     const brand     = BRANDS[slotIndex % BRANDS.length];
     stats.brand = brand;
 

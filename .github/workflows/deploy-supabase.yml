@@ -79,7 +79,7 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           cat > /tmp/reset.json <<'JSON'
-          {"query":"UPDATE public.api_usage SET system_paused = false, paused = false WHERE service IN ('gmail_main','gmail_lp'); UPDATE public.send_queue SET gmail_account = 'main' WHERE gmail_account = 'lp'; UPDATE public.send_queue SET status = 'pending', retry_count = 0, error = NULL WHERE status = 'failed'; UPDATE public.api_usage SET used = 0, limit_value = 10000 WHERE service = 'serpapi'; UPDATE public.api_usage SET used = 0, limit_value = 1000 WHERE service = 'jina';"}
+          {"query":"UPDATE public.api_usage SET system_paused = false, paused = false WHERE service IN ('gmail_main','gmail_lp'); UPDATE public.send_queue SET gmail_account = 'main' WHERE gmail_account = 'lp'; UPDATE public.send_queue SET status = 'pending', retry_count = 0, error = NULL WHERE status = 'failed'; UPDATE public.api_usage SET used = 0, limit_value = 10000 WHERE service = 'serpapi'; UPDATE public.api_usage SET used = 0, limit_value = 1000 WHERE service = 'jina'; UPDATE public.send_queue SET status = 'skipped', error = 'luckypari brand disabled' WHERE brand = 'luckypari' AND status IN ('pending','failed');"}
           JSON
           curl -sf -X POST \
             "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \

@@ -6208,7 +6208,7 @@ async function loadAutomatToday() {
     const leadsFound      = allLeads.length;
     const leadsWithContact = allLeads.filter(l => l.contact_email).length;
 
-    const emails        = emailsRes.data || [];
+    const emails        = (emailsRes.data || []).filter(e => e.brand !== 'luckypari');
     const emailsSent    = emails.length;
     const bounces       = emails.filter(e => e.bounced).length;
     const bounceRate    = emailsSent > 0 ? ((bounces / emailsSent) * 100).toFixed(1) : '0.0';
@@ -6222,7 +6222,7 @@ async function loadAutomatToday() {
 
     // Brand breakdown
     const brands = {};
-    emails.forEach(e => { brands[e.brand] = (brands[e.brand] || 0) + 1; });
+    emails.forEach(e => { if (e.brand !== 'luckypari') brands[e.brand] = (brands[e.brand] || 0) + 1; });
     const brandBreakdown = Object.entries(brands).map(([b, c]) => `${b}: ${c}`).join(' · ') || '—';
 
     const queueItems    = queueRes.data || [];
