@@ -336,6 +336,24 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
+      // ── HARD DEDUP — last-mile guard ────────────────────────────────────
+      // Check ALL-TIME email_log: if we ever sent to this address, skip it.
+      // This catches anything that slipped through generate-queue's filter.
+      const { count: prevSentCount } = await supabase
+        .from('email_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('email', lead.contact_email);
+      if ((prevSentCount ?? 0) > 0) {
+        await supabase.from('send_queue')
+          .update({ status: 'skipped', error: 'duplicate: already in email_log' })
+          .eq('id', item.id);
+        await supabase.from('leads')
+          .update({ stage: 'waiting' })
+          .eq('id', lead.id);
+        stats.skipped++;
+        continue;
+      }
+
       const subject = buildSubject(lead.name, lead.url || '', item.brand);
       const body    = buildEmailBody(lead, item.brand);
 

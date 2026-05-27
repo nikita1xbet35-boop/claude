@@ -550,12 +550,19 @@ Deno.serve(async (req: Request) => {
     } catch (_) {}
     const blacklistSet = new Set(blRows.map((r: any) => (r.domain || '').toLowerCase()));
 
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: recentSent } = await supabase
-      .from('email_log').select('email').gt('sent_at', thirtyDaysAgo);
+    // Hard dedup: ALL-TIME — never re-add a lead whose email was ever contacted
+    const { data: allSent } = await supabase
+      .from('email_log').select('email');
     const emailedSet = new Set(
-      (recentSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
+      (allSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
     );
+    // Also collect emails already in the leads table (stage=waiting/excluded) so
+    // we don't create a second lead record for a domain we already know about
+    const { data: existingLeadEmails } = await supabase
+      .from('leads').select('contact_email').not('contact_email', 'is', null).neq('stage', 'new');
+    (existingLeadEmails || []).forEach((r: any) => {
+      if (r.contact_email) emailedSet.add(r.contact_email.toLowerCase());
+    });
 
     // 4. Process each keyword
     for (const kw of keywords) {

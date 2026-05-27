@@ -176,16 +176,15 @@ Deno.serve(async (req: Request) => {
     let newLeads: Array<{ id: string; brand: string }> = [];
 
     if (newQuota > 0) {
-      // 1. Emails contacted in the last 30 days — dedup by address
-      const thirtyDaysAgo = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: recentSent } = await supabase
-        .from('email_log').select('email, lead_id').gt('sent_at', thirtyDaysAgo);
+      // Hard dedup: ALL-TIME — never re-contact anyone we've ever emailed
+      const { data: allSent } = await supabase
+        .from('email_log').select('email, lead_id');
       const emailedSet = new Set(
-        (recentSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
+        (allSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
       );
       // Also dedup by lead_id — prevents duplicates even if contact email changed
       const sentLeadIds = new Set(
-        (recentSent || []).map((r: any) => r.lead_id).filter(Boolean),
+        (allSent || []).map((r: any) => r.lead_id).filter(Boolean),
       );
 
       const queuedLeadIds = new Set(livePending.map(p => p.lead_id));
