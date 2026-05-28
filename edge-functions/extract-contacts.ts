@@ -21,7 +21,7 @@ const SERP_API_KEY  = Deno.env.get('SERP_API_KEY') ||
 const JINA_API_KEY  = Deno.env.get('JINA_API_KEY') || '';
 
 // How many leads to process per run
-const BATCH_SIZE = 8;
+const BATCH_SIZE = 12;
 // Global wall-clock budget — stop starting new leads after this
 const TIME_BUDGET_MS = 110_000;
 // Per-page fetch timeout
@@ -348,20 +348,13 @@ Deno.serve(async (req: Request) => {
   const startedAt = Date.now();
 
   try {
-    const { data: sysRow } = await supabase
-      .from('api_usage').select('system_paused').eq('service', 'gmail_main').single();
-    if (sysRow?.system_paused) {
-      stats.skipped = true;
-      return new Response(JSON.stringify({ ...stats, reason: 'system paused' }),
-        { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
-
+    // extract-contacts never pauses — finding contacts is always safe
     const { data: leads, error } = await supabase
       .from('leads')
       .select('id, url, name')
-      .eq('stage', 'new')
       .is('contact_email', null)
       .is('contact_email_type', null)
+      .not('stage', 'eq', 'excluded')
       .order('created_at', { ascending: true })
       .limit(BATCH_SIZE);
 
