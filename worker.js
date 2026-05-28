@@ -2,13 +2,12 @@
 // fetch()     → serves the static dashboard via Cloudflare Assets
 // scheduled() → drives the autonomous pipeline by firing Supabase Edge Functions:
 //
-//   every 2 min  → process-queue    (send due emails — tight tick so sends fire
-//                                    close to their scheduled time)
-//   every 15 min → find-and-queue   (search → Groq relevance analysis → contact → lead)
-//                + generate-queue   (queue top-up, stable schedule, 3-5 min cadence)
-//                + extract-contacts (find emails for leads added outside the pipeline)
-//   every 30 min → check-limits     (API limit monitoring + Telegram alerts)
-//   06:00 UTC    → daily-report     (09:00 GMT+3 Telegram report)
+//   every 2 min  → process-queue    (send due emails)
+//                + extract-contacts (contact search — runs near-continuously until all leads covered)
+//   every 15 min → find-and-queue   (search → Groq analysis → lead insert)
+//                + generate-queue   (queue top-up)
+//   every 30 min → check-limits
+//   06:00 UTC    → daily-report
 //
 // Env vars (optional — sane fallbacks below): SUPABASE_URL, SUPABASE_ANON_KEY
 
@@ -51,19 +50,15 @@ export default {
     const cron = event.cron;
 
     if (cron === '*/2 * * * *') {
-      // Fast tick — send any emails that are now due.
-      await call('process-queue', { cron });
+      // Fast tick — send emails + extract contacts near-continuously
+      await call('process-queue', {});
+      await call('extract-contacts', {});
       return;
     }
 
     if (cron === '*/15 * * * *') {
-      // find-and-queue runs the full pipeline (search → Groq analysis →
-      // contact extraction → lead insert); generate-queue then schedules
-      // newly-eligible leads; extract-contacts backfills contacts for leads
-      // added outside the pipeline.
       await call('find-and-queue', {});
       await call('generate-queue', {});
-      await call('extract-contacts', {});
       return;
     }
 
