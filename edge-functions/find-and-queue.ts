@@ -251,6 +251,51 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+/** Search DuckDuckGo HTML — free, no key required */
+async function searchDuckDuckGo(
+  query: string, num: number,
+): Promise<Array<{ link: string; title: string; snippet: string }>> {
+  const res = await fetch(
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+    {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AffiliateOS/1.0)', 'Accept': 'text/html' },
+      signal: AbortSignal.timeout(12_000),
+    },
+  );
+  if (!res.ok) return [];
+  const html = await res.text();
+
+  const results: Array<{ link: string; title: string; snippet: string }> = [];
+
+  // DDG HTML: result links are <a class="result__a" href="/l/?uddg=<encoded>&...">Title</a>
+  const linkRe  = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const snippRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|span|div)>/gi;
+
+  const links: Array<{ url: string; title: string }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = linkRe.exec(html)) !== null && links.length < num * 2) {
+    const rawHref = m[1];
+    const title   = m[2].replace(/<[^>]+>/g, '').trim();
+    let url = rawHref;
+    // Decode the actual URL from the DDG redirect wrapper
+    const uddg = rawHref.match(/[?&]uddg=([^&]+)/)?.[1];
+    if (uddg) url = decodeURIComponent(uddg);
+    if (url.startsWith('http') && !url.includes('duckduckgo.com')) {
+      links.push({ url, title });
+    }
+  }
+
+  const snippets: string[] = [];
+  while ((m = snippRe.exec(html)) !== null) {
+    snippets.push(m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+  }
+
+  for (let i = 0; i < Math.min(links.length, num); i++) {
+    results.push({ link: links[i].url, title: links[i].title, snippet: snippets[i] || '' });
+  }
+  return results;
+}
+
 /** Extract the footer section of a page (last 20% of HTML) for targeted email scanning */
 function extractFooter(html: string): string {
   const footerRe = /<footer[\s\S]*?<\/footer>/gi;
@@ -505,7 +550,6 @@ Deno.serve(async (req: Request) => {
 
   jinaCount = 0;
   groqCount = 0;
-  let serpCount = 0;
   const stats = {
     brand: '', preset: '', keywords_run: 0,
     found: 0, analyzed: 0, irrelevant: 0, competitors: 0, geo_excluded: 0,
@@ -516,10 +560,6 @@ Deno.serve(async (req: Request) => {
 
   try {
     // find-and-queue never pauses — finding new leads is always valuable
-    if (!SERP_API_KEY) {
-      return new Response(JSON.stringify({ skipped: true, reason: 'SERP_API_KEY not configured' }),
-        { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
 
     // 2. Determine brand + preset for this 15-min slot
     const slotIndex = Math.floor(Date.now() / (15 * 60 * 1000));
@@ -581,19 +621,13 @@ Deno.serve(async (req: Request) => {
 
       let serpResults: Array<{ link: string; title: string; snippet?: string }> = [];
       try {
-        serpCount++;
-        const res = await fetch(
-          `https://serpapi.com/search.json?q=${encodeURIComponent(kw)}&num=${RESULTS_PER_KW}&api_key=${SERP_API_KEY}`,
-          { signal: AbortSignal.timeout(12_000) },
-        );
-        if (res.ok) {
-          const sd = await res.json();
-          serpResults = (sd.organic_results || []).slice(0, RESULTS_PER_KW);
-        } else {
-          stats.errors.push(`SERP "${kw}": HTTP ${res.status}`);
+        serpResults = await searchDuckDuckGo(kw, RESULTS_PER_KW);
+        if (serpResults.length === 0) {
+          stats.errors.push(`DDG "${kw}": no results`);
+          continue;
         }
       } catch (e: any) {
-        stats.errors.push(`SERP "${kw}": ${e.message}`);
+        stats.errors.push(`DDG "${kw}": ${e.message}`);
         continue;
       }
 
@@ -675,11 +709,10 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 5. Track API usage
+    // 5. Track API usage (DuckDuckGo is free/keyless — no counter needed)
     await Promise.all([
-      bumpUsage('serpapi', serpCount),
-      bumpUsage('jina',    jinaCount),
-      bumpUsage('groq',    groqCount),
+      bumpUsage('jina',  jinaCount),
+      bumpUsage('groq',  groqCount),
     ]);
 
     await supabase.from('error_log').insert([{

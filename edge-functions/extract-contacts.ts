@@ -16,8 +16,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const SERP_API_KEY  = Deno.env.get('SERP_API_KEY') ||
-  ['59416a59dfd4fc019bcb24053a24e984', '86375c61bfed0bb7ae25d031393d64e1'].join('');
 const JINA_API_KEY  = Deno.env.get('JINA_API_KEY') || '';
 
 // How many leads to process per run
@@ -179,8 +177,6 @@ interface ContactResult {
   contact_source_url: string | null;
 }
 
-let serpCalls = 0;
-
 /** Scan one HTML page and update bestEmail/tg/wa/phone accumulators. */
 function scanPage(
   html: string, page: string,
@@ -278,36 +274,37 @@ async function extractContacts(siteUrl: string): Promise<ContactResult | null> {
     if (state.bestEmail || state.tg || state.wa) break;
   }
 
-  // Phase 4: SerpAPI fallback — search for emails mentioned on third-party pages
-  if (!state.bestEmail && SERP_API_KEY) {
+  // Phase 4: DuckDuckGo fallback — search for emails mentioned on third-party pages (free, no key)
+  if (!state.bestEmail) {
     try {
       const domain = new URL(base).hostname.replace(/^www\./, '');
-      const q = encodeURIComponent(`"@${domain}" email contact advertise`);
-      serpCalls++;
+      const q = `"@${domain}" email contact advertise`;
       const res = await fetch(
-        `https://serpapi.com/search.json?q=${q}&num=10&api_key=${SERP_API_KEY}`,
-        { signal: AbortSignal.timeout(10_000) },
+        `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
+        {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AffiliateOS/1.0)', 'Accept': 'text/html' },
+          signal: AbortSignal.timeout(10_000),
+        },
       );
       if (res.ok) {
-        const sd = await res.json();
-        const snippets = (sd.organic_results || [])
-          .map((r: any) => (r.snippet || '') + ' ' + (r.title || '')).join(' ');
+        const html = await res.text();
+        const text = html.replace(/<[^>]+>/g, ' ');
         const root = domain.split('.')[0];
-        const serpEmails = [...new Set(
-          (deobfuscateEmails(snippets).match(EMAIL_REGEX) || [])
+        const ddgEmails = [...new Set(
+          (deobfuscateEmails(text).match(EMAIL_REGEX) || [])
             .filter((e: string) => e.toLowerCase().includes(root) && isValidEmail(e)),
         )] as string[];
-        for (const e of serpEmails) {
+        for (const e of ddgEmails) {
           const p = emailPriority(e);
           if (p < state.bestPrio) {
             state.bestPrio  = p;
             state.bestEmail = e;
             state.bestType  = emailType(e);
-            state.sourceUrl = 'serp:' + domain;
+            state.sourceUrl = 'ddg:' + domain;
           }
         }
       }
-    } catch (_) { /* serp fallback failed */ }
+    } catch (_) { /* ddg fallback failed */ }
   }
 
   if (!state.bestEmail && !state.tg && !state.wa) return null;
@@ -401,8 +398,7 @@ Deno.serve(async (req: Request) => {
       stats.processed++;
     }
 
-    await bumpUsage('jina',    jinaCalls);
-    await bumpUsage('serpapi', serpCalls);
+    await bumpUsage('jina', jinaCalls);
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'extract-contacts',
