@@ -62,7 +62,7 @@ url: @name или t.me/name → "https://t.me/name"; домен → "https://д�
   const data = await r.json();
   const raw = data.choices?.[0]?.message?.content?.trim() || '';
   const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('Groq не вернул JSON: ' + raw);
+  if (!m) throw new Error('Groq: ' + (raw.slice(0, 200) || '(пустой ответ)'));
   return JSON.parse(m[0]);
 }
 
