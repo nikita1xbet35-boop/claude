@@ -14,8 +14,132 @@
 const DEFAULT_SUPABASE_URL = 'https://lxsyrserfuighwxuymgb.supabase.co';
 const DEFAULT_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
 
+// ── Telegram Bot ─────────────────────────────────────────────────────────────
+
+const TG_MY_USER_ID = env => Number(env.TG_MY_USER_ID);
+
+async function tgCall(method, payload, env) {
+  const res = await fetch(`https://api.telegram.org/bot${env.TG_TOKEN}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) console.error(`TG ${method} failed:`, await res.text());
+  return res;
+}
+
+async function sendTg(chatId, text, env, extra = {}) {
+  await tgCall('sendMessage', {
+    chat_id: chatId,
+    text,
+    reply_markup: {
+      inline_keyboard: [[{
+        text: '📊 Открыть AffiliateOS',
+        web_app: { url: 'https://claude.nikita1xbet35.workers.dev/' },
+      }]],
+    },
+    ...extra,
+  }, env);
+}
+
+async function parseLead(text, env) {
+  const prompt = `Ты парсер лидов для affiliate-менеджера iGaming.
+Из вольного текста извлеки JSON с полями:
+{"url":string,"partner_type":string,"brand":string,"geo":string|null,"channel_kind":string}
+partner_type: tipster|seo_site|arbitrage_team|aviator_predictor|casino_channel
+brand: "1xBet"|"1xCasino"|"Lucky Pari" (бет→1xBet, каз→1xCasino, lucky/пари→Lucky Pari)
+channel_kind: "telegram"|"website"
+url: @name или t.me/name → "https://t.me/name"; домен → "https://домен"
+Верни ТОЛЬКО валидный JSON без markdown.
+Текст: "${text.replace(/"/g, '\\"')}"`;
+
+  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 256 }),
+  });
+  const data = await r.json();
+  const raw = data.choices?.[0]?.message?.content?.trim() || '';
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('Groq не вернул JSON: ' + raw);
+  return JSON.parse(m[0]);
+}
+
+async function handleTgUpdate(update, env) {
+  if (update.callback_query) {
+    await tgCall('answerCallbackQuery', { callback_query_id: update.callback_query.id }, env);
+    return;
+  }
+  const msg = update.message;
+  if (!msg?.text) return;
+
+  const chatId = msg.chat.id;
+  if (msg.from?.id !== TG_MY_USER_ID(env)) {
+    await sendTg(chatId, '⛔ Нет доступа.', env);
+    return;
+  }
+
+  const text = msg.text.trim();
+  if (text === '/start' || text === '/help') {
+    await sendTg(chatId, `*AffiliateOS Bot* — быстрый захват лидов\n\nПросто кинь строку:\n\`@channelname тг бет\`\n\`t.me/ch тг каз\`\n\`site.com сео бет нигерия\`\n\`t.me/team арбитраж бет индия\`\n\`@signals авиатор каз\`\n\nЛид сразу падает в Supabase со статусом \`waiting\`.`, env, { parse_mode: 'Markdown' });
+    return;
+  }
+
+  await sendTg(chatId, '⏳ Парсю...', env);
+
+  let parsed;
+  try {
+    parsed = await parseLead(text, env);
+  } catch (e) {
+    await sendTg(chatId, `❌ Ошибка парсинга: ${e.message}`, env);
+    return;
+  }
+
+  const { url, partner_type, brand, geo, channel_kind } = parsed;
+  if (!url || !partner_type || !brand) {
+    await sendTg(chatId, '❌ Не удалось распознать. Уточни запрос.', env);
+    return;
+  }
+
+  const SUPABASE_URL = env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const SUPABASE_KEY = env.SUPABASE_SERVICE_KEY;
+
+  const sb = await fetch(`${SUPABASE_URL}/rest/v1/leads`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal',
+    },
+    body: JSON.stringify({ url, partner_type, brand, geo: geo || null, channel_kind, status: 'waiting', name: url }),
+  });
+
+  if (!sb.ok) {
+    await sendTg(chatId, `❌ Ошибка БД: ${sb.status} ${await sb.text()}`, env);
+    return;
+  }
+
+  await sendTg(chatId, `✅ Добавлено в pipeline\n\n🔗 ${url}\n📂 ${partner_type}\n🎯 ${brand}\n🌍 ${geo || '—'}`, env);
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
 export default {
   async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    // Telegram webhook endpoint
+    if (request.method === 'POST' && url.pathname === '/tg-webhook') {
+      try {
+        const update = await request.json();
+        ctx.waitUntil(handleTgUpdate(update, env));
+      } catch (e) {
+        console.error('tg-webhook error:', e);
+      }
+      return new Response('OK');
+    }
+
     return env.ASSETS.fetch(request);
   },
 
