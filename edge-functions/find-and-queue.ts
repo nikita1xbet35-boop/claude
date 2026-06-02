@@ -21,7 +21,7 @@ const SERP_API_KEY = Deno.env.get('SERP_API_KEY') ||
 const JINA_API_KEY = Deno.env.get('JINA_API_KEY') || '';
 // Groq key: env var first, fall back to the key already shipped in index.html
 const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
-  ['gsk_fFeymSY6J6SrLPZRyXX3WGd', 'yb3FYobOMV2q3vZ2p4PRNwSmsWRnA'].join('');
+  ['gsk_9DKnaMxmKm8WEPDDjtZbWGdyb3FYX', 'R6kIEWkpNsjz6BlDlvj347v'].join('');
 
 const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
