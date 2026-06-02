@@ -60,6 +60,7 @@ url: @name или t.me/name → "https://t.me/name"; домен → "https://д�
     body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 256 }),
   });
   const data = await r.json();
+  if (!r.ok) throw new Error(`Groq API ${r.status}: ${data.error?.message || JSON.stringify(data)}`);
   const raw = data.choices?.[0]?.message?.content?.trim() || '';
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) throw new Error('Groq: ' + (raw.slice(0, 200) || '(пустой ответ)'));
