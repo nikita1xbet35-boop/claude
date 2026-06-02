@@ -42,6 +42,7 @@ async function sendTg(chatId, text, env, extra = {}) {
   }, env);
 }
 
+
 async function parseLead(text, env) {
   const prompt = `Ты парсер лидов для affiliate-менеджера iGaming.
 Из вольного текста извлеки JSON с полями:
@@ -65,6 +66,26 @@ url: @name или t.me/name → "https://t.me/name"; домен → "https://д�
   return JSON.parse(m[0]);
 }
 
+async function deleteMsg(chatId, messageId, env) {
+  await tgCall('deleteMessage', { chat_id: chatId, message_id: messageId }, env);
+}
+
+async function sendTgRaw(chatId, text, env, extra = {}) {
+  const res = await tgCall('sendMessage', {
+    chat_id: chatId,
+    text,
+    reply_markup: {
+      inline_keyboard: [[{
+        text: '📊 Открыть AffiliateOS',
+        web_app: { url: 'https://claude.nikita1xbet35.workers.dev/' },
+      }]],
+    },
+    ...extra,
+  }, env);
+  const data = await res.json();
+  return data.result?.message_id;
+}
+
 async function handleTgUpdate(update, env) {
   if (update.callback_query) {
     await tgCall('answerCallbackQuery', { callback_query_id: update.callback_query.id }, env);
@@ -74,6 +95,8 @@ async function handleTgUpdate(update, env) {
   if (!msg?.text) return;
 
   const chatId = msg.chat.id;
+  const userMsgId = msg.message_id;
+
   if (msg.from?.id !== TG_MY_USER_ID(env)) {
     await sendTg(chatId, '⛔ Нет доступа.', env);
     return;
@@ -85,18 +108,23 @@ async function handleTgUpdate(update, env) {
     return;
   }
 
-  await sendTg(chatId, '⏳ Парсю...', env);
+  // Отправляем "Парсю...", запоминаем id
+  const loadingMsgId = await sendTgRaw(chatId, '⏳ Парсю...', env);
 
   let parsed;
   try {
     parsed = await parseLead(text, env);
   } catch (e) {
+    await deleteMsg(chatId, loadingMsgId, env);
+    await deleteMsg(chatId, userMsgId, env);
     await sendTg(chatId, `❌ Ошибка парсинга: ${e.message}`, env);
     return;
   }
 
   const { url, partner_type, brand, geo, channel_kind } = parsed;
   if (!url || !partner_type || !brand) {
+    await deleteMsg(chatId, loadingMsgId, env);
+    await deleteMsg(chatId, userMsgId, env);
     await sendTg(chatId, '❌ Не удалось распознать. Уточни запрос.', env);
     return;
   }
@@ -114,6 +142,10 @@ async function handleTgUpdate(update, env) {
     },
     body: JSON.stringify({ url, type: partner_type, brand, geo: geo || null, channel_kind, status: 'waiting', name: url }),
   });
+
+  // Удаляем "Парсю..." и сообщение пользователя
+  await deleteMsg(chatId, loadingMsgId, env);
+  await deleteMsg(chatId, userMsgId, env);
 
   if (!sb.ok) {
     await sendTg(chatId, `❌ Ошибка БД: ${sb.status} ${await sb.text()}`, env);
