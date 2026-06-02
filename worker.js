@@ -112,7 +112,7 @@ async function handleTgUpdate(update, env) {
       'Content-Type': 'application/json',
       'Prefer': 'return=minimal',
     },
-    body: JSON.stringify({ url, partner_type, brand, geo: geo || null, channel_kind, status: 'waiting', name: url }),
+    body: JSON.stringify({ url, type: partner_type, brand, geo: geo || null, channel_kind, status: 'waiting', name: url }),
   });
 
   if (!sb.ok) {
