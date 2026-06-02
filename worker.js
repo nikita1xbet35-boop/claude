@@ -57,7 +57,7 @@ url: @name или t.me/name → "https://t.me/name"; домен → "https://д�
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 256 }),
+    body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 256 }),
   });
   const data = await r.json();
   if (!r.ok) throw new Error(`Groq API ${r.status}: ${data.error?.message || JSON.stringify(data)}`);
