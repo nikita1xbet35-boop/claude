@@ -69,6 +69,8 @@ Deno.serve(async (req: Request) => {
 
     const leadsFound       = newLeads?.length || 0;
     const leadsWithContact = newLeads?.filter(l => l.contact_email).length || 0;
+    const DAILY_GOAL       = 200;
+    const progressPct      = Math.round((leadsFound / DAILY_GOAL) * 100);
 
     const stageCounts: Record<string, number> = {};
     pipeline?.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage] || 0) + 1; });
@@ -98,7 +100,9 @@ Deno.serve(async (req: Request) => {
 ${apiLines}
 
 <b>Activity (yesterday):</b>
-🔍 Leads found: ${leadsFound} (with contacts: ${leadsWithContact})
+🎯 <b>Leads goal: ${leadsFound}/${DAILY_GOAL}</b> (${progressPct}%)
+   ${progressPct >= 100 ? '✅ Goal achieved!' : `Progress: ${'█'.repeat(Math.floor(progressPct / 10))}${'░'.repeat(10 - Math.floor(progressPct / 10))}`}
+💌 With contacts: ${leadsWithContact}
 📧 Emails sent: ${totalSent}
    • 1xBet: ${sentBy1xbet}
    • 1xCasino: ${sentByCasino}
