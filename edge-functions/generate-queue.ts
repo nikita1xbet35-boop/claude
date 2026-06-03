@@ -6,8 +6,8 @@
 //     the dashboard stays stable and matches when the email actually sends
 //   - Reschedules only overdue items (slot in the past) to fire again soon
 //   - Appends newly-eligible leads (with contacts) after the last occupied slot
-//   - Keeps the queue within the daily target (100 weekday / 30 weekend)
-//   - Respects working hours 09:00-18:00 GMT+3 and the 13:00-14:00 lunch break
+//   - Keeps the queue within the daily target (200 weekday / 100 weekend)
+//   - Respects working hours 08:00-20:00 GMT+3
 //
 // Deploy: supabase functions deploy generate-queue --no-verify-jwt
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto-injected)
@@ -17,8 +17,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-const WEEKDAY_TARGET = 100;
-const WEEKEND_TARGET = 30;
+const WEEKDAY_TARGET = 200;
+const WEEKEND_TARGET = 100;
 // 30–90 s cadence gives ~360–1080 slots in the 09-18 window.
 // process-queue runs every 2 min and picks up whatever is due, so dense
 // scheduling means multiple sends per run when the queue is full.
@@ -91,8 +91,8 @@ Deno.serve(async (req: Request) => {
     // GMT+3 day boundaries / working window (as UTC instants)
     const todayMidnightUTC    = new Date(`${todayStr}T00:00:00+03:00`);
     const tomorrowMidnightUTC = new Date(todayMidnightUTC.getTime() + 24 * 60 * 60 * 1000);
-    const workStartMs = new Date(`${todayStr}T09:00:00+03:00`).getTime();
-    const workEndMs   = new Date(`${todayStr}T18:00:00+03:00`).getTime();
+    const workStartMs = new Date(`${todayStr}T08:00:00+03:00`).getTime();
+    const workEndMs   = new Date(`${todayStr}T20:00:00+03:00`).getTime();
 
     const dayOfWeek    = nowGMT3.getUTCDay();
     const isWeekend    = dayOfWeek === 0 || dayOfWeek === 6;
