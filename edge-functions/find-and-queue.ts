@@ -42,26 +42,18 @@ interface Preset { id: string; name: string; geo: string; keywords: string[]; br
 
 const DEFAULT_PRESETS: Record<string, Preset[]> = {
   '1xbet': [
-    { id:'1xb-id', name:'Indonesia', geo:'ID',
-      keywords:['situs taruhan bola terbaik','prediksi bola akurat','bandar judi online review','agen taruhan bola terpercaya','tips taruhan olahraga indonesia','prediksi liga 1 indonesia','review situs bola','bandar online terbaik'] },
-    { id:'1xb-bd', name:'Bangladesh', geo:'BD',
-      keywords:['cricket prediction site bangladesh','bpl betting tips review','সেরা বাজির সাইট','ক্রিকেট প্রেডিকশন','betting site review bangladesh','bd cricket tips blog','bangladesh sports betting guide','online betting bd review'] },
-    { id:'1xb-in', name:'India', geo:'IN',
-      keywords:['cricket prediction website india','ipl betting tips blog','best fantasy cricket app review','india sports betting guide','satta tips website','cricket betting strategy india','hindi betting tips','indian sportsbook review'] },
-    { id:'1xb-ci', name:'Côte d\'Ivoire', geo:'CI',
-      keywords:['pronostics football Côte d\'Ivoire','site de paris sportifs Abidjan','meilleur bookmaker CIV','pronostiqueur ivoirien telegram','paris sportifs Afrique de l\'Ouest','tipster francophone Afrique','analyse foot Côte d\'Ivoire','pronos foot CIV'] },
-    { id:'1xb-eg', name:'Egypt', geo:'EG',
-      keywords:['أفضل مواقع المراهنات مصر','توقعات كرة القدم مصر','egypt sports betting review','arabic betting tips site','مراهنات رياضية مصر','prediction site egypt football','arabic football tipster','موقع رهان مصر'] },
+    { id:'1xb-ng', name:'Nigeria', geo:'NG',
+      keywords:['best betting site nigeria','football prediction nigeria','sure bet tips nigeria','betting tips today nigeria','free betting tips nigeria','betting predictions nigeria','how to win bet nigeria','sports betting nigeria','casino online nigeria','bet9ja','betway nigeria','sportybet','1xbet nigeria','1xbet promo code'] },
+    { id:'1xb-kg', name:'Kyrgyzstan', geo:'KG',
+      keywords:['ставки на спорт кыргызстан','прогнозы на футбол кыргызстан','букмекеры кыргызстан','бесплатные прогнозы на спорт','прогнозы на спорт бесплатно','ставки на спорт бишкек','лучшие букмекеры','казино онлайн кыргызстан','melbet kyrgyzstan','1win кыргызстан','mostbet кыргызстан','1xbet кыргызстан','1xbet скачать','1xbet кирүү'] },
     { id:'1xb-my', name:'Malaysia', geo:'MY',
-      keywords:['laman judi bola terbaik malaysia','ramalan bola malaysia','bandar online malaysia review','betting tips malaysia','online sportsbook malaysia','analisis bola malaysia','judi online malaysia review','laman taruhan malaysia'] },
-    { id:'1xb-uz', name:'Uzbekistan', geo:'UZ',
-      keywords:['ставки на спорт Узбекистан обзор','прогнозы футбол Ташкент','капперы Узбекистан telegram','букмекерские конторы Узбекистан','обзор ставок UZ','sport tikish bashoratlari','футбол прогноз Узбекистан','sport bashoratlari UZ'] },
+      keywords:['betting site malaysia','online casino malaysia','sportsbook malaysia','judi bola online','judi online malaysia','taruhan bola','live casino malaysia','4d online malaysia','slot online malaysia','马来西亚 博彩','马来西亚 体育投注','betway malaysia','bk8','1xbet malaysia'] },
+    { id:'1xb-ph', name:'Philippines', geo:'PH',
+      keywords:['betting site philippines','online betting philippines','sabong online','pba betting','pinoy betting tips','online casino philippines','sports betting philippines','e-sabong','basketball betting philippines','taya sa basketball','gcash betting','melbet philippines','betway philippines','1xbet philippines'] },
     { id:'1xb-np', name:'Nepal', geo:'NP',
-      keywords:['cricket prediction nepal','betting tips nepal site','sports betting nepal review','nepali football tips','nepal sportsbook guide','online betting nepal','nepali cricket tipster','nepal sports tips blog'] },
+      keywords:['betting site nepal','cricket betting nepal','IPL betting nepal','betting tips nepal','online betting nepal','online casino nepal','cricket prediction nepal','football betting nepal','खेल सट्टा नेपाल','1win nepal','melbet nepal','1xbet nepal'] },
     { id:'1xb-pk', name:'Pakistan', geo:'PK',
-      keywords:['cricket prediction pakistan','psl betting tips','pakistan sports betting blog','urdu cricket tips site','pakistan cricket prediction','betting tips pakistan','pakistan football tips','karachi betting site review'] },
-    { id:'1xb-tr', name:'Turkey', geo:'TR',
-      keywords:['bahis tahminleri sitesi','güvenilir iddaa tahminleri','maç tahmin sitesi turkiye','canlı bahis tahmin','bahis analiz blog turkiye','futbol tahmin sitesi','süper lig bahis tahminleri','türk bahis incelemesi'] },
+      keywords:['cricket betting pakistan','PSL betting','online betting pakistan','betting tips pakistan','cricket prediction pakistan','online casino pakistan','sports betting pakistan','cricket betting tips','betting app pakistan','کرکٹ بیٹنگ','betwinner pakistan','melbet pakistan','1xbet pakistan','1xbet login pakistan'] },
   ],
   '1xcasino': [
     { id:'1xc-ar', name:'Argentina', geo:'AR',
@@ -114,6 +106,7 @@ const GLOBAL_SKIP = new Set([
   'bwin.com','unibet.com','888casino.com','888sport.com','betfair.com','pokerstars.com',
   'draftkings.com','fanduel.com','betonline.com','bovada.lv','mybookie.ag',
   'melbet.com','22bet.com','mostbet.com','pinup.casino','pin-up.casino',
+  'bet9ja.com','1win.com','1win.pro','betwinner.com','bk8.com','betwinner.ng',
   'stake.com','mystake.com','rollbit.com','bc.game','cloudbet.com',
   'bitstarz.com','bitcasino.io','mbitcasino.com','rocketpot.io','n1casino.com',
   'casinodays.com','jackpotcity.com','spinaway.com','casumo.com','leovegas.com',
@@ -353,29 +346,34 @@ async function analyzeWithGroq(
                      : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
   const text = pageText.slice(0, 6000);
 
-  const sys = `You qualify websites as affiliate partners for ${partnerBrand}.\n\n`
-    + `Brand context:\n`
-    + `- 1xBet: sports betting partner (tipsters, sports review, prediction sites)\n`
-    + `- 1xCasino: online casino/slots/crash partner (review sites, slot blogs, aviator/crash content)\n`
-    + `- LuckyPari: mixed (any iGaming content, treat as fresh brand)\n\n`
+  const sys = `You qualify websites as affiliate PARTNERS for ${partnerBrand} (sports betting brand).\n\n`
+    + `We want AFFILIATE / PUBLISHER sites: tipsters, prediction sites, betting-tips blogs, `
+    + `sports media, review/comparison sites, "best betting site" lists. We pitch them a partnership.\n`
+    + `We especially want LARGE, high-traffic, established sites — they are the prime targets.\n\n`
     + `Return ONLY JSON:\n`
     + `{"score":0-100,"type":"review|tipster|media|aggregator|blog|other",`
     + `"summary":"1 sentence","why":"1 sentence — why fits or not",`
     + `"priority":"High|Medium|Low","lang":"language code",`
-    + `"is_competitor":true/false,"relevant":true/false,"geo_excluded":true/false,"is_operator":true/false}\n\n`
-    + `Scoring:\n`
-    + `- 80-95: active site, content matches brand, contacts likely, target GEO\n`
-    + `- 60-79: matches but quality unclear or partial fit\n`
-    + `- 30-59: tangential, mixed signals\n`
+    + `"is_competitor":false,"relevant":true/false,"geo_excluded":true/false,"is_operator":true/false}\n\n`
+    + `Scoring (favour big established sites):\n`
+    + `- 80-100: large/established affiliate or media site, clear betting/casino content, target GEO\n`
+    + `- 60-79: solid affiliate site, partial fit or quality unclear\n`
+    + `- 30-59: tangential, thin content, mixed signals\n`
     + `- 0-29: not iGaming, dead, irrelevant\n\n`
-    + `OPERATORS (is_operator=true): sites that ARE a casino/sportsbook themselves — they accept player bets/deposits.\n`
-    + `Examples of operators: stake.com, mystake.com, bc.game, betway.com, 1xbet.com, bet365.com, bitstarz.com, rollbit.com, cloudbet.com, casumo.com, leovegas.com.\n`
-    + `PARTNERS (is_operator=false): sites that REVIEW, COMPARE, PREDICT, or BLOG about betting/casino — they send traffic TO operators.\n`
-    + `Examples of partners: tipster blogs, casino review sites, prediction sites, sports analysis blogs, slot review sites, aviator strategy sites.\n`
-    + `If the site has its own deposit/withdrawal/registration button → is_operator=true.\n`
-    + `Set is_competitor=true if it's a 1xBet/1xCasino/LuckyPari competitor brand.\n`
+    + `IMPORTANT — mentioning or promoting betting brands is GOOD, not bad:\n`
+    + `- A site that reviews, promotes, ranks, or writes about 1xBet (or ANY betting brand like `
+    + `bet9ja, betway, melbet, 1win, mostbet, betwinner, sportybet) is a PERFECT PARTNER. `
+    + `NEVER mark it is_competitor. Always set is_competitor=false.\n`
+    + `- "1xbet promo code", "1xbet nigeria", "betway review" pages are affiliate content → relevant=true.\n\n`
+    + `The ONLY hard block is is_operator:\n`
+    + `OPERATORS (is_operator=true): the site IS itself a casino/sportsbook — it has its own `
+    + `deposit / withdrawal / account registration / login-to-bet. Examples: bet365.com, 1xbet.com, `
+    + `bet9ja.com, betway.com, stake.com, melbet.com, 1win.com, mostbet.com, betwinner.com. We can't partner those.\n`
+    + `PARTNERS (is_operator=false): sites that REVIEW, COMPARE, PREDICT, RANK, or BLOG about betting — `
+    + `they send traffic TO operators. These are our targets.\n\n`
     + `Set geo_excluded=true ONLY for: USA, UK, Western Europe, Ukraine, Brazil, Australia.\n`
-    + `Set relevant=false if is_operator OR is_competitor OR geo_excluded OR score<${MIN_SCORE}.`;
+    + `Set relevant=false ONLY if is_operator OR geo_excluded OR score<${MIN_SCORE}. `
+    + `Do NOT use is_competitor to exclude anything.`;
 
   const user = `URL: ${url}\nTitle: ${title}\nSnippet: ${snippet}\n\nPage content:\n${text}`;
 
@@ -415,7 +413,9 @@ async function analyzeWithGroq(
       is_competitor,
       is_operator,
       geo_excluded,
-      relevant:     !!ai.relevant && score >= MIN_SCORE && !is_competitor && !is_operator && !geo_excluded,
+      // Promoting/mentioning betting brands (incl. 1xBet) is GOOD — is_competitor is NOT a reason to skip.
+      // Only real operators (own deposit/withdrawal) and excluded geos are blocked.
+      relevant:     !!ai.relevant && score >= MIN_SCORE && !is_operator && !geo_excluded,
     };
   } catch (_) {
     return null;
@@ -563,7 +563,8 @@ Deno.serve(async (req: Request) => {
 
     // 2. Determine brand + preset for this 15-min slot
     const slotIndex = Math.floor(Date.now() / (15 * 60 * 1000));
-    const BRANDS    = ['1xbet', '1xcasino'] as const; // luckypari disabled — no active email account
+    // 1xcasino + luckypari paused — hunt 1xBet affiliates only (chasing the big giants)
+    const BRANDS    = ['1xbet'] as const;
     const brand     = BRANDS[slotIndex % BRANDS.length];
     stats.brand = brand;
 
@@ -666,7 +667,8 @@ Deno.serve(async (req: Request) => {
         if (!analysis) { stats.irrelevant++; continue; }
 
         stats.analyzed++;
-        if (analysis.is_competitor || analysis.is_operator) { stats.competitors++; continue; }
+        // Only block real operators (own casino/sportsbook). Sites promoting 1xBet/other brands are partners.
+        if (analysis.is_operator)   { stats.competitors++; continue; }
         if (analysis.geo_excluded)  { stats.geo_excluded++; continue; }
         if (!analysis.relevant)     { stats.irrelevant++;   continue; }
 

@@ -6,10 +6,10 @@ const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const SUPABASE_ANON = Deno.env.get('SUPABASE_ANON_KEY') || SUPABASE_KEY;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
-const ACCOUNT_DAILY_LIMIT = 100;
+const ACCOUNT_DAILY_LIMIT = 200;
 const BATCH_SIZE          = 10;
 const MAX_RETRIES         = 3;
-const WEEKEND_DAILY_CAP   = 30;
+const WEEKEND_DAILY_CAP   = 100;
 const SEND_DELAY_MS       = 500;
 
 const cors = {
@@ -116,31 +116,16 @@ function geoName(geoCode: string): string {
   return GEO_NAMES[geoCode.trim().toUpperCase()] || GEO_NAMES[geoCode.trim()] || geoCode;
 }
 
-/** Build the outreach email body from a fixed template. No Groq needed. */
-function buildEmailBody(lead: Record<string, unknown>, brand: string): string {
+/** Build the outreach email body from a fixed template. No Groq needed.
+ *  Single 1xPartners template — only the site name is personalised. */
+function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
   const siteName = cleanSiteName(lead.name as string, lead.url as string || '');
-  const country  = geoName(lead.geo as string || '');
-  const is1xCasino = brand === '1xcasino';
 
-  if (is1xCasino) {
-    return `Hi ${siteName} team,\n`
-      + `Nick from 1xCasino here.\n\n`
-      + `Saw ${siteName} while reviewing top affiliate platforms in ${country} — the kind of project we look to partner with directly in this market.\n\n`
-      + `1xCasino is one of the strongest casino brands across ${country}, and we run a clean RevShare model — up to 55% for top GEOs, from day one. No admin fee, no hidden commissions, no test month gates. Individual terms calibrated to your audience.\n\n`
-      + `Worth a quick chat?\n\n`
-      + `— Nick\n`
-      + `1xCasino Partners\n`
-      + `Telegram: @aff_manager_xbet`;
-  }
-
-  return `Hi ${siteName} team,\n`
-    + `Nick from 1xBet here.\n\n`
-    + `Saw ${siteName} while reviewing top affiliate platforms in ${country} — the kind of project we look to partner with directly in this market.\n\n`
-    + `1xBet is one of the leading sports betting brands across ${country} and the broader region. A direct partnership would mean clean RevShare on traffic you're already generating, no admin fee, no hidden commissions, individual terms calibrated to your audience and scale.\n\n`
-    + `Worth a quick chat?\n\n`
-    + `— Nick\n`
-    + `1xBet Partners\n`
-    + `Telegram: @aff_manager_xbet`;
+  return `${siteName}, straight up — you're driving the kind of volume most affiliates only talk about. `
+    + `I'm Nick, I run partner acquisition at 1xPartners. `
+    + `For someone at your level we don't do standard terms — individual RevShare scaled to your numbers, `
+    + `a personal manager (me), custom promo codes and landings for your audience, payouts always on time. `
+    + `Happy to walk you through what we could put together — want to talk it over?`;
 }
 
 // Strip non-ASCII so subject headers never need RFC 2047 encoding.
@@ -223,10 +208,10 @@ Deno.serve(async (req: Request) => {
     // Pause logic removed entirely — system is self-healing.
     // Individual failures mark items as failed/skipped; system keeps running.
 
-    // 2. Working hours: 09:00–18:00 GMT+3, skip 13:00–14:00
+    // 2. Working hours: 08:00–20:00 GMT+3
     const { hour, dayOfWeek, dateStr } = toGMT3(now);
-    if (hour < 9 || hour >= 18) {
-      stats.reason = hour < 9 ? 'before working hours' : 'after working hours';
+    if (hour < 8 || hour >= 20) {
+      stats.reason = hour < 8 ? 'before working hours' : 'after working hours';
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
