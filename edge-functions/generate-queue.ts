@@ -19,12 +19,12 @@ const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const WEEKDAY_TARGET = 100;
 const WEEKEND_TARGET = 30;
-// 3-5 min cadence (avg 4) gives ~120 send slots in the 09-18 window minus
-// lunch — comfortably enough headroom to actually reach 100/day.
-// Randomized so the pattern stays human, not robotic.
-const MIN_INTERVAL_MS = 3 * 60 * 1000;
-const MAX_INTERVAL_MS = 5 * 60 * 1000;
-const START_DELAY_MS  = 90 * 1000;     // first slot is now + 90s
+// 30–90 s cadence gives ~360–1080 slots in the 09-18 window.
+// process-queue runs every 2 min and picks up whatever is due, so dense
+// scheduling means multiple sends per run when the queue is full.
+const MIN_INTERVAL_MS = 30 * 1000;
+const MAX_INTERVAL_MS = 90 * 1000;
+const START_DELAY_MS  = 30 * 1000;     // first slot is now + 30s
 
 const cors = {
   'Access-Control-Allow-Origin': '*',

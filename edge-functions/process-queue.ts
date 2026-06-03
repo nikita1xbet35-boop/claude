@@ -7,7 +7,7 @@ const SUPABASE_ANON = Deno.env.get('SUPABASE_ANON_KEY') || SUPABASE_KEY;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
 const ACCOUNT_DAILY_LIMIT = 100;
-const BATCH_SIZE          = 5;
+const BATCH_SIZE          = 10;
 const MAX_RETRIES         = 3;
 const WEEKEND_DAILY_CAP   = 30;
 const SEND_DELAY_MS       = 500;

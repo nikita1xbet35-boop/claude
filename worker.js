@@ -3,9 +3,9 @@
 // scheduled() → drives the autonomous pipeline by firing Supabase Edge Functions:
 //
 //   every 2 min  → process-queue    (send due emails)
+//                + generate-queue   (top-up queue — fast refill, 30-90s intervals)
 //                + extract-contacts (contact search — runs near-continuously until all leads covered)
 //   every 15 min → find-and-queue   (search → Groq analysis → lead insert)
-//                + generate-queue   (queue top-up)
 //   every 30 min → check-limits
 //   06:00 UTC    → daily-report
 //
@@ -50,15 +50,15 @@ export default {
     const cron = event.cron;
 
     if (cron === '*/2 * * * *') {
-      // Fast tick — send emails + extract contacts near-continuously
+      // Fast tick — send emails + top-up queue + extract contacts near-continuously
       await call('process-queue', {});
+      await call('generate-queue', {});
       await call('extract-contacts', {});
       return;
     }
 
     if (cron === '*/15 * * * *') {
       await call('find-and-queue', {});
-      await call('generate-queue', {});
       return;
     }
 
