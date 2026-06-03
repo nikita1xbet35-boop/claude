@@ -339,7 +339,6 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   jinaCalls = 0;
-  serpCalls = 0;
 
   const stats = { processed: 0, found: 0, not_found: 0, skipped: false };
   const startedAt = Date.now();
