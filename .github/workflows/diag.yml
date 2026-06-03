@@ -2,6 +2,10 @@ name: DB Diagnostics
 
 on:
   workflow_dispatch:
+  push:
+    branches: [claude/review-website-index-AwMEG]
+    paths:
+      - '.github/workflows/diag.yml'
 
 jobs:
   diag:
