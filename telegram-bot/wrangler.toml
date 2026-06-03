@@ -1,0 +1,11 @@
+name = "affiliateos-bot"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+
+# Secrets — НЕ хранятся здесь, задаются через:
+# wrangler secret put TELEGRAM_TOKEN
+# wrangler secret put MY_USER_ID
+# wrangler secret put SUPABASE_URL
+# wrangler secret put SUPABASE_KEY
+# wrangler secret put GROQ_API_KEY
+# wrangler secret put AFFILIATEOS_URL
