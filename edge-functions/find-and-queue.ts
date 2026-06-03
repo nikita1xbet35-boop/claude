@@ -530,9 +530,20 @@ function getDomain(url: string): string {
     return new URL(url.startsWith('http') ? url : 'https://' + url).hostname.replace(/^www\./, '');
   } catch { return ''; }
 }
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#x27;/gi, "'").replace(/&#39;/g, "'").replace(/&apos;/gi, "'")
+    .replace(/&quot;/gi, '"').replace(/&#34;/g, '"')
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ' '; } })
+    .replace(/&#(\d+);/g,           (_, n) => { try { return String.fromCodePoint(parseInt(n, 10)); } catch { return ' '; } })
+    .replace(/&amp;/gi, '&');
+}
 function nameFromTitle(title: string): string {
-  return (title || '').replace(/\s*[-|—·|\/]\s*.{0,60}$/, '').trim().slice(0, 80)
-    || (title || '').slice(0, 80) || 'Unknown';
+  const t = decodeEntities(title || '');
+  return t.replace(/\s*[-|—·|\/]\s*.{0,60}$/, '').trim().slice(0, 80)
+    || t.slice(0, 80) || 'Unknown';
 }
 
 async function bumpUsage(service: string, delta: number) {

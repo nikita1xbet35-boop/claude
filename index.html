@@ -5080,11 +5080,21 @@ function gmailGetTemplate(){
   };
 }
 
+function decodeEntities(s){
+  return (s || '')
+    .replace(/&#x27;/gi, "'").replace(/&#39;/g, "'").replace(/&apos;/gi, "'")
+    .replace(/&quot;/gi, '"').replace(/&#34;/g, '"')
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ' '; } })
+    .replace(/&#(\d+);/g,           (_, n) => { try { return String.fromCodePoint(parseInt(n, 10)); } catch { return ' '; } })
+    .replace(/&amp;/gi, '&');
+}
 function gmailFillVars(text, lead){
   const cfg = BRAND_CONFIG[lead.brand] || getBrandCfg();
   const mgr = localStorage.getItem('gmail_manager') || cfg.managerName;
   return text
-    .replace(/\[сайт\]/g, lead.name || getDomain(lead.url || ''))
+    .replace(/\[сайт\]/g, decodeEntities(lead.name) || getDomain(lead.url || ''))
     .replace(/\[страна\]/g, lead.geo || '—')
     .replace(/\[бренд\]/g, cfg.display || cfg.partnerBrand)
     .replace(/\[программа\]/g, cfg.partnerProgram)
@@ -5183,13 +5193,11 @@ function renderGmailLeads(){
   const container = document.getElementById('gmail-leads-list');
   if(!container) return;
 
-  // filter by active account's brands: main = 1xbet+1xcasino, lp = luckypari
-  const acctBrands = gmailActiveAccount === 'lp' ? ['luckypari'] : ['1xbet','1xcasino'];
+  // Unified 1xPartners campaign — main account sends to every brand's leads.
   const eligible = leads.filter(l =>
     l.stage === 'new' &&
     (l.contact_email || l.email) &&
-    !isBlacklisted(l.url) &&
-    acctBrands.includes(l.brand || '1xbet')
+    !isBlacklisted(l.url)
   );
   const badge = document.getElementById('gmail-badge');
   if(badge) badge.textContent = eligible.length + ' лидов';
@@ -5227,8 +5235,7 @@ function gmailToggle(id, checked){
 }
 
 function gmailSelectAll(){
-  const acctBrands = gmailActiveAccount === 'lp' ? ['luckypari'] : ['1xbet','1xcasino'];
-  leads.filter(l => l.stage==='new' && (l.contact_email||l.email) && !isBlacklisted(l.url) && acctBrands.includes(l.brand||'1xbet'))
+  leads.filter(l => l.stage==='new' && (l.contact_email||l.email) && !isBlacklisted(l.url))
     .forEach(l => { gmailSelected.add(l.id); const cb = document.querySelector(`#gmail-row-${l.id} input`); if(cb) cb.checked=true; });
   updateGmailSelCount();
 }
@@ -6194,7 +6201,7 @@ async function loadAutomatToday() {
     const leadsFound      = allLeads.length;
     const leadsWithContact = allLeads.filter(l => l.contact_email).length;
 
-    const emails        = (emailsRes.data || []).filter(e => e.brand !== 'luckypari');
+    const emails        = (emailsRes.data || []);
     const emailsSent    = emails.length;
     const bounces       = emails.filter(e => e.bounced).length;
     const bounceRate    = emailsSent > 0 ? ((bounces / emailsSent) * 100).toFixed(1) : '0.0';
@@ -6208,7 +6215,7 @@ async function loadAutomatToday() {
 
     // Brand breakdown
     const brands = {};
-    emails.forEach(e => { if (e.brand !== 'luckypari') brands[e.brand] = (brands[e.brand] || 0) + 1; });
+    emails.forEach(e => { brands[e.brand] = (brands[e.brand] || 0) + 1; });
     const brandBreakdown = Object.entries(brands).map(([b, c]) => `${b}: ${c}`).join(' · ') || '—';
 
     const queueItems    = queueRes.data || [];

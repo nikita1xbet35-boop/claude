@@ -128,6 +128,19 @@ function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
     + `Happy to walk you through what we could put together — want to talk it over?`;
 }
 
+// Decode HTML entities so site names never show raw "&amp;" / "&#x27;" etc.
+// (DuckDuckGo/page titles arrive HTML-encoded — this is the "binary code" artifact.)
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#x27;/gi, "'").replace(/&#39;/g, "'").replace(/&apos;/gi, "'")
+    .replace(/&quot;/gi, '"').replace(/&#34;/g, '"')
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ' '; } })
+    .replace(/&#(\d+);/g,           (_, n) => { try { return String.fromCodePoint(parseInt(n, 10)); } catch { return ' '; } })
+    .replace(/&amp;/gi, '&'); // must be last so "&amp;lt;" → "&lt;" → "<" never happens prematurely
+}
+
 // Strip non-ASCII so subject headers never need RFC 2047 encoding.
 function toAsciiSafe(s: string): string {
   return s.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
@@ -152,7 +165,7 @@ function cleanSiteName(leadName: string, leadUrl: string): string {
 
   if (!leadName) return domain || 'your site';
 
-  const ascii = toAsciiSafe(leadName);
+  const ascii = toAsciiSafe(decodeEntities(leadName));
   if (!ascii) return domain || 'your site';
 
   // Remove common SEO noise patterns:
@@ -257,14 +270,9 @@ Deno.serve(async (req: Request) => {
     for (const item of queueItems) {
       stats.processed++;
 
-      // LuckyPari brand disabled — skip any luckypari queue items permanently
-      if (item.brand === 'luckypari') {
-        await supabase.from('send_queue')
-          .update({ status: 'skipped', error: 'luckypari brand disabled' })
-          .eq('id', item.id);
-        stats.skipped++;
-        continue;
-      }
+      // Unified 1xPartners campaign — every lead (regardless of which brand-search
+      // found it) is a valid affiliate target. All sends go through the main account
+      // with the brand-neutral template, so no brand is skipped anymore.
 
       // LP account disabled — route everything through main
       const account    = 'main';
