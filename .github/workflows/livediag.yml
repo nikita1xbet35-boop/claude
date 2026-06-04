@@ -1,5 +1,5 @@
 name: Live Diagnose
-# run 2 — post Groq-fix verification
+# run 3 — confirm Groq fix produces saved>0
 on:
   push:
     branches: [main]
