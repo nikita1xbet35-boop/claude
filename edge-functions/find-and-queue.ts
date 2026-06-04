@@ -98,6 +98,12 @@ const GLOBAL_SKIP = new Set([
   'reddit.com','wikipedia.org','amazon.com','t.me','telegram.org','linkedin.com',
   'tiktok.com','pinterest.com','whatsapp.com','bbc.com','cnn.com','espn.com',
   'medium.com','github.com','play.google.com','apps.apple.com','quora.com','blogspot.com',
+  // Big corporate platforms / portals — NOT affiliates, never contact
+  'yandex.ru','yandex.com','maps.yandex.ru','market.yandex.ru','dzen.ru','zen.yandex.ru',
+  'mail.ru','vk.com','ok.ru','rambler.ru','avito.ru','gosuslugi.ru','sberbank.ru','tinkoff.ru',
+  'wildberries.ru','ozon.ru','2gis.ru','rbc.ru','rt.com','ria.ru','tass.ru','kommersant.ru',
+  'apple.com','microsoft.com','samsung.com','huawei.com','xiaomi.com','baidu.com','aliexpress.com',
+  'wordpress.com','wordpress.org','wix.com','shopify.com','cloudflare.com','godaddy.com',
   // Our own brands
   '1xbet.com','1xcasino.com','luckypari.com','1xpartners.com',
   // Known sportsbook / casino operators — never contact them as affiliates
