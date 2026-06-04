@@ -1,0 +1,58 @@
+name: Live Diagnose
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/livediag.yml'
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query live DB
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          q() {
+            curl -sf -X POST \
+              "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\":\"$1\"}"
+            echo ""
+          }
+
+          echo "===== API_USAGE (paused? limit? used?) ====="
+          q "SELECT service, used, limit_value, paused, system_paused, alert_sent_critical FROM api_usage"
+
+          echo "===== SEND_QUEUE by status ====="
+          q "SELECT status, count(*) FROM send_queue GROUP BY status ORDER BY count DESC"
+
+          echo "===== PENDING: scheduled past vs future (now=UTC) ====="
+          q "SELECT (scheduled_at <= now()) AS due_now, count(*) FROM send_queue WHERE status='pending' GROUP BY 1"
+
+          echo "===== PENDING with valid contact_email (joinable) ====="
+          q "SELECT count(*) FROM send_queue sq JOIN leads l ON l.id=sq.lead_id WHERE sq.status='pending' AND l.contact_email IS NOT NULL AND l.contact_email <> ''"
+
+          echo "===== SENT today (last 8h) ====="
+          q "SELECT count(*) FROM email_log WHERE sent_at > now() - interval '8 hours'"
+
+          echo "===== SENT all time ====="
+          q "SELECT count(*) FROM email_log"
+
+          echo "===== LAST 5 sent ====="
+          q "SELECT sent_at, brand, gmail_account FROM email_log ORDER BY sent_at DESC LIMIT 5"
+
+          echo "===== SKIP reasons ====="
+          q "SELECT error, count(*) FROM send_queue WHERE status='skipped' GROUP BY error ORDER BY count DESC LIMIT 12"
+
+          echo "===== LEADS stage=new WITH email ====="
+          q "SELECT count(*) FROM leads WHERE stage='new' AND contact_email IS NOT NULL AND contact_email <> ''"
+
+          echo "===== LEADS by stage ====="
+          q "SELECT stage, count(*) FROM leads GROUP BY stage ORDER BY count DESC"
+
+          echo "===== ERROR_LOG last 40 (all services) ====="
+          q "SELECT to_char(created_at,'HH24:MI') t, level, service, left(message,140) msg FROM error_log ORDER BY created_at DESC LIMIT 40"
+
+          echo "===== process-queue/send-email errors last 6h ====="
+          q "SELECT to_char(created_at,'HH24:MI') t, level, service, left(message,160) msg FROM error_log WHERE service IN ('process-queue','send-email') AND created_at > now() - interval '6 hours' ORDER BY created_at DESC LIMIT 25"
