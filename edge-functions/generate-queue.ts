@@ -200,10 +200,13 @@ Deno.serve(async (req: Request) => {
 
       const queuedLeadIds = new Set(livePending.map(p => p.lead_id));
 
+      // 'waiting' = already contacted (set by process-queue after send). All other
+      // stages with a contact email are fair game — the all-time email_log dedup below
+      // guarantees we never re-contact anyone, so widening the net is safe.
       const { data: candidates, error: leadsErr } = await supabase
         .from('leads')
         .select('id, brand, contact_email, url, geo')
-        .eq('stage', 'new')
+        .in('stage', ['new', 'ready', 'researched', 'followup'])
         .not('contact_email', 'is', null)
         .neq('contact_email', '')
         .order('created_at', { ascending: true })

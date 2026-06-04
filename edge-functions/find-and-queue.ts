@@ -25,8 +25,8 @@ const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
 
 const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
-const RESULTS_PER_KW   = 15;
-const KW_PER_RUN       = 4;
+const RESULTS_PER_KW   = 10;
+const KW_PER_RUN       = 3;
 // Minimum Groq relevance score to keep a lead
 const MIN_SCORE        = 40;
 
@@ -344,13 +344,47 @@ interface Analysis {
 }
 
 let groqCount = 0;
+let groqLastError = '';
+
+// Groq chat call with retry on 429 (rate limit) / 5xx. Returns parsed JSON content or null.
+async function groqChat(body: Record<string, unknown>): Promise<string | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      groqCount++;
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_API_KEY },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.status === 429 || res.status >= 500) {
+        groqLastError = `HTTP ${res.status}`;
+        // brief backoff then retry (rate limit recovers per-minute)
+        await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
+        continue;
+      }
+      if (!res.ok) {
+        groqLastError = `HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`;
+        return null;
+      }
+      const d = await res.json();
+      return d?.choices?.[0]?.message?.content || '';
+    } catch (e: any) {
+      groqLastError = e?.message || 'fetch error';
+      await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+    }
+  }
+  return null;
+}
 
 async function analyzeWithGroq(
   url: string, title: string, snippet: string, pageText: string, brand: string,
 ): Promise<Analysis | null> {
   const partnerBrand = brand === '1xcasino' ? '1xCasino'
                      : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
-  const text = pageText.slice(0, 6000);
+  // Trim hard — title+snippet+lead paragraph is enough to qualify, and small payloads
+  // keep us well under Groq's tokens-per-minute limit so we don't get 429'd into oblivion.
+  const text = pageText.slice(0, 2500);
 
   const sys = `You qualify websites as affiliate PARTNERS for ${partnerBrand} (sports betting brand).\n\n`
     + `We want AFFILIATE / PUBLISHER sites: tipsters, prediction sites, betting-tips blogs, `
@@ -384,25 +418,16 @@ async function analyzeWithGroq(
   const user = `URL: ${url}\nTitle: ${title}\nSnippet: ${snippet}\n\nPage content:\n${text}`;
 
   try {
-    groqCount++;
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + GROQ_API_KEY,
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
-        temperature: 0.1,
-        max_tokens: 300,
-        response_format: { type: 'json_object' },
-      }),
-      signal: AbortSignal.timeout(22_000),
+    // llama-3.1-8b-instant — far higher Groq free-tier rate limits than 70b-versatile,
+    // and plenty accurate for a binary "is this a betting affiliate" qualification.
+    const raw = await groqChat({
+      model: 'llama-3.1-8b-instant',
+      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+      temperature: 0.1,
+      max_tokens: 300,
+      response_format: { type: 'json_object' },
     });
-    if (!res.ok) return null;
-    const d = await res.json();
-    const raw = d?.choices?.[0]?.message?.content || '';
+    if (!raw) return null;
     const ai = JSON.parse(raw.replace(/```json|```/g, '').trim());
 
     const score        = Math.max(0, Math.min(100, Number(ai.score) || 0));
@@ -739,7 +764,8 @@ Deno.serve(async (req: Request) => {
       message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} `
         + `found=${stats.found} analyzed=${stats.analyzed} `
         + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
-        + `saved=${stats.saved} contacts=${stats.contacts}`
+        + `saved=${stats.saved} contacts=${stats.contacts} groqCalls=${groqCount}`
+        + (groqLastError ? ` groqErr="${groqLastError}"` : '')
         + (stats.errors.length ? ' | ' + stats.errors.slice(0, 3).join('; ') : ''),
     }]);
 
