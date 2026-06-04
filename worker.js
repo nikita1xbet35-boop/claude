@@ -5,9 +5,10 @@
 //   every 2 min  → process-queue    (send due emails)
 //                + generate-queue   (top-up queue — fast refill, 30-90s intervals)
 //                + extract-contacts (contact search — runs near-continuously until all leads covered)
-//   every 15 min → find-and-queue   (search → Groq analysis → lead insert)
-//   every 30 min → check-limits
-//   06:00 UTC    → daily-report
+//   every 5 min  → find-and-queue   (search → Groq analysis → lead insert — 3x faster than before)
+//   every 15 min → check-limits
+//   every 30 min → daily-report
+//   06:00 UTC    → daily-report (also fires via */30)
 //
 // Env vars (optional — sane fallbacks below): SUPABASE_URL, SUPABASE_ANON_KEY
 
@@ -214,19 +215,24 @@ export default {
       return;
     }
 
-    if (cron === '*/15 * * * *') {
+    if (cron === '*/5 * * * *') {
       await call('find-and-queue', {});
       return;
     }
 
-    if (cron === '*/30 * * * *') {
+    if (cron === '*/15 * * * *') {
       await call('check-limits', { cron });
+      return;
+    }
+
+    if (cron === '*/30 * * * *') {
+      await call('daily-report', {});
       return;
     }
 
     if (cron === '0 6 * * *') {
       await call('daily-report', {});
-      return;
+      return; // same handler — daily-report also fires at midnight UTC+3 via */30
     }
   },
 };

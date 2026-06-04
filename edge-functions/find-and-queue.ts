@@ -25,8 +25,8 @@ const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
 
 const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
-const RESULTS_PER_KW   = 8;
-const KW_PER_RUN       = 2;
+const RESULTS_PER_KW   = 15;
+const KW_PER_RUN       = 4;
 // Minimum Groq relevance score to keep a lead
 const MIN_SCORE        = 40;
 
@@ -572,8 +572,8 @@ Deno.serve(async (req: Request) => {
   try {
     // find-and-queue never pauses — finding new leads is always valuable
 
-    // 2. Determine brand + preset for this 15-min slot
-    const slotIndex = Math.floor(Date.now() / (15 * 60 * 1000));
+    // 2. Determine brand + preset — slot advances every 5 min to cycle unique keywords faster
+    const slotIndex = Math.floor(Date.now() / (5 * 60 * 1000));
     // 1xcasino + luckypari paused — hunt 1xBet affiliates only (chasing the big giants)
     const BRANDS    = ['1xbet'] as const;
     const brand     = BRANDS[slotIndex % BRANDS.length];
