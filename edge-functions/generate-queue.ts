@@ -43,14 +43,25 @@ const PLACEHOLDERS = [
   'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
 ];
 const PLACEHOLDER_LOCAL = new Set(['email','test','demo','sample','info123','admin123','example','noreply','donotreply','postmaster','mailer']);
+// Big corporate / portal email domains — NOT affiliates. Never email these even if
+// a bad lead slipped through (e.g. support@maps.yandex.ru).
+const CORP_EMAIL_DOMAINS = new Set([
+  'yandex.ru','yandex.com','maps.yandex.ru','ya.ru','mail.ru','vk.com','ok.ru','rambler.ru',
+  'avito.ru','gosuslugi.ru','sberbank.ru','tinkoff.ru','wildberries.ru','ozon.ru','2gis.ru',
+  'rbc.ru','rt.com','ria.ru','tass.ru','google.com','gmail.com','googlemail.com','apple.com',
+  'microsoft.com','outlook.com','hotmail.com','samsung.com','huawei.com','xiaomi.com',
+  'baidu.com','aliexpress.com','wordpress.com','wix.com','shopify.com','cloudflare.com',
+]);
 
 function isSendableEmail(e: string | null): boolean {
   if (!e) return false;
   const l = e.toLowerCase();
   if (DISPOSABLE.some(d => l.includes(d)))   return false;
   if (PLACEHOLDERS.some(p => l.includes(p))) return false;
-  const local = l.split('@')[0];
+  const local  = l.split('@')[0];
+  const domain = l.split('@')[1] || '';
   if (PLACEHOLDER_LOCAL.has(local))          return false;
+  if (CORP_EMAIL_DOMAINS.has(domain))        return false;
   return EMAIL_RE.test(e);
 }
 

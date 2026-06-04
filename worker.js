@@ -11,6 +11,7 @@
 //   06:00 UTC    → daily-report (also fires via */30)
 //
 // Env vars (optional — sane fallbacks below): SUPABASE_URL, SUPABASE_ANON_KEY
+// (deploy retrigger: cloudflare workflow now uses direct `npx wrangler@4 deploy`)
 
 const DEFAULT_SUPABASE_URL = 'https://lxsyrserfuighwxuymgb.supabase.co';
 const DEFAULT_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';

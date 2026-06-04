@@ -313,15 +313,30 @@ Deno.serve(async (req: Request) => {
         'email@domain','mail@domain','name@domain','user@domain','email@site','mail@site',
       ];
       const PLACEHOLDER_LOCAL_PQ = new Set(['email','test','demo','sample','example','noreply','donotreply','postmaster','mailer']);
+      // Big corporate / portal email domains — NOT affiliates (e.g. support@maps.yandex.ru)
+      const CORP_EMAIL_DOMAINS_PQ = new Set([
+        'yandex.ru','yandex.com','maps.yandex.ru','ya.ru','mail.ru','vk.com','ok.ru','rambler.ru',
+        'avito.ru','gosuslugi.ru','sberbank.ru','tinkoff.ru','wildberries.ru','ozon.ru','2gis.ru',
+        'rbc.ru','rt.com','ria.ru','tass.ru','google.com','gmail.com','googlemail.com','apple.com',
+        'microsoft.com','outlook.com','hotmail.com','samsung.com','huawei.com','xiaomi.com',
+        'baidu.com','aliexpress.com','wordpress.com','wix.com','shopify.com','cloudflare.com',
+      ]);
       const emailLower = (lead.contact_email || '').toLowerCase();
       const emailLocal = emailLower.split('@')[0];
+      const emailDomain = emailLower.split('@')[1] || '';
       const isPlaceholder = EMAIL_PLACEHOLDERS_PQ.some(p => emailLower.includes(p))
                          || PLACEHOLDER_LOCAL_PQ.has(emailLocal);
+      const isCorpDomain = CORP_EMAIL_DOMAINS_PQ.has(emailDomain);
 
-      if (!lead.contact_email || isPlaceholder) {
+      if (!lead.contact_email || isPlaceholder || isCorpDomain) {
+        const reason = isCorpDomain ? `corporate domain (not an affiliate): ${lead.contact_email}`
+          : isPlaceholder ? `placeholder email: ${lead.contact_email}` : 'no contact email';
         await supabase.from('send_queue')
-          .update({ status: 'skipped', error: isPlaceholder ? `placeholder email: ${lead.contact_email}` : 'no contact email' })
+          .update({ status: 'skipped', error: reason })
           .eq('id', item.id);
+        if (isCorpDomain) {
+          await supabase.from('leads').update({ stage: 'excluded' }).eq('id', lead.id);
+        }
         stats.skipped++;
         continue;
       }
