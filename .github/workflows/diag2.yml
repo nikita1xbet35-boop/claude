@@ -1,0 +1,60 @@
+name: Diagnose June 4
+on: workflow_dispatch
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check DB state
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          run_query() {
+            curl -sf -X POST \
+              "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\":\"$1\"}"
+          }
+
+          echo "=== SEND QUEUE STATUS ==="
+          run_query "SELECT status, count(*) FROM send_queue GROUP BY status ORDER BY count DESC"
+
+          echo ""
+          echo "=== SENT TODAY ==="
+          run_query "SELECT count(*) as sent_today FROM email_log WHERE sent_at >= NOW() - INTERVAL '4 hours'"
+
+          echo ""
+          echo "=== TOTAL SENT ALL TIME ==="
+          run_query "SELECT count(*) FROM email_log"
+
+          echo ""
+          echo "=== PENDING QUEUE NEXT 10 ==="
+          run_query "SELECT id, brand, gmail_account, scheduled_at FROM send_queue WHERE status='pending' ORDER BY scheduled_at ASC LIMIT 10"
+
+          echo ""
+          echo "=== API USAGE ==="
+          run_query "SELECT service, used, limit_value, paused, system_paused FROM api_usage"
+
+          echo ""
+          echo "=== LEADS stage=new WITH EMAIL ==="
+          run_query "SELECT count(*) FROM leads WHERE stage='new' AND contact_email IS NOT NULL AND contact_email != ''"
+
+          echo ""
+          echo "=== LEADS WITHOUT EMAIL (awaiting extract) ==="
+          run_query "SELECT count(*) FROM leads WHERE contact_email IS NULL AND contact_email_type IS NULL AND stage != 'excluded'"
+
+          echo ""
+          echo "=== LEADS BY STAGE ==="
+          run_query "SELECT stage, count(*) FROM leads GROUP BY stage"
+
+          echo ""
+          echo "=== SKIP REASONS ==="
+          run_query "SELECT error, count(*) FROM send_queue WHERE status='skipped' GROUP BY error ORDER BY count DESC LIMIT 10"
+
+          echo ""
+          echo "=== RECENT ERROR_LOG ==="
+          run_query "SELECT created_at, level, service, LEFT(message,120) as msg FROM error_log ORDER BY created_at DESC LIMIT 30"
+
+          echo ""
+          echo "=== LAST 5 SENT ==="
+          run_query "SELECT sent_at, email, brand FROM email_log ORDER BY sent_at DESC LIMIT 5"
