@@ -19,7 +19,7 @@ const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const JINA_API_KEY  = Deno.env.get('JINA_API_KEY') || '';
 
 // How many leads to process per run
-const BATCH_SIZE = 12;
+const BATCH_SIZE = 20;
 // Global wall-clock budget — stop starting new leads after this
 const TIME_BUDGET_MS = 110_000;
 // Per-page fetch timeout
