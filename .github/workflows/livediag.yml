@@ -1,4 +1,5 @@
 name: Live Diagnose
+# run 2 — post Groq-fix verification
 on:
   push:
     branches: [main]
