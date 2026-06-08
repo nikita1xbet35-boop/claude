@@ -216,7 +216,7 @@ export default {
       return;
     }
 
-    if (cron === '*/5 * * * *') {
+    if (cron === '*/3 * * * *') {
       await call('find-and-queue', {});
       return;
     }

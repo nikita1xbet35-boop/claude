@@ -25,8 +25,8 @@ const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
 
 const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
-const RESULTS_PER_KW   = 8;
-const KW_PER_RUN       = 3;
+const RESULTS_PER_KW   = 12;
+const KW_PER_RUN       = 5;
 // Minimum Groq relevance score to keep a lead
 const MIN_SCORE        = 40;
 // Min ms between consecutive Groq calls — paces at ~27 req/min, safely under the 30/min free-tier limit
@@ -516,7 +516,8 @@ async function extractContact(
   // If we already have a priority-1 (advertising/partner) email, we're done
   if (prio.v <= 1) return acc;
 
-  // Phase 2: high-value partner/advertise pages first
+  // Phase 2: high-value partner/advertise pages — fetched in PARALLEL (was sequential,
+  // which could burn 50s+ per lead and starve the rest of the run).
   const phase2 = [
     origin + '/advertise',
     origin + '/advertising',
@@ -527,16 +528,17 @@ async function extractContact(
     origin + '/media',
     origin + '/press',
   ];
-  for (const page of phase2) {
-    if (Date.now() > deadline) return acc;
-    const html = await fetchPage(page);
-    if (!html || html.length < 100) continue;
-    scanContacts(html, page, acc, prio);
-    if (prio.v <= 1) return acc; // found advertising email, stop
+  if (Date.now() < deadline) {
+    const pages = await Promise.all(phase2.map(p => fetchPage(p).then(h => ({ page: p, html: h }))));
+    for (const { page, html } of pages) {
+      if (!html || html.length < 100) continue;
+      scanContacts(html, page, acc, prio);
+    }
+    if (prio.v <= 1) return acc; // found advertising/partner email, stop
   }
 
-  // Phase 3: generic contact / about pages (if still no email)
-  if (!acc.email && !acc.telegram && !acc.whatsapp) {
+  // Phase 3: generic contact / about pages (if still no contact at all) — also parallel
+  if (!acc.email && !acc.telegram && !acc.whatsapp && Date.now() < deadline) {
     const phase3 = [
       origin + '/contact',
       origin + '/contact-us',
@@ -545,12 +547,10 @@ async function extractContact(
       origin + '/business',
       origin + '/collaborate',
     ];
-    for (const page of phase3) {
-      if (Date.now() > deadline) return acc;
-      const html = await fetchPage(page);
+    const pages = await Promise.all(phase3.map(p => fetchPage(p).then(h => ({ page: p, html: h }))));
+    for (const { page, html } of pages) {
       if (!html || html.length < 100) continue;
       scanContacts(html, page, acc, prio);
-      if (acc.email || acc.telegram || acc.whatsapp) break;
     }
   }
 
@@ -604,8 +604,9 @@ Deno.serve(async (req: Request) => {
   try {
     // find-and-queue never pauses — finding new leads is always valuable
 
-    // 2. Determine brand + preset — slot advances every 5 min to cycle unique keywords faster
-    const slotIndex = Math.floor(Date.now() / (5 * 60 * 1000));
+    // 2. Determine brand + preset — slot advances every 3 min (matches the find-and-queue
+    //    cron) so each run picks a fresh set of keywords rather than re-searching the same ones.
+    const slotIndex = Math.floor(Date.now() / (3 * 60 * 1000));
     // 1xcasino + luckypari paused — hunt 1xBet affiliates only (chasing the big giants)
     const BRANDS    = ['1xbet'] as const;
     const brand     = BRANDS[slotIndex % BRANDS.length];
@@ -659,114 +660,109 @@ Deno.serve(async (req: Request) => {
       (allSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
     );
 
-    // 4. Process each keyword
-    // Track time of last Groq call for inter-call pacing (avoids 429 rate-limit)
-    let lastGroqCallMs = 0;
+    // 4. Run ALL keyword searches in PARALLEL (was sequential — up to 12s each wasted
+    //    serially). Then merge + dedup into one candidate list before analysis.
+    const serpBatches = await Promise.all(
+      keywords.map(kw =>
+        searchDuckDuckGo(`${kw} ${DDG_MINUS}`, RESULTS_PER_KW)
+          .then(r => { stats.keywords_run++; return r; })
+          .catch(e => { stats.errors.push(`DDG "${kw}": ${e.message}`); return []; }),
+      ),
+    );
 
-    for (const kw of keywords) {
-      if (Date.now() > deadline) break;
-
-      let serpResults: Array<{ link: string; title: string; snippet?: string }> = [];
-      try {
-        serpResults = await searchDuckDuckGo(`${kw} ${DDG_MINUS}`, RESULTS_PER_KW);
-        if (serpResults.length === 0) {
-          stats.errors.push(`DDG "${kw}": no results`);
-          continue;
-        }
-      } catch (e: any) {
-        stats.errors.push(`DDG "${kw}": ${e.message}`);
-        continue;
-      }
-
-      stats.keywords_run++;
-      stats.found += serpResults.length;
-
-      for (const result of serpResults) {
-        if (Date.now() > deadline) break;
-
+    // Merge, dedup by domain across all keywords, and apply the cheap pre-filters now
+    // so the expensive Groq+fetch loop only sees real candidates.
+    const candidates: Array<{ url: string; title: string; snippet: string; origin: string }> = [];
+    const seenThisRun = new Set<string>();
+    for (const batch of serpBatches) {
+      stats.found += batch.length;
+      for (const result of batch) {
         const url    = result.link || '';
         const domain = getDomain(url);
-        if (!domain || GLOBAL_SKIP.has(domain) ||
-            existingDomains.has(domain) || blacklistSet.has(domain)) continue;
-
-        // Noise pre-filter — drop forums, livescores, download pages, etc.
+        if (!domain || seenThisRun.has(domain)) continue;
+        if (GLOBAL_SKIP.has(domain) || existingDomains.has(domain) || blacklistSet.has(domain)) continue;
         if (isNoisyResult(url, result.title || '', result.snippet || '')) { stats.irrelevant++; continue; }
-
-        // Fast TLD geo-filter — skip obviously excluded markets before fetching
         if (isExcludedByTld(domain)) { stats.geo_excluded++; continue; }
-
-        // Mark domain seen now so the same domain isn't processed twice in one run
-        existingDomains.add(domain);
-
         let origin: string;
         try {
           origin = new URL(url.startsWith('http') ? url : 'https://' + url).origin;
         } catch { continue; }
+        seenThisRun.add(domain);
+        candidates.push({ url, title: result.title || '', snippet: result.snippet || '', origin });
+      }
+    }
 
-        // 4a. Groq pre-filter using snippet+title ONLY (no page fetch yet — fast & cheap).
-        //     Pace calls to ~27/min to stay under the Groq free-tier 30 req/min limit.
-        const sinceLastGroq = Date.now() - lastGroqCallMs;
-        if (sinceLastGroq < GROQ_PACE_MS) {
-          await new Promise(r => setTimeout(r, GROQ_PACE_MS - sinceLastGroq));
-        }
-        if (Date.now() > deadline) break;
-        lastGroqCallMs = Date.now();
+    // Track time of last Groq call for inter-call pacing (avoids 429 rate-limit)
+    let lastGroqCallMs = 0;
 
-        const analysis = await analyzeWithGroq(url, result.title || '', result.snippet || '', brand);
+    for (const cand of candidates) {
+      if (Date.now() > deadline) break;
+      const { url, title, snippet, origin } = cand;
+      const domain = getDomain(url);
 
-        // Groq MUST succeed — if it failed we skip the lead rather than risk adding
-        // operators/competitors that Groq would have caught.
-        if (!analysis) { stats.irrelevant++; continue; }
+      // 4a. Groq pre-filter using snippet+title ONLY (no page fetch yet — fast & cheap).
+      //     Pace calls to ~27/min to stay under the Groq free-tier 30 req/min limit.
+      const sinceLastGroq = Date.now() - lastGroqCallMs;
+      if (sinceLastGroq < GROQ_PACE_MS) {
+        await new Promise(r => setTimeout(r, GROQ_PACE_MS - sinceLastGroq));
+      }
+      if (Date.now() > deadline) break;
+      lastGroqCallMs = Date.now();
 
-        stats.analyzed++;
-        // Only block real operators (own casino/sportsbook). Sites promoting 1xBet/other brands are partners.
-        if (analysis.is_operator)   { stats.competitors++; continue; }
-        if (analysis.geo_excluded)  { stats.geo_excluded++; continue; }
-        if (!analysis.relevant)     { stats.irrelevant++;   continue; }
+      const analysis = await analyzeWithGroq(url, title, snippet, brand);
 
-        // 4b. Passed Groq — NOW fetch the homepage for contact extraction
-        if (Date.now() > deadline) break;
-        const homepageHtml = await fetchPage(url);
+      // Groq MUST succeed — if it failed we skip the lead rather than risk adding
+      // operators/competitors that Groq would have caught.
+      if (!analysis) { stats.irrelevant++; continue; }
 
-        // 4c. Extract contact details (multi-phase: homepage → partner pages → contact pages)
-        let contact: Contact = { email: null, emailType: null, telegram: null, whatsapp: null, phone: null, sourceUrl: null };
-        if (homepageHtml && homepageHtml.length > 200) {
-          contact = await extractContact(url, origin, homepageHtml, deadline);
-        }
-        if (contact.email && emailedSet.has(contact.email.toLowerCase())) continue;
+      stats.analyzed++;
+      // Only block real operators (own casino/sportsbook). Sites promoting 1xBet/other brands are partners.
+      if (analysis.is_operator)   { stats.competitors++; continue; }
+      if (analysis.geo_excluded)  { stats.geo_excluded++; continue; }
+      if (!analysis.relevant)     { stats.irrelevant++;   continue; }
 
-        // 4d. Build & insert the lead
-        const leadData: Record<string, unknown> = {
-          url,
-          name:     nameFromTitle(result.title || ''),
-          brand,
-          stage:    'new',
-          geo:      preset.geo,
-          type:     analysis?.type     ?? 'other',
-          score:    analysis?.score    ?? 50,
-          summary:  analysis?.summary  ?? '',
-          why:      analysis?.why      ?? '',
-          priority: analysis?.priority ?? 'Medium',
-          lang:     analysis?.lang     ?? '',
-        };
-        if (contact.email) {
-          leadData.contact_email      = contact.email;
-          leadData.contact_email_type = contact.emailType;
-          leadData.email              = contact.email; // legacy column kept in sync
-          stats.contacts++;
-        }
-        if (contact.telegram)  { leadData.contact_telegram = contact.telegram; leadData.tg = contact.telegram; }
-        if (contact.whatsapp)  leadData.contact_whatsapp   = contact.whatsapp;
-        if (contact.phone)     leadData.contact_phone      = contact.phone;
-        if (contact.sourceUrl) leadData.contact_source_url = contact.sourceUrl;
+      // 4b. Passed Groq — NOW fetch the homepage for contact extraction
+      if (Date.now() > deadline) break;
+      const homepageHtml = await fetchPage(url);
 
-        const { error: insErr } = await supabase.from('leads').insert([leadData]);
-        if (!insErr) {
-          if (contact.email) emailedSet.add(contact.email.toLowerCase());
-          stats.saved++;
-        } else {
-          stats.errors.push(`insert ${domain}: ${insErr.message}`);
-        }
+      // 4c. Extract contact details (multi-phase: homepage → partner pages → contact pages)
+      let contact: Contact = { email: null, emailType: null, telegram: null, whatsapp: null, phone: null, sourceUrl: null };
+      if (homepageHtml && homepageHtml.length > 200) {
+        contact = await extractContact(url, origin, homepageHtml, deadline);
+      }
+      if (contact.email && emailedSet.has(contact.email.toLowerCase())) continue;
+
+      // 4d. Build & insert the lead
+      const leadData: Record<string, unknown> = {
+        url,
+        name:     nameFromTitle(title),
+        brand,
+        stage:    'new',
+        geo:      preset.geo,
+        type:     analysis?.type     ?? 'other',
+        score:    analysis?.score    ?? 50,
+        summary:  analysis?.summary  ?? '',
+        why:      analysis?.why      ?? '',
+        priority: analysis?.priority ?? 'Medium',
+        lang:     analysis?.lang     ?? '',
+      };
+      if (contact.email) {
+        leadData.contact_email      = contact.email;
+        leadData.contact_email_type = contact.emailType;
+        leadData.email              = contact.email; // legacy column kept in sync
+        stats.contacts++;
+      }
+      if (contact.telegram)  { leadData.contact_telegram = contact.telegram; leadData.tg = contact.telegram; }
+      if (contact.whatsapp)  leadData.contact_whatsapp   = contact.whatsapp;
+      if (contact.phone)     leadData.contact_phone      = contact.phone;
+      if (contact.sourceUrl) leadData.contact_source_url = contact.sourceUrl;
+
+      const { error: insErr } = await supabase.from('leads').insert([leadData]);
+      if (!insErr) {
+        if (contact.email) emailedSet.add(contact.email.toLowerCase());
+        stats.saved++;
+      } else {
+        stats.errors.push(`insert ${domain}: ${insErr.message}`);
       }
     }
 
