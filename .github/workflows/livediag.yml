@@ -1,0 +1,72 @@
+name: Live DB Diagnostic
+on:
+  push:
+    paths: ['.github/workflows/livediag.yml']
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          BASE="$SUPABASE_URL/rest/v1"
+          H1="apikey: $SUPABASE_SERVICE_ROLE_KEY"
+          H2="Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY"
+
+          echo "=== API USAGE (limits/paused) ==="
+          curl -s "$BASE/api_usage?select=service,used,limit_value,paused,system_paused" \
+            -H "$H1" -H "$H2" | python3 -m json.tool
+
+          echo ""
+          echo "=== SEND QUEUE STATUS COUNTS ==="
+          curl -s "$BASE/send_queue?select=status&status=neq.null" \
+            -H "$H1" -H "$H2" -H "Prefer: count=exact" \
+            -o /dev/null -D - 2>/dev/null | grep -i content-range || true
+
+          for st in pending sent failed skipped; do
+            COUNT=$(curl -s "$BASE/send_queue?status=eq.$st&select=id" \
+              -H "$H1" -H "$H2" -H "Prefer: count=exact" \
+              -D - -o /dev/null 2>/dev/null | grep -i 'content-range' | grep -oP '\d+(?= \[)' || echo "?")
+            echo "  $st: $COUNT"
+          done
+
+          echo ""
+          echo "=== LAST 5 SENT EMAILS ==="
+          curl -s "$BASE/email_log?select=created_at,to_email,brand,subject&order=created_at.desc&limit=5" \
+            -H "$H1" -H "$H2" | python3 -m json.tool
+
+          echo ""
+          echo "=== LEADS AVAILABLE (stage in new/ready/researched/followup, has email) ==="
+          for stage in new ready researched followup; do
+            COUNT=$(curl -s "$BASE/leads?stage=eq.$stage&contact_email=not.is.null&select=id" \
+              -H "$H1" -H "$H2" -H "Prefer: count=exact" \
+              -D - -o /dev/null 2>/dev/null | grep -i 'content-range' | grep -oP '\d+(?= \[)' || echo "?")
+            echo "  $stage: $COUNT"
+          done
+
+          echo ""
+          echo "=== LAST 10 FIND-AND-QUEUE LOGS ==="
+          curl -s "$BASE/error_log?service=eq.find-and-queue&select=created_at,level,message&order=created_at.desc&limit=10" \
+            -H "$H1" -H "$H2" | python3 -m json.tool
+
+          echo ""
+          echo "=== LAST 10 GENERATE-QUEUE LOGS ==="
+          curl -s "$BASE/error_log?service=eq.generate-queue&select=created_at,level,message&order=created_at.desc&limit=10" \
+            -H "$H1" -H "$H2" | python3 -m json.tool
+
+          echo ""
+          echo "=== LAST 10 PROCESS-QUEUE LOGS ==="
+          curl -s "$BASE/error_log?service=eq.process-queue&select=created_at,level,message&order=created_at.desc&limit=10" \
+            -H "$H1" -H "$H2" | python3 -m json.tool
+
+          echo ""
+          echo "=== EXTRACT-CONTACTS LAST 5 LOGS ==="
+          curl -s "$BASE/error_log?service=eq.extract-contacts&select=created_at,level,message&order=created_at.desc&limit=5" \
+            -H "$H1" -H "$H2" | python3 -m json.tool
+
+          echo ""
+          echo "=== SEND QUEUE: PENDING LEADS (first 10) ==="
+          curl -s "$BASE/send_queue?status=eq.pending&select=id,brand,gmail_account,scheduled_at,created_at&order=scheduled_at.asc&limit=10" \
+            -H "$H1" -H "$H2" | python3 -m json.tool
