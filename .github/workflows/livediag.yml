@@ -1,0 +1,40 @@
+name: Live Diagnostic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query live DB
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set +e
+          q() {
+            curl -sf -X POST \
+              "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\":\"$1\"}"
+            echo ""
+          }
+
+          echo "=== SEND_QUEUE BUFFER (pending, due now) ==="
+          q "SELECT count(*) AS pending_due FROM send_queue WHERE status='pending' AND scheduled_at <= now();"
+
+          echo "=== SEND_QUEUE BY STATUS ==="
+          q "SELECT status, count(*) FROM send_queue GROUP BY status ORDER BY count DESC;"
+
+          echo "=== LEADS WITH EMAIL, NOT YET SENT (the real reserve) ==="
+          q "SELECT count(*) AS contactable_reserve FROM leads l WHERE l.contact_email IS NOT NULL AND l.stage IN ('new','ready','researched','followup') AND NOT EXISTS (SELECT 1 FROM email_log e WHERE e.email = l.contact_email);"
+
+          echo "=== LAST 12 find-and-queue RUNS ==="
+          q "SELECT created_at, message FROM error_log WHERE service='find-and-queue' ORDER BY created_at DESC LIMIT 12;"
+
+          echo "=== EMAILS SENT TODAY (GMT+3) ==="
+          q "SELECT count(*) AS sent_today FROM email_log WHERE sent_at >= (now() AT TIME ZONE 'UTC' + interval '3 hours')::date - interval '3 hours';"
+
+          echo "=== LEADS ADDED IN LAST 60 MIN ==="
+          q "SELECT count(*) AS new_leads_1h, count(contact_email) AS with_email_1h FROM leads WHERE created_at > now() - interval '60 minutes';"
