@@ -25,10 +25,12 @@ const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
 
 const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
-const RESULTS_PER_KW   = 10;
+const RESULTS_PER_KW   = 8;
 const KW_PER_RUN       = 3;
 // Minimum Groq relevance score to keep a lead
 const MIN_SCORE        = 40;
+// Min ms between consecutive Groq calls — paces at ~27 req/min, safely under the 30/min free-tier limit
+const GROQ_PACE_MS     = 2200;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -348,7 +350,7 @@ let groqLastError = '';
 
 // Groq chat call with retry on 429 (rate limit) / 5xx. Returns parsed JSON content or null.
 async function groqChat(body: Record<string, unknown>): Promise<string | null> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
       groqCount++;
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -359,8 +361,8 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
       });
       if (res.status === 429 || res.status >= 500) {
         groqLastError = `HTTP ${res.status}`;
-        // brief backoff then retry (rate limit recovers per-minute)
-        await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
+        // Longer backoff on rate-limit — let the per-minute window reset
+        await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
         continue;
       }
       if (!res.ok) {
@@ -371,51 +373,40 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
       return d?.choices?.[0]?.message?.content || '';
     } catch (e: any) {
       groqLastError = e?.message || 'fetch error';
-      await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+      await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
     }
   }
   return null;
 }
 
+// Uses title+snippet only (no page fetch needed) — fast pre-filter before we spend time
+// fetching pages. Snippet is usually enough to classify betting affiliate vs operator vs irrelevant.
 async function analyzeWithGroq(
-  url: string, title: string, snippet: string, pageText: string, brand: string,
+  url: string, title: string, snippet: string, brand: string,
 ): Promise<Analysis | null> {
   const partnerBrand = brand === '1xcasino' ? '1xCasino'
                      : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
-  // Trim hard — title+snippet+lead paragraph is enough to qualify, and small payloads
-  // keep us well under Groq's tokens-per-minute limit so we don't get 429'd into oblivion.
-  const text = pageText.slice(0, 2500);
 
   const sys = `You qualify websites as affiliate PARTNERS for ${partnerBrand} (sports betting brand).\n\n`
     + `We want AFFILIATE / PUBLISHER sites: tipsters, prediction sites, betting-tips blogs, `
     + `sports media, review/comparison sites, "best betting site" lists. We pitch them a partnership.\n`
-    + `We especially want LARGE, high-traffic, established sites — they are the prime targets.\n\n`
     + `Return ONLY JSON:\n`
     + `{"score":0-100,"type":"review|tipster|media|aggregator|blog|other",`
     + `"summary":"1 sentence","why":"1 sentence — why fits or not",`
     + `"priority":"High|Medium|Low","lang":"language code",`
     + `"is_competitor":false,"relevant":true/false,"geo_excluded":true/false,"is_operator":true/false}\n\n`
-    + `Scoring (favour big established sites):\n`
+    + `Scoring:\n`
     + `- 80-100: large/established affiliate or media site, clear betting/casino content, target GEO\n`
     + `- 60-79: solid affiliate site, partial fit or quality unclear\n`
     + `- 30-59: tangential, thin content, mixed signals\n`
     + `- 0-29: not iGaming, dead, irrelevant\n\n`
-    + `IMPORTANT — mentioning or promoting betting brands is GOOD, not bad:\n`
-    + `- A site that reviews, promotes, ranks, or writes about 1xBet (or ANY betting brand like `
-    + `bet9ja, betway, melbet, 1win, mostbet, betwinner, sportybet) is a PERFECT PARTNER. `
-    + `NEVER mark it is_competitor. Always set is_competitor=false.\n`
-    + `- "1xbet promo code", "1xbet nigeria", "betway review" pages are affiliate content → relevant=true.\n\n`
-    + `The ONLY hard block is is_operator:\n`
-    + `OPERATORS (is_operator=true): the site IS itself a casino/sportsbook — it has its own `
-    + `deposit / withdrawal / account registration / login-to-bet. Examples: bet365.com, 1xbet.com, `
-    + `bet9ja.com, betway.com, stake.com, melbet.com, 1win.com, mostbet.com, betwinner.com. We can't partner those.\n`
-    + `PARTNERS (is_operator=false): sites that REVIEW, COMPARE, PREDICT, RANK, or BLOG about betting — `
-    + `they send traffic TO operators. These are our targets.\n\n`
+    + `IMPORTANT — sites that REVIEW or PROMOTE betting brands (1xBet, betway, bet9ja, melbet, 1win etc.) are PERFECT PARTNERS. Set is_competitor=false always.\n\n`
+    + `OPERATORS (is_operator=true): the site IS itself a casino/sportsbook with deposits/withdrawals/login-to-bet (e.g. bet365.com, 1xbet.com). NOT partners.\n`
+    + `PARTNERS (is_operator=false): sites that review, compare, predict, rank, or blog about betting. These are targets.\n\n`
     + `Set geo_excluded=true ONLY for: USA, UK, Western Europe, Ukraine, Brazil, Australia.\n`
-    + `Set relevant=false ONLY if is_operator OR geo_excluded OR score<${MIN_SCORE}. `
-    + `Do NOT use is_competitor to exclude anything.`;
+    + `Set relevant=false ONLY if is_operator OR geo_excluded OR score<${MIN_SCORE}.`;
 
-  const user = `URL: ${url}\nTitle: ${title}\nSnippet: ${snippet}\n\nPage content:\n${text}`;
+  const user = `URL: ${url}\nTitle: ${title}\nSnippet: ${snippet}`;
 
   try {
     // llama-3.1-8b-instant — far higher Groq free-tier rate limits than 70b-versatile,
@@ -659,6 +650,9 @@ Deno.serve(async (req: Request) => {
     );
 
     // 4. Process each keyword
+    // Track time of last Groq call for inter-call pacing (avoids 429 rate-limit)
+    let lastGroqCallMs = 0;
+
     for (const kw of keywords) {
       if (Date.now() > deadline) break;
 
@@ -696,13 +690,16 @@ Deno.serve(async (req: Request) => {
           origin = new URL(url.startsWith('http') ? url : 'https://' + url).origin;
         } catch { continue; }
 
-        // 4a. Fetch the homepage
-        const homepageHtml = await fetchPage(url);
-        if (!homepageHtml || homepageHtml.length < 200) continue;
+        // 4a. Groq pre-filter using snippet+title ONLY (no page fetch yet — fast & cheap).
+        //     Pace calls to ~27/min to stay under the Groq free-tier 30 req/min limit.
+        const sinceLastGroq = Date.now() - lastGroqCallMs;
+        if (sinceLastGroq < GROQ_PACE_MS) {
+          await new Promise(r => setTimeout(r, GROQ_PACE_MS - sinceLastGroq));
+        }
+        if (Date.now() > deadline) break;
+        lastGroqCallMs = Date.now();
 
-        // 4b. Groq relevance + geo analysis on the real page content
-        const pageText = stripHtml(homepageHtml);
-        const analysis = await analyzeWithGroq(url, result.title || '', result.snippet || '', pageText, brand);
+        const analysis = await analyzeWithGroq(url, result.title || '', result.snippet || '', brand);
 
         // Groq MUST succeed — if it failed we skip the lead rather than risk adding
         // operators/competitors that Groq would have caught.
@@ -714,8 +711,15 @@ Deno.serve(async (req: Request) => {
         if (analysis.geo_excluded)  { stats.geo_excluded++; continue; }
         if (!analysis.relevant)     { stats.irrelevant++;   continue; }
 
+        // 4b. Passed Groq — NOW fetch the homepage for contact extraction
+        if (Date.now() > deadline) break;
+        const homepageHtml = await fetchPage(url);
+
         // 4c. Extract contact details (multi-phase: homepage → partner pages → contact pages)
-        const contact = await extractContact(url, origin, homepageHtml, deadline);
+        let contact: Contact = { email: null, emailType: null, telegram: null, whatsapp: null, phone: null, sourceUrl: null };
+        if (homepageHtml && homepageHtml.length > 200) {
+          contact = await extractContact(url, origin, homepageHtml, deadline);
+        }
         if (contact.email && emailedSet.has(contact.email.toLowerCase())) continue;
 
         // 4d. Build & insert the lead
