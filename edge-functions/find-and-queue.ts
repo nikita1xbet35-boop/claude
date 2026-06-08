@@ -32,6 +32,16 @@ const MIN_SCORE        = 40;
 // Min ms between consecutive Groq calls — paces at ~27 req/min, safely under the 30/min free-tier limit
 const GROQ_PACE_MS     = 2200;
 
+// Minus-words appended to every DDG query to cut noise
+const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk';
+
+// Pre-filter: drop results whose title/snippet/URL contain these strings (catches what DDG misses)
+const RESULT_NOISE_TERMS = ['forum','reddit','wikipedia','livescore','flashscore','sofascore','results','fixtures','how to play','rules of ','login','sign up','download','apk','app store','google play'];
+function isNoisyResult(url: string, title: string, snippet: string): boolean {
+  const haystack = (url + ' ' + title + ' ' + snippet).toLowerCase();
+  return RESULT_NOISE_TERMS.some(t => haystack.includes(t));
+}
+
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -45,17 +55,17 @@ interface Preset { id: string; name: string; geo: string; keywords: string[]; br
 const DEFAULT_PRESETS: Record<string, Preset[]> = {
   '1xbet': [
     { id:'1xb-ng', name:'Nigeria', geo:'NG',
-      keywords:['best betting site nigeria','football prediction nigeria','sure bet tips nigeria','betting tips today nigeria','free betting tips nigeria','betting predictions nigeria','how to win bet nigeria','sports betting nigeria','casino online nigeria','bet9ja','betway nigeria','sportybet','1xbet nigeria','1xbet promo code'] },
+      keywords:['best betting sites nigeria','top betting sites nigeria','betting sites comparison nigeria','bookmaker review nigeria','best online casino nigeria','new betting sites nigeria','betting bonus nigeria','casino review nigeria'] },
     { id:'1xb-kg', name:'Kyrgyzstan', geo:'KG',
-      keywords:['ставки на спорт кыргызстан','прогнозы на футбол кыргызстан','букмекеры кыргызстан','бесплатные прогнозы на спорт','прогнозы на спорт бесплатно','ставки на спорт бишкек','лучшие букмекеры','казино онлайн кыргызстан','melbet kyrgyzstan','1win кыргызстан','mostbet кыргызстан','1xbet кыргызстан','1xbet скачать','1xbet кирүү'] },
+      keywords:['рейтинг букмекеров кыргызстан','лучшие букмекерские конторы','обзор букмекеров','сравнение букмекеров','лучшие онлайн казино','обзор казино','рейтинг казино','бонусы букмекеров'] },
     { id:'1xb-my', name:'Malaysia', geo:'MY',
-      keywords:['betting site malaysia','online casino malaysia','sportsbook malaysia','judi bola online','judi online malaysia','taruhan bola','live casino malaysia','4d online malaysia','slot online malaysia','马来西亚 博彩','马来西亚 体育投注','betway malaysia','bk8','1xbet malaysia'] },
+      keywords:['best betting sites malaysia','best online casino malaysia','betting sites comparison malaysia','casino review malaysia','laman judi terbaik malaysia','ulasan kasino malaysia','马来西亚博彩网站推荐','马来西亚最佳娱乐场'] },
     { id:'1xb-ph', name:'Philippines', geo:'PH',
-      keywords:['betting site philippines','online betting philippines','sabong online','pba betting','pinoy betting tips','online casino philippines','sports betting philippines','e-sabong','basketball betting philippines','taya sa basketball','gcash betting','melbet philippines','betway philippines','1xbet philippines'] },
+      keywords:['best betting sites philippines','top online casino philippines','betting sites comparison philippines','casino review philippines','best sabong site','pinakamahusay na betting site','online casino review philippines'] },
     { id:'1xb-np', name:'Nepal', geo:'NP',
-      keywords:['betting site nepal','cricket betting nepal','IPL betting nepal','betting tips nepal','online betting nepal','online casino nepal','cricket prediction nepal','football betting nepal','खेल सट्टा नेपाल','1win nepal','melbet nepal','1xbet nepal'] },
+      keywords:['best betting sites nepal','best cricket betting site nepal','betting sites comparison nepal','online casino review nepal','top betting sites nepal','उत्कृष्ट सट्टा साइट नेपाल'] },
     { id:'1xb-pk', name:'Pakistan', geo:'PK',
-      keywords:['cricket betting pakistan','PSL betting','online betting pakistan','betting tips pakistan','cricket prediction pakistan','online casino pakistan','sports betting pakistan','cricket betting tips','betting app pakistan','کرکٹ بیٹنگ','betwinner pakistan','melbet pakistan','1xbet pakistan','1xbet login pakistan'] },
+      keywords:['best betting sites pakistan','best cricket betting site pakistan','betting sites comparison pakistan','online casino review pakistan','top betting sites pakistan','بہترین بیٹنگ سائٹ پاکستان'] },
   ],
   '1xcasino': [
     { id:'1xc-ar', name:'Argentina', geo:'AR',
@@ -658,7 +668,7 @@ Deno.serve(async (req: Request) => {
 
       let serpResults: Array<{ link: string; title: string; snippet?: string }> = [];
       try {
-        serpResults = await searchDuckDuckGo(kw, RESULTS_PER_KW);
+        serpResults = await searchDuckDuckGo(`${kw} ${DDG_MINUS}`, RESULTS_PER_KW);
         if (serpResults.length === 0) {
           stats.errors.push(`DDG "${kw}": no results`);
           continue;
@@ -678,6 +688,9 @@ Deno.serve(async (req: Request) => {
         const domain = getDomain(url);
         if (!domain || GLOBAL_SKIP.has(domain) ||
             existingDomains.has(domain) || blacklistSet.has(domain)) continue;
+
+        // Noise pre-filter — drop forums, livescores, download pages, etc.
+        if (isNoisyResult(url, result.title || '', result.snippet || '')) { stats.irrelevant++; continue; }
 
         // Fast TLD geo-filter — skip obviously excluded markets before fetching
         if (isExcludedByTld(domain)) { stats.geo_excluded++; continue; }

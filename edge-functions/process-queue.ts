@@ -121,11 +121,11 @@ function geoName(geoCode: string): string {
 function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
   const siteName = cleanSiteName(lead.name as string, lead.url as string || '');
 
-  return `${siteName}, straight up — you're driving the kind of volume most affiliates only talk about. `
-    + `I'm Nick, I run partner acquisition at 1xPartners. `
-    + `For someone at your level we don't do standard terms — individual RevShare scaled to your numbers, `
-    + `a personal manager (me), custom promo codes and landings for your audience, payouts always on time. `
-    + `Happy to walk you through what we could put together — want to talk it over?`;
+  return `${siteName}, straight up — ${siteName} should have 1xBet on it. `
+    + `It's the most recognized betting brand across most of your GEOs, licensed, and it earns publishers strong, consistent monthly income. `
+    + `Clean RevShare with individual terms per GEO, full S2S/postback tracking, deeplinks, custom landings for your audience, and 1xCasino on top of 1xBet. `
+    + `No admin fee, payouts always on time, you run directly with me. `
+    + `I'll build the terms around your real numbers — want a concrete proposal?`;
 }
 
 // Decode HTML entities so site names never show raw "&amp;" / "&#x27;" etc.

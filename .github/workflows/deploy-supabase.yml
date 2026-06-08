@@ -17,7 +17,7 @@ jobs:
         with:
           version: latest
 
-      # Add brand column to search_presets if it doesn't exist yet
+      # Add brand column to search_presets if it doesn't exist yet + purge old custom presets
       - name: Run DB migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -28,6 +28,12 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"query":"ALTER TABLE public.search_presets ADD COLUMN IF NOT EXISTS brand TEXT DEFAULT NULL;"}' \
             && echo "Migration OK" || echo "Migration skipped (column may already exist)"
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"DELETE FROM public.search_presets WHERE is_default = false;"}' \
+            && echo "Old custom presets cleared" || echo "Preset cleanup skipped"
 
       - name: Prepare function directories
         run: |
