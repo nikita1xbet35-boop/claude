@@ -15,47 +15,56 @@ jobs:
           AUTH="Authorization: Bearer $SUPABASE_ACCESS_TOKEN"
 
           run_query() {
-            curl -sf -X POST "$BASE" \
+            RESULT=$(curl -sf -X POST "$BASE" \
               -H "$AUTH" \
               -H "Content-Type: application/json" \
-              -d "{\"query\":\"$1\"}" 2>&1
+              -d "{\"query\":\"$1\"}" 2>&1)
+            if [ $? -eq 0 ] && [ -n "$RESULT" ]; then
+              echo "$RESULT" | python3 -m json.tool 2>/dev/null || echo "$RESULT"
+            else
+              echo "(empty or error)"
+            fi
           }
 
           echo "=== API USAGE ==="
-          run_query "SELECT service, used, limit_value, paused, system_paused FROM api_usage ORDER BY service;" | python3 -m json.tool
+          run_query "SELECT service, used, limit_value, paused, system_paused FROM api_usage ORDER BY service;"
 
           echo ""
           echo "=== SEND QUEUE COUNTS ==="
-          run_query "SELECT status, COUNT(*) as cnt FROM send_queue GROUP BY status ORDER BY status;" | python3 -m json.tool
+          run_query "SELECT status, COUNT(*) as cnt FROM send_queue GROUP BY status ORDER BY status;"
 
           echo ""
-          echo "=== LAST 5 SENT EMAILS ==="
-          run_query "SELECT created_at, to_email, brand FROM email_log ORDER BY created_at DESC LIMIT 5;" | python3 -m json.tool
+          echo "=== TODAY SENT via send_queue ==="
+          run_query "SELECT COUNT(*) as sent_today FROM send_queue WHERE status='sent' AND updated_at >= CURRENT_DATE;"
 
           echo ""
-          echo "=== TODAY SENT EMAILS COUNT ==="
-          run_query "SELECT COUNT(*) as today_sent FROM email_log WHERE created_at >= CURRENT_DATE;" | python3 -m json.tool
+          echo "=== LEADS AVAILABLE (with email, in active stages) ==="
+          run_query "SELECT stage, COUNT(*) as cnt FROM leads WHERE contact_email IS NOT NULL AND stage IN ('new','ready','researched','followup') GROUP BY stage ORDER BY stage;"
 
           echo ""
-          echo "=== LEADS AVAILABLE ==="
-          run_query "SELECT stage, COUNT(*) as cnt FROM leads WHERE contact_email IS NOT NULL AND stage IN ('new','ready','researched','followup') GROUP BY stage ORDER BY stage;" | python3 -m json.tool
+          echo "=== TOTAL LEADS WITH EMAIL (all stages) ==="
+          run_query "SELECT stage, COUNT(*) as cnt FROM leads WHERE contact_email IS NOT NULL GROUP BY stage ORDER BY stage;"
 
           echo ""
           echo "=== LAST 10 FIND-AND-QUEUE LOGS ==="
-          run_query "SELECT created_at, level, message FROM error_log WHERE service='find-and-queue' ORDER BY created_at DESC LIMIT 10;" | python3 -m json.tool
+          run_query "SELECT created_at, level, message FROM error_log WHERE service='find-and-queue' ORDER BY created_at DESC LIMIT 10;"
 
           echo ""
           echo "=== LAST 10 GENERATE-QUEUE LOGS ==="
-          run_query "SELECT created_at, level, message FROM error_log WHERE service='generate-queue' ORDER BY created_at DESC LIMIT 10;" | python3 -m json.tool
+          run_query "SELECT created_at, level, message FROM error_log WHERE service='generate-queue' ORDER BY created_at DESC LIMIT 10;"
 
           echo ""
           echo "=== LAST 10 PROCESS-QUEUE LOGS ==="
-          run_query "SELECT created_at, level, message FROM error_log WHERE service='process-queue' ORDER BY created_at DESC LIMIT 10;" | python3 -m json.tool
+          run_query "SELECT created_at, level, message FROM error_log WHERE service='process-queue' ORDER BY created_at DESC LIMIT 10;"
 
           echo ""
-          echo "=== PENDING QUEUE ITEMS (first 10) ==="
-          run_query "SELECT sq.id, sq.brand, sq.gmail_account, sq.scheduled_at, l.contact_email FROM send_queue sq JOIN leads l ON sq.lead_id=l.id WHERE sq.status='pending' ORDER BY sq.scheduled_at ASC LIMIT 10;" | python3 -m json.tool
+          echo "=== LAST 5 EXTRACT-CONTACTS LOGS ==="
+          run_query "SELECT created_at, level, message FROM error_log WHERE service='extract-contacts' ORDER BY created_at DESC LIMIT 5;"
 
           echo ""
-          echo "=== EXTRACT-CONTACTS LAST 5 LOGS ==="
-          run_query "SELECT created_at, level, message FROM error_log WHERE service='extract-contacts' ORDER BY created_at DESC LIMIT 5;" | python3 -m json.tool
+          echo "=== LAST 5 CHECK-LIMITS LOGS ==="
+          run_query "SELECT created_at, level, message FROM error_log WHERE service='check-limits' ORDER BY created_at DESC LIMIT 5;"
+
+          echo ""
+          echo "=== LAST 10 SENT EMAILS (send_queue) ==="
+          run_query "SELECT sq.updated_at, l.contact_email, sq.brand FROM send_queue sq JOIN leads l ON sq.lead_id=l.id WHERE sq.status='sent' ORDER BY sq.updated_at DESC LIMIT 10;"
