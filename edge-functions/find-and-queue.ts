@@ -29,8 +29,8 @@ const RESULTS_PER_KW   = 12;
 const KW_PER_RUN       = 5;
 // Minimum Groq relevance score to keep a lead
 const MIN_SCORE        = 40;
-// Min ms between consecutive Groq calls — paces at ~27 req/min, safely under the 30/min free-tier limit
-const GROQ_PACE_MS     = 2200;
+// Min ms between consecutive Groq calls — paces at ~23 req/min, safe buffer under the 30/min free-tier limit
+const GROQ_PACE_MS     = 2600;
 
 // Minus-words appended to every DDG query to cut noise
 const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk';
@@ -393,7 +393,7 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
       if (res.status === 429 || res.status >= 500) {
         groqLastError = `HTTP ${res.status}`;
         // Longer backoff on rate-limit — let the per-minute window reset
-        await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 10000 * (attempt + 1)));
         continue;
       }
       if (!res.ok) {
@@ -689,18 +689,19 @@ Deno.serve(async (req: Request) => {
     const serpBatches = await Promise.all(
       keywords.map(kw =>
         searchDuckDuckGo(`${kw} ${DDG_MINUS}`, RESULTS_PER_KW, DDG_OFFSET)
-          .then(r => { stats.keywords_run++; return r; })
-          .catch(e => { stats.errors.push(`DDG "${kw}": ${e.message}`); return []; }),
+          .then(r => { stats.keywords_run++; return { kw, results: r }; })
+          .catch(e => { stats.errors.push(`DDG "${kw}": ${e.message}`); return { kw, results: [] }; }),
       ),
     );
 
     // Merge, dedup by domain across all keywords, and apply the cheap pre-filters now
     // so the expensive Groq+fetch loop only sees real candidates.
-    const candidates: Array<{ url: string; title: string; snippet: string; origin: string }> = [];
+    // Each candidate carries the keyword that surfaced it (stored on the lead).
+    const candidates: Array<{ url: string; title: string; snippet: string; origin: string; keyword: string }> = [];
     const seenThisRun = new Set<string>();
-    for (const batch of serpBatches) {
-      stats.found += batch.length;
-      for (const result of batch) {
+    for (const { kw, results } of serpBatches) {
+      stats.found += results.length;
+      for (const result of results) {
         const url    = result.link || '';
         const domain = getDomain(url);
         if (!domain || seenThisRun.has(domain)) continue;
@@ -712,7 +713,7 @@ Deno.serve(async (req: Request) => {
           origin = new URL(url.startsWith('http') ? url : 'https://' + url).origin;
         } catch { continue; }
         seenThisRun.add(domain);
-        candidates.push({ url, title: result.title || '', snippet: result.snippet || '', origin });
+        candidates.push({ url, title: result.title || '', snippet: result.snippet || '', origin, keyword: kw });
       }
     }
 
@@ -721,7 +722,7 @@ Deno.serve(async (req: Request) => {
 
     for (const cand of candidates) {
       if (Date.now() > deadline) break;
-      const { url, title, snippet, origin } = cand;
+      const { url, title, snippet, origin, keyword } = cand;
       const domain = getDomain(url);
 
       // 4a. Groq pre-filter using snippet+title ONLY (no page fetch yet — fast & cheap).
@@ -769,6 +770,7 @@ Deno.serve(async (req: Request) => {
         why:      analysis?.why      ?? '',
         priority: analysis?.priority ?? 'Medium',
         lang:     analysis?.lang     ?? '',
+        found_keyword: keyword,
       };
       if (contact.email) {
         leadData.contact_email      = contact.email;
