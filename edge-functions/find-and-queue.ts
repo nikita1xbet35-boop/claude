@@ -668,8 +668,8 @@ Deno.serve(async (req: Request) => {
     // 2. Determine brand + preset — slot advances every 3 min (matches the find-and-queue
     //    cron) so each run picks a fresh set of keywords rather than re-searching the same ones.
     const slotIndex = Math.floor(Date.now() / (3 * 60 * 1000));
-    // Rotate 1xbet and 1xcasino — fresh geo pool for 1xcasino avoids domain exhaustion
-    const BRANDS    = ['1xbet', '1xcasino'] as const;
+    // 1xcasino paused — hunt 1xBet affiliates only
+    const BRANDS    = ['1xbet'] as const;
     const brand     = BRANDS[slotIndex % BRANDS.length];
     stats.brand = brand;
 
