@@ -29,8 +29,8 @@ const RESULTS_PER_KW   = 12;
 const KW_PER_RUN       = 5;
 // Minimum Groq relevance score to keep a lead
 const MIN_SCORE        = 40;
-// Min ms between consecutive Groq calls — paces at ~27 req/min, safely under the 30/min free-tier limit
-const GROQ_PACE_MS     = 2200;
+// Min ms between consecutive Groq calls — paces at ~23 req/min, safe buffer under the 30/min free-tier limit
+const GROQ_PACE_MS     = 2600;
 
 // Minus-words appended to every DDG query to cut noise
 const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk';
@@ -393,7 +393,7 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
       if (res.status === 429 || res.status >= 500) {
         groqLastError = `HTTP ${res.status}`;
         // Longer backoff on rate-limit — let the per-minute window reset
-        await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 10000 * (attempt + 1)));
         continue;
       }
       if (!res.ok) {
