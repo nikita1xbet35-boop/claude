@@ -22,8 +22,6 @@ const JINA_API_KEY = Deno.env.get('JINA_API_KEY') || '';
 // Groq key: env var first, fall back to the key already shipped in index.html
 const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
   ['gsk_9DKnaMxmKm8WEPDDjtZbWGdyb3FYX', 'R6kIEWkpNsjz6BlDlvj347v'].join('');
-const BRAVE_API_KEY = Deno.env.get('BRAVE_API_KEY') || '';
-const BING_API_KEY  = Deno.env.get('BING_API_KEY')  || '';
 
 const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
@@ -328,44 +326,6 @@ async function searchDuckDuckGo(
     results.push({ link: links[i].url, title: links[i].title, snippet: snippets[i] || '' });
   }
   return results;
-}
-
-/** Search Brave Search API — requires BRAVE_API_KEY env var */
-async function searchBrave(
-  query: string, num: number, offset = 0,
-): Promise<Array<{ link: string; title: string; snippet: string }>> {
-  if (!BRAVE_API_KEY) return [];
-  try {
-    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${num}&offset=${offset}&result_filter=web`;
-    const res = await fetch(url, {
-      headers: { 'Accept': 'application/json', 'X-Subscription-Token': BRAVE_API_KEY },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.web?.results || []).map((r: any) => ({
-      link: r.url || '', title: r.title || '', snippet: r.description || '',
-    }));
-  } catch (_) { return []; }
-}
-
-/** Search Bing Web Search API — requires BING_API_KEY env var */
-async function searchBing(
-  query: string, num: number, offset = 0,
-): Promise<Array<{ link: string; title: string; snippet: string }>> {
-  if (!BING_API_KEY) return [];
-  try {
-    const url = `https://api.bing.microsoft.com/v7.0/search?q=${encodeURIComponent(query)}&count=${num}&offset=${offset}&mkt=en-US`;
-    const res = await fetch(url, {
-      headers: { 'Ocp-Apim-Subscription-Key': BING_API_KEY },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.webPages?.value || []).map((r: any) => ({
-      link: r.url || '', title: r.name || '', snippet: r.snippet || '',
-    }));
-  } catch (_) { return []; }
 }
 
 /** Extract the footer section of a page (last 20% of HTML) for targeted email scanning */
@@ -721,24 +681,17 @@ Deno.serve(async (req: Request) => {
       (allSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
     );
 
-    // 4. Run ALL keyword searches in PARALLEL across DDG + Brave + Bing.
+    // 4. Run ALL keyword searches in PARALLEL on DDG.
     //    DDG paginates through pages 1-5 (offset 0/30/60/90/120) to surface
     //    fresh sites beyond the exhausted first page.
-    //    Brave & Bing are completely independent indexes — no dedup overlap with DDG.
-    const DDG_OFFSET   = (slotIndex % 5) * 30;
-    const BRAVE_OFFSET = (slotIndex % 10) * 10; // 10 results/page, cycle 10 pages
-    const BING_OFFSET  = (slotIndex % 10) * 10;
+    const DDG_OFFSET = (slotIndex % 5) * 30;
 
     const serpBatches = await Promise.all(
-      keywords.flatMap(kw => [
+      keywords.map(kw =>
         searchDuckDuckGo(`${kw} ${DDG_MINUS}`, RESULTS_PER_KW, DDG_OFFSET)
           .then(r => { stats.keywords_run++; return r; })
           .catch(e => { stats.errors.push(`DDG "${kw}": ${e.message}`); return []; }),
-        searchBrave(`${kw} ${DDG_MINUS}`, 10, BRAVE_OFFSET)
-          .catch(() => [] as Array<{ link: string; title: string; snippet: string }>),
-        searchBing(`${kw} ${DDG_MINUS}`, 10, BING_OFFSET)
-          .catch(() => [] as Array<{ link: string; title: string; snippet: string }>),
-      ]),
+      ),
     );
 
     // Merge, dedup by domain across all keywords, and apply the cheap pre-filters now
@@ -845,7 +798,7 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'find-and-queue',
-      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} page=${DDG_OFFSET/30+1} engines=ddg${BRAVE_API_KEY?'+brave':''}${BING_API_KEY?'+bing':''} `
+      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} page=${DDG_OFFSET/30+1} `
         + `found=${stats.found} analyzed=${stats.analyzed} `
         + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
         + `saved=${stats.saved} contacts=${stats.contacts} groqCalls=${groqCount}`
