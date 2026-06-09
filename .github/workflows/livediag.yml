@@ -70,3 +70,4 @@ jobs:
             exit 1
           fi
           echo "✅ Healthy — reserve=$RESERVE, new_leads_1h=$NEW1H, sent_today=$SENT"
+# ping 1780992379
