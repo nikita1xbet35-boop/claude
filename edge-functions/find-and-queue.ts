@@ -22,6 +22,8 @@ const JINA_API_KEY = Deno.env.get('JINA_API_KEY') || '';
 // Groq key: env var first, fall back to the key already shipped in index.html
 const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
   ['gsk_9DKnaMxmKm8WEPDDjtZbWGdyb3FYX', 'R6kIEWkpNsjz6BlDlvj347v'].join('');
+const BRAVE_API_KEY = Deno.env.get('BRAVE_API_KEY') || '';
+const BING_API_KEY  = Deno.env.get('BING_API_KEY')  || '';
 
 const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
@@ -55,17 +57,35 @@ interface Preset { id: string; name: string; geo: string; keywords: string[]; br
 const DEFAULT_PRESETS: Record<string, Preset[]> = {
   '1xbet': [
     { id:'1xb-ng', name:'Nigeria', geo:'NG',
-      keywords:['best betting sites nigeria','top betting sites nigeria','betting sites comparison nigeria','bookmaker review nigeria','best online casino nigeria','new betting sites nigeria','betting bonus nigeria','casino review nigeria'] },
+      keywords:['best betting sites nigeria','top betting sites nigeria','betting sites comparison nigeria','bookmaker review nigeria','best online casino nigeria','new betting sites nigeria','betting bonus nigeria','casino review nigeria',
+        'football prediction site nigeria','bet9ja alternatives nigeria','sports betting blog nigeria','nigeria betting tips today','naija betting guide','betting odds comparison nigeria','online gambling nigeria review','soccer prediction nigeria'] },
     { id:'1xb-kg', name:'Kyrgyzstan', geo:'KG',
-      keywords:['рейтинг букмекеров кыргызстан','лучшие букмекерские конторы','обзор букмекеров','сравнение букмекеров','лучшие онлайн казино','обзор казино','рейтинг казино','бонусы букмекеров'] },
+      keywords:['рейтинг букмекеров кыргызстан','лучшие букмекерские конторы','обзор букмекеров','сравнение букмекеров','лучшие онлайн казино','обзор казино','рейтинг казино','бонусы букмекеров',
+        'ставки на спорт обзор','прогнозы матчей кыргызстан','топ казино кыргызстан','букмекер бонус без депозита','спортивные ставки блог','казино бонус кыргызстан','беттинг сайт обзор','азартные игры кыргызстан'] },
     { id:'1xb-my', name:'Malaysia', geo:'MY',
-      keywords:['best betting sites malaysia','best online casino malaysia','betting sites comparison malaysia','casino review malaysia','laman judi terbaik malaysia','ulasan kasino malaysia','马来西亚博彩网站推荐','马来西亚最佳娱乐场'] },
+      keywords:['best betting sites malaysia','best online casino malaysia','betting sites comparison malaysia','casino review malaysia','laman judi terbaik malaysia','ulasan kasino malaysia',
+        'sportsbook review malaysia','taruhan online malaysia','bonus kasino malaysia','tipster malaysia','football prediction malaysia','judi bola review','kasino dalam talian malaysia','pertaruhan sukan malaysia'] },
     { id:'1xb-ph', name:'Philippines', geo:'PH',
-      keywords:['best betting sites philippines','top online casino philippines','betting sites comparison philippines','casino review philippines','best sabong site','pinakamahusay na betting site','online casino review philippines'] },
+      keywords:['best betting sites philippines','top online casino philippines','betting sites comparison philippines','casino review philippines','best sabong site','pinakamahusay na betting site','online casino review philippines',
+        'sports betting review philippines','basketball betting philippines','gcash casino review','philbetting tips','online gambling guide philippines','football prediction philippines','filipino sports betting blog'] },
     { id:'1xb-np', name:'Nepal', geo:'NP',
-      keywords:['best betting sites nepal','best cricket betting site nepal','betting sites comparison nepal','online casino review nepal','top betting sites nepal','उत्कृष्ट सट्टा साइट नेपाल'] },
+      keywords:['best betting sites nepal','best cricket betting site nepal','betting sites comparison nepal','online casino review nepal','top betting sites nepal','उत्कृष्ट सट्टा साइट नेपाल',
+        'ipl betting nepal','sports betting blog nepal','cricket tips nepal','gambling review nepal','betting guide nepal','nepal cricket prediction site'] },
     { id:'1xb-pk', name:'Pakistan', geo:'PK',
-      keywords:['best betting sites pakistan','best cricket betting site pakistan','betting sites comparison pakistan','online casino review pakistan','top betting sites pakistan','بہترین بیٹنگ سائٹ پاکستان'] },
+      keywords:['best betting sites pakistan','best cricket betting site pakistan','betting sites comparison pakistan','online casino review pakistan','top betting sites pakistan','بہترین بیٹنگ سائٹ پاکستان',
+        'psl betting tips','cricket prediction pakistan','sports betting guide pakistan','online gambling pakistan','betting odds pakistan','pakistan cricket betting blog'] },
+    { id:'1xb-ke', name:'Kenya', geo:'KE',
+      keywords:['best betting sites kenya','top bookmakers kenya','sports betting kenya review','football prediction kenya','betting tips kenya','online casino kenya','soccer tips kenya',
+        'kenya betting comparison','betika alternatives','sportpesa alternatives kenya','best odds kenya','betting bonus kenya','kenya gambling guide'] },
+    { id:'1xb-gh', name:'Ghana', geo:'GH',
+      keywords:['best betting sites ghana','top bookmakers ghana','sports betting ghana review','football prediction ghana','betting tips ghana','online casino ghana','soccer prediction ghana',
+        'ghana betting comparison','betway alternatives ghana','sportybet ghana review','betting bonus ghana','ghana gambling blog','premier league tips ghana'] },
+    { id:'1xb-in', name:'India', geo:'IN',
+      keywords:['best betting sites india','cricket betting india review','ipl betting tips','betting sites comparison india','online casino india','sports betting blog india',
+        'cricket prediction website india','fantasy cricket vs betting india','bet365 alternatives india','best odds india','betting guide india hindi','india betting bonus review'] },
+    { id:'1xb-bd', name:'Bangladesh', geo:'BD',
+      keywords:['best betting sites bangladesh','cricket betting bangladesh','bpl betting tips','online casino bangladesh','sports betting bangladesh review','betting tips bangladesh',
+        'cricket prediction bangladesh','bangladesh gambling guide','online betting blog bangladesh','betting bonus bangladesh','football prediction bangladesh'] },
   ],
   '1xcasino': [
     { id:'1xc-ar', name:'Argentina', geo:'AR',
@@ -308,6 +328,44 @@ async function searchDuckDuckGo(
     results.push({ link: links[i].url, title: links[i].title, snippet: snippets[i] || '' });
   }
   return results;
+}
+
+/** Search Brave Search API — requires BRAVE_API_KEY env var */
+async function searchBrave(
+  query: string, num: number, offset = 0,
+): Promise<Array<{ link: string; title: string; snippet: string }>> {
+  if (!BRAVE_API_KEY) return [];
+  try {
+    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${num}&offset=${offset}&result_filter=web`;
+    const res = await fetch(url, {
+      headers: { 'Accept': 'application/json', 'X-Subscription-Token': BRAVE_API_KEY },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.web?.results || []).map((r: any) => ({
+      link: r.url || '', title: r.title || '', snippet: r.description || '',
+    }));
+  } catch (_) { return []; }
+}
+
+/** Search Bing Web Search API — requires BING_API_KEY env var */
+async function searchBing(
+  query: string, num: number, offset = 0,
+): Promise<Array<{ link: string; title: string; snippet: string }>> {
+  if (!BING_API_KEY) return [];
+  try {
+    const url = `https://api.bing.microsoft.com/v7.0/search?q=${encodeURIComponent(query)}&count=${num}&offset=${offset}&mkt=en-US`;
+    const res = await fetch(url, {
+      headers: { 'Ocp-Apim-Subscription-Key': BING_API_KEY },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.webPages?.value || []).map((r: any) => ({
+      link: r.url || '', title: r.name || '', snippet: r.snippet || '',
+    }));
+  } catch (_) { return []; }
 }
 
 /** Extract the footer section of a page (last 20% of HTML) for targeted email scanning */
@@ -610,8 +668,8 @@ Deno.serve(async (req: Request) => {
     // 2. Determine brand + preset — slot advances every 3 min (matches the find-and-queue
     //    cron) so each run picks a fresh set of keywords rather than re-searching the same ones.
     const slotIndex = Math.floor(Date.now() / (3 * 60 * 1000));
-    // 1xcasino + luckypari paused — hunt 1xBet affiliates only (chasing the big giants)
-    const BRANDS    = ['1xbet'] as const;
+    // Rotate 1xbet and 1xcasino — fresh geo pool for 1xcasino avoids domain exhaustion
+    const BRANDS    = ['1xbet', '1xcasino'] as const;
     const brand     = BRANDS[slotIndex % BRANDS.length];
     stats.brand = brand;
 
@@ -663,20 +721,24 @@ Deno.serve(async (req: Request) => {
       (allSent || []).map((r: any) => (r.email || '').toLowerCase()).filter(Boolean),
     );
 
-    // 4. Run ALL keyword searches in PARALLEL (was sequential — up to 12s each wasted
-    //    serially). Then merge + dedup into one candidate list before analysis.
-    //
-    // Paginate DDG: cycle through pages 1-5 based on slotIndex so consecutive
-    // runs fetch fresh result sets instead of the same top-10 sites every time.
-    // Page 1 = offset 0, page 2 = offset 30, ..., page 5 = offset 120.
-    const DDG_OFFSET = (slotIndex % 5) * 30;
+    // 4. Run ALL keyword searches in PARALLEL across DDG + Brave + Bing.
+    //    DDG paginates through pages 1-5 (offset 0/30/60/90/120) to surface
+    //    fresh sites beyond the exhausted first page.
+    //    Brave & Bing are completely independent indexes — no dedup overlap with DDG.
+    const DDG_OFFSET   = (slotIndex % 5) * 30;
+    const BRAVE_OFFSET = (slotIndex % 10) * 10; // 10 results/page, cycle 10 pages
+    const BING_OFFSET  = (slotIndex % 10) * 10;
 
     const serpBatches = await Promise.all(
-      keywords.map(kw =>
+      keywords.flatMap(kw => [
         searchDuckDuckGo(`${kw} ${DDG_MINUS}`, RESULTS_PER_KW, DDG_OFFSET)
           .then(r => { stats.keywords_run++; return r; })
           .catch(e => { stats.errors.push(`DDG "${kw}": ${e.message}`); return []; }),
-      ),
+        searchBrave(`${kw} ${DDG_MINUS}`, 10, BRAVE_OFFSET)
+          .catch(() => [] as Array<{ link: string; title: string; snippet: string }>),
+        searchBing(`${kw} ${DDG_MINUS}`, 10, BING_OFFSET)
+          .catch(() => [] as Array<{ link: string; title: string; snippet: string }>),
+      ]),
     );
 
     // Merge, dedup by domain across all keywords, and apply the cheap pre-filters now
@@ -783,7 +845,7 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'find-and-queue',
-      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} page=${DDG_OFFSET/30+1} `
+      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} page=${DDG_OFFSET/30+1} engines=ddg${BRAVE_API_KEY?'+brave':''}${BING_API_KEY?'+bing':''} `
         + `found=${stats.found} analyzed=${stats.analyzed} `
         + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
         + `saved=${stats.saved} contacts=${stats.contacts} groqCalls=${groqCount}`
