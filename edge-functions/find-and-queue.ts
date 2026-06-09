@@ -262,12 +262,15 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-/** Search DuckDuckGo HTML — free, no key required */
+/** Search DuckDuckGo HTML — free, no key required.
+ *  offset: 0 = page 1, 30 = page 2, 60 = page 3, etc. (DDG s= param) */
 async function searchDuckDuckGo(
-  query: string, num: number,
+  query: string, num: number, offset = 0,
 ): Promise<Array<{ link: string; title: string; snippet: string }>> {
-  const res = await fetch(
-    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+  const qs = offset > 0
+    ? `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&s=${offset}&dc=${offset + 1}`
+    : `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const res = await fetch(qs,
     {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AffiliateOS/1.0)', 'Accept': 'text/html' },
       signal: AbortSignal.timeout(12_000),
@@ -662,9 +665,15 @@ Deno.serve(async (req: Request) => {
 
     // 4. Run ALL keyword searches in PARALLEL (was sequential — up to 12s each wasted
     //    serially). Then merge + dedup into one candidate list before analysis.
+    //
+    // Paginate DDG: cycle through pages 1-5 based on slotIndex so consecutive
+    // runs fetch fresh result sets instead of the same top-10 sites every time.
+    // Page 1 = offset 0, page 2 = offset 30, ..., page 5 = offset 120.
+    const DDG_OFFSET = (slotIndex % 5) * 30;
+
     const serpBatches = await Promise.all(
       keywords.map(kw =>
-        searchDuckDuckGo(`${kw} ${DDG_MINUS}`, RESULTS_PER_KW)
+        searchDuckDuckGo(`${kw} ${DDG_MINUS}`, RESULTS_PER_KW, DDG_OFFSET)
           .then(r => { stats.keywords_run++; return r; })
           .catch(e => { stats.errors.push(`DDG "${kw}": ${e.message}`); return []; }),
       ),
@@ -774,7 +783,7 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'find-and-queue',
-      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} `
+      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} page=${DDG_OFFSET/30+1} `
         + `found=${stats.found} analyzed=${stats.analyzed} `
         + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
         + `saved=${stats.saved} contacts=${stats.contacts} groqCalls=${groqCount}`
