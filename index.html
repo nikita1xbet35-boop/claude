@@ -2893,10 +2893,21 @@ function setBrand(brand){
 // ══════════════════════════════════════════
 async function loadLeads(){
   showGlobalLoading(true);
-  const {data, error} = await sb.from('leads').select('*').order('created_at', {ascending: false});
+  // Supabase caps a single request at 1000 rows — page through with .range()
+  // so the "Все" view shows every lead, not just the first 1000.
+  const PAGE = 1000;
+  let all = [], from = 0, error = null;
+  while(true){
+    const {data, error: e} = await sb.from('leads').select('*')
+      .order('created_at', {ascending: false}).range(from, from + PAGE - 1);
+    if(e){ error = e; break; }
+    all = all.concat(data || []);
+    if(!data || data.length < PAGE) break;
+    from += PAGE;
+  }
   showGlobalLoading(false);
   if(error){ showError('Ошибка загрузки: ' + error.message); return; }
-  leads = data || [];
+  leads = all;
   renderLeads(curFilter);
   updateBadge();
   populateGeoFilter();
@@ -3455,6 +3466,7 @@ function openLead(id){
         <div class="kv-row"><span class="kv-key">TG (ручной)</span><span class="kv-val cval">${l.tg || '—'}</span></div>
         <div class="kv-row"><span class="kv-key">Язык</span><span class="kv-val">${l.lang || '—'}</span></div>
         <div class="kv-row"><span class="kv-key">Приоритет</span><span class="kv-val">${prioRU[l.priority] || l.priority || '—'}</span></div>
+        ${l.found_keyword ? `<div class="kv-row"><span class="kv-key">Найден по ключу</span><span class="kv-val">${l.found_keyword}</span></div>` : ''}
         <div class="kv-row"><span class="kv-key">Добавлен</span><span class="kv-val">${l.created_at ? new Date(l.created_at).toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}) : '—'}</span></div>
       </div>
       <div class="detail-section">

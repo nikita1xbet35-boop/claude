@@ -34,6 +34,12 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"query":"DELETE FROM public.search_presets WHERE is_default = false;"}' \
             && echo "Old custom presets cleared" || echo "Preset cleanup skipped"
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS found_keyword TEXT DEFAULT NULL;"}' \
+            && echo "found_keyword column OK" || echo "found_keyword migration skipped (may already exist)"
 
       - name: Prepare function directories
         run: |
