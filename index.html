@@ -120,13 +120,29 @@
   .leads-list::-webkit-scrollbar{width:4px;}
   .leads-list::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
 
-  /* LEAD CARD */
+  /* LEAD CARD (legacy, still used on other pages) */
   .lead-card{padding:11px 13px;border-radius:10px;border:1px solid var(--border);background:var(--bg);margin-bottom:5px;cursor:pointer;transition:all .15s;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:start;}
   .lead-card:hover{border-color:var(--border2);background:var(--bg3);}
   .lead-card.active{border-color:var(--accent)40;background:var(--accent-glow);}
   .lead-name{font-size:13px;font-weight:500;color:var(--text);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .lead-url{font-size:11px;color:var(--text3);font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px;}
   .lead-meta{display:flex;gap:4px;flex-wrap:wrap;}
+
+  /* LEAD ROW — compact one-line list item (pipeline) */
+  .lead-row{display:grid;grid-template-columns:34px minmax(0,1.1fr) minmax(0,1fr) 34px 86px;gap:10px;align-items:center;
+    padding:7px 12px;border-radius:8px;border:1px solid transparent;cursor:pointer;margin-bottom:1px;
+    transition:background .12s,border-color .12s;contain:content;}
+  .lead-row:hover{background:var(--bg3);border-color:var(--border);}
+  .lead-row.active{background:var(--accent-glow);border-color:color-mix(in oklab,var(--accent) 35%,transparent);}
+  .lr-score{font-family:var(--font-mono);font-size:11.5px;font-weight:600;text-align:center;padding:2px 0;border-radius:6px;}
+  .lr-score.good{color:var(--green);background:var(--green-bg);}
+  .lr-score.mid{color:var(--amber);background:var(--amber-bg);}
+  .lr-score.low{color:var(--text3);background:var(--bg3);}
+  .lr-name{font-size:12.5px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lr-domain{font-size:11px;color:var(--text3);font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lr-geo{font-size:10.5px;color:var(--text3);font-family:var(--font-mono);text-align:center;}
+  .lr-stage{font-size:10.5px;font-family:var(--font-mono);text-align:center;padding:2px 6px;border-radius:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lr-contact-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--green);margin-right:5px;vertical-align:1px;}
   .chip{padding:2px 8px;border-radius:20px;font-size:11px;font-family:var(--font-mono);font-weight:500;}
   .chip-type{background:var(--bg4);color:var(--text2);border:1px solid var(--border);}
   .chip-geo{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue)20;}
@@ -142,27 +158,31 @@
   .score-low{background:var(--red-bg);color:var(--red);}
 
   /* DETAIL PANEL */
-  .detail-header{padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0;}
-  .detail-domain{font-family:var(--font-mono);font-size:11px;color:var(--accent2);margin-bottom:5px;display:flex;align-items:center;gap:6px;}
-  .detail-name{font-family:var(--font-head);font-size:17px;font-weight:600;line-height:1.2;margin-bottom:9px;}
-  .detail-chips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:11px;align-items:center;}
+  .detail-header{padding:12px 16px 10px;border-bottom:1px solid var(--border);flex-shrink:0;}
+  .detail-domain{font-family:var(--font-mono);font-size:11px;color:var(--accent2);margin-bottom:4px;display:flex;align-items:center;gap:6px;}
+  .detail-name{font-family:var(--font-head);font-size:16px;font-weight:600;line-height:1.2;margin-bottom:7px;}
+  .detail-chips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;align-items:center;}
   .detail-actions{display:flex;gap:5px;flex-wrap:wrap;}
-  .detail-body{flex:1;overflow-y:auto;padding:0 16px 16px;}
+  .detail-body{flex:1;overflow-y:auto;padding:0 16px 14px;}
   .detail-body::-webkit-scrollbar{width:4px;}
   .detail-body::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
-  .detail-section{padding:13px 0;border-bottom:1px solid var(--border);}
+  .detail-section{padding:10px 0;border-bottom:1px solid var(--hairline,var(--border));}
   .detail-section:last-child{border-bottom:none;}
-  .dsec-title{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--text3);font-family:var(--font-mono);font-weight:500;margin-bottom:9px;}
-  .summary-text{font-size:12px;line-height:1.7;color:var(--text2);}
-  .signal-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;}
+  .dsec-title{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--text3);font-family:var(--font-mono);font-weight:500;margin-bottom:6px;}
+  .summary-text{font-size:12px;line-height:1.55;color:var(--text2);}
+  .signal-row{display:flex;align-items:center;gap:8px;padding:2px 0;font-size:12px;}
   .signal-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
   .sig-green{background:var(--green);}
   .sig-amber{background:var(--amber);}
   .sig-red{background:var(--red);}
-  .kv-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:12px;}
+  .kv-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px;}
   .kv-key{color:var(--text3);}
   .kv-val{color:var(--text);font-family:var(--font-mono);font-size:11px;}
   .kv-val.cval{color:var(--blue);}
+  /* two-column meta grid inside the lead card — halves its vertical footprint */
+  .kv-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:18px;row-gap:0;}
+  .kv-grid .kv-row{min-width:0;}
+  .kv-grid .kv-val{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%;}
   .next-action-box{background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;}
   .next-label{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;}
   .next-text{font-size:12px;color:var(--text);line-height:1.5;}
@@ -3243,6 +3263,54 @@ function getDomain(url){
 
 let pipelineSortBy = 'score'; // score | date
 
+// ── Chunked lead list rendering ────────────────────────────────
+const LEAD_CHUNK = 100;
+let _leadRenderData = [];
+let _leadRenderedCount = 0;
+let _leadSentinelObserver = null;
+
+function leadRowHTML(l, i){
+  const score = l.score || 0;
+  const scCls = score >= 75 ? 'good' : score >= 50 ? 'mid' : 'low';
+  // Animate only the first screen — staggering 1600 rows kept the
+  // compositor busy for a minute and made the whole tab lag.
+  const anim = i < 14 ? ` style="animation:fadeUp .22s ${(i*0.022).toFixed(3)}s cubic-bezier(.16,1,.3,1) both;"` : '';
+  const hasContact = !!(l.contact_email || l.email || l.contact_telegram || l.tg);
+  return `<div class="lead-row${activeId === l.id ? ' active' : ''}" onclick="openLead('${l.id}')" id="lc-${l.id}"${anim}>
+    <span class="lr-score ${scCls}">${score || '—'}</span>
+    <span class="lr-name">${hasContact ? '<span class="lr-contact-dot" title="есть контакт"></span>' : ''}${l.name || '—'}</span>
+    <span class="lr-domain">${getDomain(l.url || '') || ''}</span>
+    <span class="lr-geo">${l.geo || ''}</span>
+    <span class="lr-stage ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage || ''}</span>
+  </div>`;
+}
+
+function appendLeadChunk(list){
+  const from = _leadRenderedCount;
+  const to   = Math.min(from + LEAD_CHUNK, _leadRenderData.length);
+  if (from >= to) return;
+  document.getElementById('leads-sentinel')?.remove();
+  let html = '';
+  for (let i = from; i < to; i++) html += leadRowHTML(_leadRenderData[i], i);
+  _leadRenderedCount = to;
+  if (to < _leadRenderData.length) {
+    html += `<div id="leads-sentinel" style="height:36px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text3);font-family:var(--font-mono);">ещё ${_leadRenderData.length - to}…</div>`;
+  }
+  list.insertAdjacentHTML('beforeend', html);
+  const sentinel = document.getElementById('leads-sentinel');
+  if (sentinel) {
+    if (!_leadSentinelObserver) {
+      _leadSentinelObserver = new IntersectionObserver(entries => {
+        if (entries.some(e => e.isIntersecting)) {
+          appendLeadChunk(document.getElementById('leads-list'));
+        }
+      }, { rootMargin: '600px' });
+    }
+    _leadSentinelObserver.disconnect();
+    _leadSentinelObserver.observe(sentinel);
+  }
+}
+
 function renderLeads(filter = ''){
   const list = document.getElementById('leads-list');
 
@@ -3301,22 +3369,14 @@ function renderLeads(filter = ''){
       <div style="font-size:12px;color:var(--text3);">Попробуйте изменить фильтры</div>
     </div>`;
     list.innerHTML = leads.length === 0 ? emptyDB : emptyFilter;
+    _leadRenderData = [];
   } else {
-    list.innerHTML = data.map((l,i) => `
-      <div class="lead-card${activeId === l.id ? ' active' : ''}${l.priority==='High'?' priority-high':l.priority==='Medium'?' priority-medium':''}" onclick="openLead('${l.id}')" id="lc-${l.id}" style="opacity:0;animation:fadeUp .35s ${i*0.04}s cubic-bezier(.16,1,.3,1) forwards;">
-        <div style="min-width:0;">
-          <div class="lead-name">${l.name || '—'}</div>
-          <div class="lead-url">${l.url || ''}</div>
-          <div class="lead-meta">
-            ${brandBadge(l.brand)}
-            <span class="chip chip-type">${l.type || '—'}</span>
-            <span class="chip chip-geo">${l.geo || '—'}</span>
-            <span class="chip ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage}</span>
-            ${brandPresenceBadges(l, true)}
-          </div>
-        </div>
-        ${scoreRingHTML(l.score)}
-      </div>`).join('');
+    // Chunked render: building 1600+ rows in one innerHTML froze the tab.
+    // First chunk paints instantly; the rest stream in as the user scrolls.
+    _leadRenderData = data;
+    _leadRenderedCount = 0;
+    list.innerHTML = '';
+    appendLeadChunk(list);
   }
 
   // Stats
@@ -3409,7 +3469,7 @@ function openLead(id){
   activeId = id;
   const l = leads.find(x => x.id === id);
   if(!l) return;
-  document.querySelectorAll('.lead-card').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('.lead-card, .lead-row').forEach(c => c.classList.remove('active'));
   const card = document.getElementById('lc-' + id);
   if(card) card.classList.add('active');
   document.getElementById('empty-detail').style.display = 'none';
@@ -3426,7 +3486,6 @@ function openLead(id){
           style="cursor:pointer;transition:color .15s;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--accent2)'">
           ◉ ${l.url || '—'}
         </span>
-        <span style="font-size:10px;color:var(--text3);opacity:.5;margin-left:4px;">✦ копировать</span>
         <span style="margin-left:auto;font-size:10px;color:var(--text3);">${l.status==='complete' ? '✓ проанализирован' : '⏳ в очереди'}</span>
       </div>
       <div class="detail-name">${l.name || '—'}</div>
@@ -3459,19 +3518,20 @@ function openLead(id){
         ${sigs.map(s=>`<div class="signal-row"><span class="signal-dot ${sigC(s.t)}"></span><span style="color:var(--text2)">${s.text}</span></div>`).join('')}
       </div>` : ''}
       <div class="detail-section">
-        <div class="dsec-title" style="display:flex;justify-content:space-between;align-items:center;">
-          Контактные данные
-        </div>
-        <div class="kv-row"><span class="kv-key">Email (ручной)</span><span class="kv-val cval">${l.email || '—'}</span></div>
-        <div class="kv-row"><span class="kv-key">TG (ручной)</span><span class="kv-val cval">${l.tg || '—'}</span></div>
-        <div class="kv-row"><span class="kv-key">Язык</span><span class="kv-val">${l.lang || '—'}</span></div>
-        <div class="kv-row"><span class="kv-key">Приоритет</span><span class="kv-val">${prioRU[l.priority] || l.priority || '—'}</span></div>
-        ${l.found_keyword ? `<div class="kv-row"><span class="kv-key">Найден по ключу</span><span class="kv-val">${l.found_keyword}</span></div>` : ''}
-        <div class="kv-row"><span class="kv-key">Добавлен</span><span class="kv-val">${l.created_at ? new Date(l.created_at).toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}) : '—'}</span></div>
+        <div class="dsec-title">Контакты</div>
+        <div id="contact-status-${l.id}"></div>
+        ${(l.email || l.tg) ? `<div class="kv-grid" style="margin-top:6px;">
+          ${l.email ? `<div class="kv-row"><span class="kv-key">Email (ручной)</span><span class="kv-val cval">${l.email}</span></div>` : ''}
+          ${l.tg ? `<div class="kv-row"><span class="kv-key">TG (ручной)</span><span class="kv-val cval">${l.tg}</span></div>` : ''}
+        </div>` : ''}
       </div>
       <div class="detail-section">
-        <div class="dsec-title">🔍 Auto-контакты</div>
-        <div id="contact-status-${l.id}"></div>
+        <div class="kv-grid">
+          <div class="kv-row"><span class="kv-key">Язык</span><span class="kv-val">${l.lang || '—'}</span></div>
+          <div class="kv-row"><span class="kv-key">Приоритет</span><span class="kv-val">${prioRU[l.priority] || l.priority || '—'}</span></div>
+          <div class="kv-row"><span class="kv-key">Добавлен</span><span class="kv-val">${l.created_at ? new Date(l.created_at).toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'}) : '—'}</span></div>
+          ${l.found_keyword ? `<div class="kv-row"><span class="kv-key">Ключ</span><span class="kv-val" title="${l.found_keyword}">${l.found_keyword}</span></div>` : ''}
+        </div>
       </div>
       ${l.why ? `<div class="detail-section">
         <div class="dsec-title">Почему релевантен</div>
@@ -8714,7 +8774,7 @@ try {
   }
 
   /* ─── lead-card focused via keyboard ─── */
-  .lead-card.kb-focus{
+  .lead-card.kb-focus, .lead-row.kb-focus{
     border-color: color-mix(in oklab, var(--accent) 55%, transparent) !important;
     background: color-mix(in oklab, var(--accent) 6%, transparent) !important;
     box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 25%, transparent), 0 4px 12px -4px var(--accent-glow);
@@ -8851,7 +8911,7 @@ try {
   // ════════ KEYBOARD NAVIGATION ═══════════════════════════════════
   let kbIdx = -1;
   function visibleLeadCards(){
-    return [...document.querySelectorAll('#page-pipeline.active #leads-list .lead-card')];
+    return [...document.querySelectorAll('#page-pipeline.active #leads-list .lead-row, #page-pipeline.active #leads-list .lead-card')];
   }
   function focusCard(i, scroll = true){
     const cards = visibleLeadCards();
@@ -8894,7 +8954,7 @@ try {
       if(det && det.style.display !== 'none'){
         det.style.display = 'none';
         if(emp) emp.style.display = 'flex';
-        document.querySelectorAll('.lead-card.active').forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.lead-card.active, .lead-row.active').forEach(c => c.classList.remove('active'));
       }
       return;
     }
@@ -10425,6 +10485,7 @@ try {
 
   /* density modes */
   body.density-compact .lead-card{ padding: 9px 12px !important; margin-bottom: 4px !important; }
+  body.density-compact .lead-row{ padding: 5px 10px !important; }
   body.density-compact .lead-name{ font-size: 13px !important; }
   body.density-compact .stat-num{ font-size: 17px !important; }
   body.density-compact .stat-item{ padding: 9px 8px !important; }
@@ -10433,6 +10494,7 @@ try {
   body.density-compact .detail-section{ padding: 12px 0 !important; }
 
   body.density-spacious .lead-card{ padding: 15px 17px !important; margin-bottom: 8px !important; }
+  body.density-spacious .lead-row{ padding: 10px 14px !important; }
   body.density-spacious .stat-num{ font-size: 23px !important; }
   body.density-spacious .stat-item{ padding: 15px 10px !important; }
   body.density-spacious .leads-list{ padding: 14px !important; }
