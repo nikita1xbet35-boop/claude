@@ -209,10 +209,14 @@ export default {
     const cron = event.cron;
 
     if (cron === '*/2 * * * *') {
-      // Fast tick — send emails + top-up queue + extract contacts near-continuously
-      await call('process-queue', {});
-      await call('generate-queue', {});
-      await call('extract-contacts', {});
+      // Fast tick — send emails + top-up queue + extract contacts near-continuously.
+      // PARALLEL: sequential awaits starved extract-contacts whenever process-queue
+      // ran long (it produced zero run logs for weeks until this was caught).
+      await Promise.all([
+        call('process-queue', {}),
+        call('generate-queue', {}),
+        call('extract-contacts', {}),
+      ]);
       return;
     }
 

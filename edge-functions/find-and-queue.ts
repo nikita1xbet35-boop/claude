@@ -29,8 +29,12 @@ const RESULTS_PER_KW   = 12;
 const KW_PER_RUN       = 5;
 // Minimum Groq relevance score to keep a lead
 const MIN_SCORE        = 40;
-// Min ms between consecutive Groq calls — paces at ~23 req/min, safe buffer under the 30/min free-tier limit
-const GROQ_PACE_MS     = 2600;
+// Sites analyzed per Groq call. The free-tier bottleneck is TOKENS/min (6000 TPM
+// for llama-3.1-8b-instant), not requests/min — single-site calls at any pacing
+// blow the token budget. One batched call (~1800 tokens) covers 8 sites.
+const GROQ_BATCH_SIZE  = 8;
+// Min ms between batch calls — ~3.5 calls/min × ~1800 tokens stays under 6000 TPM
+const GROQ_PACE_MS     = 16_000;
 
 // Minus-words appended to every DDG query to cut noise
 const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk';
@@ -392,8 +396,8 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
       });
       if (res.status === 429 || res.status >= 500) {
         groqLastError = `HTTP ${res.status}`;
-        // Longer backoff on rate-limit — let the per-minute window reset
-        await new Promise(r => setTimeout(r, 10000 * (attempt + 1)));
+        // TPM window is per-minute — wait long enough for it to actually reset
+        await new Promise(r => setTimeout(r, 20000 * (attempt + 1)));
         continue;
       }
       if (!res.ok) {
@@ -410,69 +414,67 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
   return null;
 }
 
-// Uses title+snippet only (no page fetch needed) — fast pre-filter before we spend time
-// fetching pages. Snippet is usually enough to classify betting affiliate vs operator vs irrelevant.
-async function analyzeWithGroq(
-  url: string, title: string, snippet: string, brand: string,
-): Promise<Analysis | null> {
+// Analyzes a BATCH of sites in ONE Groq call using title+snippet only.
+// Returns a map: batch index → Analysis. Missing index = Groq failed for that site.
+async function analyzeBatchWithGroq(
+  cands: Array<{ url: string; title: string; snippet: string }>, brand: string,
+): Promise<Map<number, Analysis>> {
+  const out = new Map<number, Analysis>();
+  if (cands.length === 0) return out;
   const partnerBrand = brand === '1xcasino' ? '1xCasino'
                      : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
 
-  const sys = `You qualify websites as affiliate PARTNERS for ${partnerBrand} (sports betting brand).\n\n`
-    + `We want AFFILIATE / PUBLISHER sites: tipsters, prediction sites, betting-tips blogs, `
-    + `sports media, review/comparison sites, "best betting site" lists. We pitch them a partnership.\n`
-    + `Return ONLY JSON:\n`
-    + `{"score":0-100,"type":"review|tipster|media|aggregator|blog|other",`
-    + `"summary":"1 sentence","why":"1 sentence — why fits or not",`
-    + `"priority":"High|Medium|Low","lang":"language code",`
-    + `"is_competitor":false,"relevant":true/false,"geo_excluded":true/false,"is_operator":true/false}\n\n`
-    + `Scoring:\n`
-    + `- 80-100: large/established affiliate or media site, clear betting/casino content, target GEO\n`
-    + `- 60-79: solid affiliate site, partial fit or quality unclear\n`
-    + `- 30-59: tangential, thin content, mixed signals\n`
-    + `- 0-29: not iGaming, dead, irrelevant\n\n`
-    + `IMPORTANT — sites that REVIEW or PROMOTE betting brands (1xBet, betway, bet9ja, melbet, 1win etc.) are PERFECT PARTNERS. Set is_competitor=false always.\n\n`
-    + `OPERATORS (is_operator=true): the site IS itself a casino/sportsbook with deposits/withdrawals/login-to-bet (e.g. bet365.com, 1xbet.com). NOT partners.\n`
-    + `PARTNERS (is_operator=false): sites that review, compare, predict, rank, or blog about betting. These are targets.\n\n`
-    + `Set geo_excluded=true ONLY for: USA, UK, Western Europe, Ukraine, Brazil, Australia.\n`
-    + `Set relevant=false ONLY if is_operator OR geo_excluded OR score<${MIN_SCORE}.`;
+  const sys = `You qualify websites as affiliate PARTNERS for ${partnerBrand} (sports betting brand).\n`
+    + `We want PUBLISHER sites: tipsters, prediction sites, betting-tips blogs, sports media, `
+    + `review/comparison sites, "best betting site" lists. We pitch them a partnership.\n`
+    + `Sites that REVIEW or PROMOTE betting brands (1xBet, betway, bet9ja, melbet, 1win etc.) are PERFECT partners.\n`
+    + `OPERATORS (is_operator=true): the site IS itself a casino/sportsbook with deposits/login-to-bet. NOT partners.\n`
+    + `geo_excluded=true ONLY for: USA, UK, Western Europe, Ukraine, Brazil, Australia.\n`
+    + `Score: 80-100 established affiliate/media in target GEO; 60-79 solid; 30-59 thin; 0-29 not iGaming/dead.\n`
+    + `relevant=false ONLY if is_operator OR geo_excluded OR score<${MIN_SCORE}.\n`
+    + `You get ${cands.length} numbered sites. Return ONLY JSON — one entry per site, same numbering:\n`
+    + `{"results":[{"i":1,"score":0-100,"type":"review|tipster|media|aggregator|blog|other",`
+    + `"summary":"1 short sentence","priority":"High|Medium|Low","lang":"xx",`
+    + `"is_operator":false,"geo_excluded":false,"relevant":true}]}`;
 
-  const user = `URL: ${url}\nTitle: ${title}\nSnippet: ${snippet}`;
+  const user = cands.map((c, i) =>
+    `${i + 1}. URL: ${c.url}\nTitle: ${(c.title || '').slice(0, 100)}\nSnippet: ${(c.snippet || '').slice(0, 160)}`,
+  ).join('\n\n');
 
   try {
-    // llama-3.1-8b-instant — far higher Groq free-tier rate limits than 70b-versatile,
-    // and plenty accurate for a binary "is this a betting affiliate" qualification.
     const raw = await groqChat({
       model: 'llama-3.1-8b-instant',
       messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
       temperature: 0.1,
-      max_tokens: 300,
+      max_tokens: 130 * cands.length + 100,
       response_format: { type: 'json_object' },
     });
-    if (!raw) return null;
-    const ai = JSON.parse(raw.replace(/```json|```/g, '').trim());
-
-    const score        = Math.max(0, Math.min(100, Number(ai.score) || 0));
-    const is_competitor = !!ai.is_competitor;
-    const is_operator   = !!ai.is_operator;
-    const geo_excluded  = !!ai.geo_excluded;
-    return {
-      score,
-      type:         String(ai.type || 'other').slice(0, 30),
-      summary:      String(ai.summary || '').slice(0, 400),
-      why:          String(ai.why || '').slice(0, 200),
-      priority:     ['High', 'Medium', 'Low'].includes(ai.priority) ? ai.priority : 'Medium',
-      lang:         String(ai.lang || '').slice(0, 40),
-      is_competitor,
-      is_operator,
-      geo_excluded,
-      // Promoting/mentioning betting brands (incl. 1xBet) is GOOD — is_competitor is NOT a reason to skip.
-      // Only real operators (own deposit/withdrawal) and excluded geos are blocked.
-      relevant:     !!ai.relevant && score >= MIN_SCORE && !is_operator && !geo_excluded,
-    };
-  } catch (_) {
-    return null;
-  }
+    if (!raw) return out;
+    const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+    const results: any[] = Array.isArray(parsed?.results) ? parsed.results
+                         : Array.isArray(parsed) ? parsed : [];
+    for (const ai of results) {
+      const idx = Number(ai?.i) - 1;
+      if (!Number.isInteger(idx) || idx < 0 || idx >= cands.length || out.has(idx)) continue;
+      const score        = Math.max(0, Math.min(100, Number(ai.score) || 0));
+      const is_operator  = !!ai.is_operator;
+      const geo_excluded = !!ai.geo_excluded;
+      out.set(idx, {
+        score,
+        type:         String(ai.type || 'other').slice(0, 30),
+        summary:      String(ai.summary || '').slice(0, 400),
+        why:          '',
+        priority:     ['High', 'Medium', 'Low'].includes(ai.priority) ? ai.priority : 'Medium',
+        lang:         String(ai.lang || '').slice(0, 40),
+        is_competitor: false,
+        is_operator,
+        geo_excluded,
+        // Only real operators (own deposit/withdrawal) and excluded geos are blocked.
+        relevant:     !!ai.relevant && score >= MIN_SCORE && !is_operator && !geo_excluded,
+      });
+    }
+  } catch (_) { /* partial/no results — unanalyzed sites are skipped, re-found next runs */ }
+  return out;
 }
 
 // ── Contact extraction ────────────────────────────────────────────────────
@@ -717,16 +719,14 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Track time of last Groq call for inter-call pacing (avoids 429 rate-limit)
+    // Track time of last Groq call — pacing keeps us under the 6000 tokens/min free-tier cap
     let lastGroqCallMs = 0;
 
-    for (const cand of candidates) {
+    for (let bi = 0; bi < candidates.length; bi += GROQ_BATCH_SIZE) {
       if (Date.now() > deadline) break;
-      const { url, title, snippet, origin, keyword } = cand;
-      const domain = getDomain(url);
+      const batch = candidates.slice(bi, bi + GROQ_BATCH_SIZE);
 
-      // 4a. Groq pre-filter using snippet+title ONLY (no page fetch yet — fast & cheap).
-      //     Pace calls to ~27/min to stay under the Groq free-tier 30 req/min limit.
+      // 4a. Pace, then analyze the whole batch in ONE Groq call
       const sinceLastGroq = Date.now() - lastGroqCallMs;
       if (sinceLastGroq < GROQ_PACE_MS) {
         await new Promise(r => setTimeout(r, GROQ_PACE_MS - sinceLastGroq));
@@ -734,61 +734,70 @@ Deno.serve(async (req: Request) => {
       if (Date.now() > deadline) break;
       lastGroqCallMs = Date.now();
 
-      const analysis = await analyzeWithGroq(url, title, snippet, brand);
+      const analyses = await analyzeBatchWithGroq(batch, brand);
 
-      // Groq MUST succeed — if it failed we skip the lead rather than risk adding
-      // operators/competitors that Groq would have caught.
-      if (!analysis) { stats.irrelevant++; continue; }
+      // 4b. Classify — only relevant sites proceed to (slow) contact extraction
+      const toExtract: Array<{ cand: typeof batch[number]; analysis: Analysis }> = [];
+      batch.forEach((cand, i) => {
+        const analysis = analyses.get(i);
+        // Groq MUST succeed — if it failed we skip the site rather than risk adding
+        // operators/competitors that Groq would have caught.
+        if (!analysis) { stats.irrelevant++; return; }
+        stats.analyzed++;
+        if (analysis.is_operator)  { stats.competitors++;  return; }
+        if (analysis.geo_excluded) { stats.geo_excluded++; return; }
+        if (!analysis.relevant)    { stats.irrelevant++;   return; }
+        toExtract.push({ cand, analysis });
+      });
 
-      stats.analyzed++;
-      // Only block real operators (own casino/sportsbook). Sites promoting 1xBet/other brands are partners.
-      if (analysis.is_operator)   { stats.competitors++; continue; }
-      if (analysis.geo_excluded)  { stats.geo_excluded++; continue; }
-      if (!analysis.relevant)     { stats.irrelevant++;   continue; }
+      // 4c. Contact extraction for all relevant sites IN PARALLEL (each one already
+      //     fans out its page fetches; doing leads concurrently overlaps the Groq pacing gap)
+      const extracted = await Promise.all(toExtract.map(async ({ cand, analysis }) => {
+        const homepageHtml = await fetchPage(cand.url);
+        let contact: Contact = { email: null, emailType: null, telegram: null, whatsapp: null, phone: null, sourceUrl: null };
+        if (homepageHtml && homepageHtml.length > 200) {
+          contact = await extractContact(cand.url, cand.origin, homepageHtml, deadline);
+        }
+        return { cand, analysis, contact };
+      }));
 
-      // 4b. Passed Groq — NOW fetch the homepage for contact extraction
-      if (Date.now() > deadline) break;
-      const homepageHtml = await fetchPage(url);
+      // 4d. Build & insert the leads
+      for (const { cand, analysis, contact } of extracted) {
+        const { url, title, keyword } = cand;
+        if (contact.email && emailedSet.has(contact.email.toLowerCase())) continue;
 
-      // 4c. Extract contact details (multi-phase: homepage → partner pages → contact pages)
-      let contact: Contact = { email: null, emailType: null, telegram: null, whatsapp: null, phone: null, sourceUrl: null };
-      if (homepageHtml && homepageHtml.length > 200) {
-        contact = await extractContact(url, origin, homepageHtml, deadline);
-      }
-      if (contact.email && emailedSet.has(contact.email.toLowerCase())) continue;
+        const leadData: Record<string, unknown> = {
+          url,
+          name:     nameFromTitle(title),
+          brand,
+          stage:    'new',
+          geo:      preset.geo,
+          type:     analysis.type,
+          score:    analysis.score,
+          summary:  analysis.summary,
+          why:      analysis.why,
+          priority: analysis.priority,
+          lang:     analysis.lang,
+          found_keyword: keyword,
+        };
+        if (contact.email) {
+          leadData.contact_email      = contact.email;
+          leadData.contact_email_type = contact.emailType;
+          leadData.email              = contact.email; // legacy column kept in sync
+          stats.contacts++;
+        }
+        if (contact.telegram)  { leadData.contact_telegram = contact.telegram; leadData.tg = contact.telegram; }
+        if (contact.whatsapp)  leadData.contact_whatsapp   = contact.whatsapp;
+        if (contact.phone)     leadData.contact_phone      = contact.phone;
+        if (contact.sourceUrl) leadData.contact_source_url = contact.sourceUrl;
 
-      // 4d. Build & insert the lead
-      const leadData: Record<string, unknown> = {
-        url,
-        name:     nameFromTitle(title),
-        brand,
-        stage:    'new',
-        geo:      preset.geo,
-        type:     analysis?.type     ?? 'other',
-        score:    analysis?.score    ?? 50,
-        summary:  analysis?.summary  ?? '',
-        why:      analysis?.why      ?? '',
-        priority: analysis?.priority ?? 'Medium',
-        lang:     analysis?.lang     ?? '',
-        found_keyword: keyword,
-      };
-      if (contact.email) {
-        leadData.contact_email      = contact.email;
-        leadData.contact_email_type = contact.emailType;
-        leadData.email              = contact.email; // legacy column kept in sync
-        stats.contacts++;
-      }
-      if (contact.telegram)  { leadData.contact_telegram = contact.telegram; leadData.tg = contact.telegram; }
-      if (contact.whatsapp)  leadData.contact_whatsapp   = contact.whatsapp;
-      if (contact.phone)     leadData.contact_phone      = contact.phone;
-      if (contact.sourceUrl) leadData.contact_source_url = contact.sourceUrl;
-
-      const { error: insErr } = await supabase.from('leads').insert([leadData]);
-      if (!insErr) {
-        if (contact.email) emailedSet.add(contact.email.toLowerCase());
-        stats.saved++;
-      } else {
-        stats.errors.push(`insert ${domain}: ${insErr.message}`);
+        const { error: insErr } = await supabase.from('leads').insert([leadData]);
+        if (!insErr) {
+          if (contact.email) emailedSet.add(contact.email.toLowerCase());
+          stats.saved++;
+        } else {
+          stats.errors.push(`insert ${getDomain(url)}: ${insErr.message}`);
+        }
       }
     }
 

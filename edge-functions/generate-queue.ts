@@ -45,11 +45,13 @@ const PLACEHOLDERS = [
 const PLACEHOLDER_LOCAL = new Set(['email','test','demo','sample','info123','admin123','example','noreply','donotreply','postmaster','mailer']);
 // Big corporate / portal email domains — NOT affiliates. Never email these even if
 // a bad lead slipped through (e.g. support@maps.yandex.ru).
+// NOTE: gmail/googlemail/outlook/hotmail are CONSUMER providers, not corporate —
+// small affiliate site owners (our core targets) use them as their main contact.
 const CORP_EMAIL_DOMAINS = new Set([
   'yandex.ru','yandex.com','maps.yandex.ru','ya.ru','mail.ru','vk.com','ok.ru','rambler.ru',
   'avito.ru','gosuslugi.ru','sberbank.ru','tinkoff.ru','wildberries.ru','ozon.ru','2gis.ru',
-  'rbc.ru','rt.com','ria.ru','tass.ru','google.com','gmail.com','googlemail.com','apple.com',
-  'microsoft.com','outlook.com','hotmail.com','samsung.com','huawei.com','xiaomi.com',
+  'rbc.ru','rt.com','ria.ru','tass.ru','google.com','apple.com',
+  'microsoft.com','samsung.com','huawei.com','xiaomi.com',
   'baidu.com','aliexpress.com','wordpress.com','wix.com','shopify.com','cloudflare.com',
 ]);
 
