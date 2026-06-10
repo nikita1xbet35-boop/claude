@@ -54,6 +54,50 @@ jobs:
           echo "=== LAST 8 find-and-queue RUNS ==="
           q "SELECT created_at, message FROM error_log WHERE service='find-and-queue' ORDER BY created_at DESC LIMIT 8;"; echo ""
 
+          echo ""
+          echo "=== SENT TODAY BY HOUR (GMT+3) ==="
+          q "SELECT to_char(sent_at + interval '3 hours', 'HH24') AS hour_gmt3, count(*) FROM email_log WHERE sent_at >= (now() AT TIME ZONE 'UTC' + interval '3 hours')::date - interval '3 hours' GROUP BY 1 ORDER BY 1;"; echo ""
+
+          echo ""
+          echo "=== NEXT 10 PENDING IN SEND_QUEUE ==="
+          q "SELECT sq.scheduled_at, sq.retry_count, l.contact_email IS NOT NULL AS has_email FROM send_queue sq LEFT JOIN leads l ON l.id = sq.lead_id WHERE sq.status = 'pending' ORDER BY sq.scheduled_at ASC LIMIT 10;"; echo ""
+
+          echo ""
+          echo "=== FAIL/SKIP REASONS (24h) ==="
+          q "SELECT status, error, count(*) FROM send_queue WHERE status IN ('failed','skipped') GROUP BY 1,2 ORDER BY 3 DESC LIMIT 12;"; echo ""
+
+          echo ""
+          echo "=== API USAGE / LIMITS / PAUSE FLAGS ==="
+          q "SELECT service, used, limit_value, paused, system_paused FROM api_usage ORDER BY service;"; echo ""
+
+          echo ""
+          echo "=== LEADS ADDED TODAY (GMT+3): total / with email ==="
+          q "SELECT count(*) AS total, count(contact_email) AS with_email FROM leads WHERE created_at >= (now() AT TIME ZONE 'UTC' + interval '3 hours')::date - interval '3 hours';"; echo ""
+
+          echo ""
+          echo "=== LAST 10 process-queue RUNS ==="
+          q "SELECT created_at, message FROM error_log WHERE service='process-queue' ORDER BY created_at DESC LIMIT 10;"; echo ""
+
+          echo ""
+          echo "=== LAST 6 generate-queue RUNS ==="
+          q "SELECT created_at, message FROM error_log WHERE service='generate-queue' ORDER BY created_at DESC LIMIT 6;"; echo ""
+
+          echo ""
+          echo "=== LAST 6 extract-contacts RUNS ==="
+          q "SELECT created_at, message FROM error_log WHERE service='extract-contacts' ORDER BY created_at DESC LIMIT 6;"; echo ""
+
+          echo ""
+          echo "=== NON-INFO ERRORS LAST 12H ==="
+          q "SELECT created_at, service, level, left(message, 200) AS msg FROM error_log WHERE level <> 'info' AND created_at > now() - interval '12 hours' ORDER BY created_at DESC LIMIT 15;"; echo ""
+
+          echo ""
+          echo "=== CRON CADENCE: find-and-queue timestamps last 2h ==="
+          q "SELECT created_at FROM error_log WHERE service='find-and-queue' AND created_at > now() - interval '2 hours' ORDER BY created_at DESC;"; echo ""
+
+          echo ""
+          echo "=== CRON CADENCE: process-queue timestamps last 1h ==="
+          q "SELECT created_at FROM error_log WHERE service='process-queue' AND created_at > now() - interval '1 hour' ORDER BY created_at DESC;"; echo ""
+
           # ── Health verdict ────────────────────────────────────────────────
           FAIL=0
           if [ "$RESERVE" -lt "$MIN_RESERVE" ]; then
