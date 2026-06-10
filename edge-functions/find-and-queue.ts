@@ -485,6 +485,11 @@ interface Contact {
 }
 
 function scanContacts(html: string, page: string, acc: Contact, prio: { v: number }) {
+  // CPU guard: regex passes over multi-MB pages can blow the edge-function CPU
+  // budget — contacts live near the header/footer, skip the middle.
+  if (html.length > 260_000) {
+    html = html.slice(0, 200_000) + '\n' + html.slice(-60_000);
+  }
   const deobf  = deobfuscate(html);
   const mailto = extractMailto(html);
   const jsonld = extractJsonLd(html);
