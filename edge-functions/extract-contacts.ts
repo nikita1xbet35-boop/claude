@@ -140,6 +140,42 @@ function normalizeBase(url: string): string | null {
 // ── Page fetching: direct first, Jina as fallback ────────────────────────────
 let jinaCalls = 0;
 
+// Read a response body with a hard size cap. A site that streams an unbounded /
+// multi-hundred-MB body into res.text() OOMs the isolate (WORKER_RESOURCE_LIMIT)
+// before anything is logged — one such "poison" lead at the head of the queue
+// killed every run of this function for weeks.
+const BODY_CAP_BYTES = 2_500_000;
+async function readCapped(res: Response, cap = BODY_CAP_BYTES): Promise<string> {
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (ct && !ct.includes('text/') && !ct.includes('html') && !ct.includes('xml') && !ct.includes('json')) {
+    res.body?.cancel().catch(() => {});
+    return '';
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return (await res.text()).slice(0, cap);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < cap) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.length;
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  const buf = new Uint8Array(Math.min(total, cap));
+  let off = 0;
+  for (const c of chunks) {
+    const n = Math.min(c.length, buf.length - off);
+    buf.set(c.subarray(0, n), off);
+    off += n;
+    if (off >= buf.length) break;
+  }
+  return new TextDecoder().decode(buf);
+}
+
 async function fetchPage(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
@@ -148,8 +184,10 @@ async function fetchPage(url: string): Promise<string | null> {
       redirect: 'follow',
     });
     if (res.ok) {
-      const text = await res.text();
+      const text = await readCapped(res);
       if (text && text.length > 200) return text;
+    } else {
+      res.body?.cancel().catch(() => {});
     }
   } catch (_) { /* fall through to Jina */ }
 
@@ -162,8 +200,10 @@ async function fetchPage(url: string): Promise<string | null> {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS + 4_000),
     });
     if (res.ok) {
-      const text = await res.text();
+      const text = await readCapped(res);
       if (text && text.length > 100) return text;
+    } else {
+      res.body?.cancel().catch(() => {});
     }
   } catch (_) { /* give up on this page */ }
 
@@ -353,13 +393,15 @@ Deno.serve(async (req: Request) => {
 
   try {
     // extract-contacts never pauses — finding contacts is always safe
+    // Newest leads first — they matter most for the send queue, and this also
+    // rotates away from any lead whose site crashes the function.
     const { data: leads, error } = await supabase
       .from('leads')
       .select('id, url, name')
       .is('contact_email', null)
       .is('contact_email_type', null)
       .not('stage', 'eq', 'excluded')
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
       .limit(BATCH_SIZE);
 
     if (error) throw new Error(`leads query failed: ${error.message}`);
@@ -367,6 +409,13 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ...stats, reason: 'no leads to process' }),
         { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
+
+    // Poison-lead protection: mark the whole batch as attempted BEFORE crawling.
+    // If a site still manages to kill the isolate mid-run, these leads won't be
+    // re-picked forever — successful extractions overwrite the marker below.
+    await supabase.from('leads')
+      .update({ contact_email_type: 'not_found' })
+      .in('id', leads.map(l => l.id));
 
     for (const lead of leads) {
       if (Date.now() - startedAt > TIME_BUDGET_MS) break;
@@ -394,6 +443,8 @@ Deno.serve(async (req: Request) => {
         const update: Record<string, unknown> = { ...result };
         if (result.contact_email)    update.email = result.contact_email;
         if (result.contact_telegram) update.tg    = result.contact_telegram;
+        // tg/wa-only result: keep the attempted-marker so the lead isn't re-scanned forever
+        if (!update.contact_email_type) update.contact_email_type = 'not_found';
         await supabase.from('leads').update(update).eq('id', lead.id);
         stats.found++;
       } else {

@@ -33,8 +33,10 @@ const MIN_SCORE        = 40;
 // for llama-3.1-8b-instant), not requests/min — single-site calls at any pacing
 // blow the token budget. One batched call (~1800 tokens) covers 8 sites.
 const GROQ_BATCH_SIZE  = 8;
-// Min ms between batch calls — ~3.5 calls/min × ~1800 tokens stays under 6000 TPM
-const GROQ_PACE_MS     = 16_000;
+// Min ms between batch calls — ~2.9 calls/min × ~1800 tokens ≈ 5.2k TPM, leaving
+// headroom for the tail of an overlapping previous run (runs fire every ~3 min
+// with a 110s budget, so adjacent runs share the same per-minute token window)
+const GROQ_PACE_MS     = 21_000;
 
 // Minus-words appended to every DDG query to cut noise
 const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk';
@@ -343,6 +345,40 @@ function extractFooter(html: string): string {
 
 let jinaCount = 0;
 
+// Read a response body with a hard size cap — a site streaming an unbounded
+// body into res.text() OOMs the isolate (WORKER_RESOURCE_LIMIT).
+const BODY_CAP_BYTES = 2_500_000;
+async function readCapped(res: Response, cap = BODY_CAP_BYTES): Promise<string> {
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (ct && !ct.includes('text/') && !ct.includes('html') && !ct.includes('xml') && !ct.includes('json')) {
+    res.body?.cancel().catch(() => {});
+    return '';
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return (await res.text()).slice(0, cap);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < cap) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.length;
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  const buf = new Uint8Array(Math.min(total, cap));
+  let off = 0;
+  for (const c of chunks) {
+    const n = Math.min(c.length, buf.length - off);
+    buf.set(c.subarray(0, n), off);
+    off += n;
+    if (off >= buf.length) break;
+  }
+  return new TextDecoder().decode(buf);
+}
+
 async function fetchPage(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
@@ -351,8 +387,10 @@ async function fetchPage(url: string): Promise<string | null> {
       redirect: 'follow',
     });
     if (res.ok) {
-      const text = await res.text();
+      const text = await readCapped(res);
       if (text && text.length > 200) return text;
+    } else {
+      res.body?.cancel().catch(() => {});
     }
   } catch (_) {}
 
@@ -365,8 +403,10 @@ async function fetchPage(url: string): Promise<string | null> {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS + 5_000),
     });
     if (res.ok) {
-      const text = await res.text();
+      const text = await readCapped(res);
       if (text && text.length > 100) return text;
+    } else {
+      res.body?.cancel().catch(() => {});
     }
   } catch (_) {}
 
