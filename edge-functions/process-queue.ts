@@ -314,11 +314,13 @@ Deno.serve(async (req: Request) => {
       ];
       const PLACEHOLDER_LOCAL_PQ = new Set(['email','test','demo','sample','example','noreply','donotreply','postmaster','mailer']);
       // Big corporate / portal email domains — NOT affiliates (e.g. support@maps.yandex.ru)
+      // NOTE: gmail/googlemail/outlook/hotmail are CONSUMER providers, not corporate —
+      // small affiliate site owners (our core targets) use them as their main contact.
       const CORP_EMAIL_DOMAINS_PQ = new Set([
         'yandex.ru','yandex.com','maps.yandex.ru','ya.ru','mail.ru','vk.com','ok.ru','rambler.ru',
         'avito.ru','gosuslugi.ru','sberbank.ru','tinkoff.ru','wildberries.ru','ozon.ru','2gis.ru',
-        'rbc.ru','rt.com','ria.ru','tass.ru','google.com','gmail.com','googlemail.com','apple.com',
-        'microsoft.com','outlook.com','hotmail.com','samsung.com','huawei.com','xiaomi.com',
+        'rbc.ru','rt.com','ria.ru','tass.ru','google.com','apple.com',
+        'microsoft.com','samsung.com','huawei.com','xiaomi.com',
         'baidu.com','aliexpress.com','wordpress.com','wix.com','shopify.com','cloudflare.com',
       ]);
       const emailLower = (lead.contact_email || '').toLowerCase();
