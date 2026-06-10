@@ -18,10 +18,12 @@ const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const JINA_API_KEY  = Deno.env.get('JINA_API_KEY') || '';
 
-// How many leads to process per run
-const BATCH_SIZE = 20;
+// How many leads to process per run. Kept small: the binding limit is the
+// edge-function CPU budget (regex passes over fetched HTML), not wall time —
+// 20 leads/run died with WORKER_RESOURCE_LIMIT before logging anything.
+const BATCH_SIZE = 5;
 // Global wall-clock budget — stop starting new leads after this
-const TIME_BUDGET_MS = 110_000;
+const TIME_BUDGET_MS = 100_000;
 // Per-page fetch timeout
 const FETCH_TIMEOUT_MS = 8_000;
 
@@ -182,6 +184,12 @@ function scanPage(
   html: string, page: string,
   state: { bestEmail: string | null; bestPrio: number; bestType: string | null; sourceUrl: string | null; tg: string | null; wa: string | null; phone: string | null },
 ): void {
+  // CPU guard: full regex passes over multi-MB pages blow the edge-function CPU
+  // budget (WORKER_RESOURCE_LIMIT). Contacts live near the header/footer — scan
+  // both ends and skip the middle of oversized documents.
+  if (html.length > 260_000) {
+    html = html.slice(0, 200_000) + '\n' + html.slice(-60_000);
+  }
   const deobf  = deobfuscateEmails(html);
   const footer = extractFooter(html);
   const footerDeobf = deobfuscateEmails(footer);
