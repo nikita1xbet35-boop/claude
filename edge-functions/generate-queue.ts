@@ -211,7 +211,10 @@ Deno.serve(async (req: Request) => {
         .in('stage', ['new', 'ready', 'researched', 'followup'])
         .not('contact_email', 'is', null)
         .neq('contact_email', '')
-        .order('created_at', { ascending: true })
+        // Newest first: fresh contactable leads must send same-day. Ascending order
+        // jammed the 600-row window with old already-emailed/placeholder leads,
+        // so generate-queue added 0 new while fresh leads sat beyond the window.
+        .order('created_at', { ascending: false })
         .limit(600);
       if (leadsErr) throw new Error(`leads query failed: ${leadsErr.message}`);
 
