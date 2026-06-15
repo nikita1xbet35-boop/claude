@@ -2,8 +2,8 @@
 // LuckyPari outreach — reads lp_outreach table, sends via Outlook (send-email-outlook).
 // Completely separate from the 1xBet pipeline: own daily quota, own template, own log.
 //
-// Working hours: 08:00–20:00 GMT+3 (same as main pipeline)
-// Daily cap: 150 emails/day (conservative for personal Outlook — ramp up after first week)
+// Working hours: 08:00–20:00 GMT+3 (12h window)
+// Daily cap: 50 emails/day, spread across all 12h via hourly limit (≤5/hour)
 //
 // Deploy: supabase functions deploy process-queue-lp --no-verify-jwt
 
@@ -13,10 +13,12 @@ const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
-const DAILY_LIMIT   = 150;
-const BATCH_SIZE    = 8;
+// 50/day × 12 working hours → max 5/hour keeps sends spread all day
+const DAILY_LIMIT   = 50;
+const HOURLY_LIMIT  = 5;
+const BATCH_SIZE    = 3;
 const MAX_RETRIES   = 3;
-const SEND_DELAY_MS = 800;
+const SEND_DELAY_MS = 1500;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -110,11 +112,12 @@ function buildSubject(siteName: string, url: string): string {
 function buildBody(siteName: string, url: string, geo: string): string {
   const name = cleanSiteName(siteName, url);
   const place = geoName(geo);
-  return `Hi, I had a look at ${name} and really like what you're doing in ${place}. `
-    + `I'm Nick from LuckyPari Partners. Lucky Pari is a licensed betting and casino brand `
-    + `with a strong presence across your market — solid recurring income for partners. `
-    + `Clean RevShare, fast approval, individual terms, and you'd work directly with me. `
-    + `I put together a short proposal — want me to send it over?`;
+  return `Hi, I had a look at ${name} and really like what you're doing in ${place}.\n\n`
+    + `I'm Nick from Lucky Pari Partners — the official affiliate program for Lucky Pari, `
+    + `a licensed betting and casino brand with real traction in your market.\n\n`
+    + `We offer clean RevShare, fast approval, and you'd be working directly with me — `
+    + `no account managers, no waiting. I put together a short proposal for you.\n\n`
+    + `Want me to send it over? You can also reach me straight on Telegram: @af_luckypari`;
 }
 
 const PLACEHOLDER_LOCAL = new Set([
@@ -144,9 +147,10 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // Daily cap check
     const gmt3DayStart = new Date(`${dateStr}T00:00:00+03:00`);
     const gmt3DayEnd   = new Date(`${dateStr}T23:59:59+03:00`);
+
+    // Daily cap check
     const { count: sentToday } = await supabase
       .from('lp_outreach')
       .select('id', { count: 'exact', head: true })
@@ -159,6 +163,23 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
+    // Hourly cap — spread 50/day evenly across 12 working hours (max 5/hour)
+    // hourStart is the UTC timestamp of the start of the current GMT+3 hour
+    const gmt3HourStartUtc = new Date(new Date(`${dateStr}T${String(hour).padStart(2,'0')}:00:00+03:00`).toISOString());
+    const { count: sentThisHour } = await supabase
+      .from('lp_outreach')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'sent')
+      .gte('sent_at', gmt3HourStartUtc.toISOString());
+
+    if ((sentThisHour ?? 0) >= HOURLY_LIMIT) {
+      stats.reason = `hourly cap reached (${sentThisHour}/${HOURLY_LIMIT})`;
+      return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
+    // Limit batch so we don't blow the hourly cap in a single tick
+    const canSend = Math.min(BATCH_SIZE, HOURLY_LIMIT - (sentThisHour ?? 0));
+
     // Fetch pending / retryable items
     const { data: items, error: fetchErr } = await supabase
       .from('lp_outreach')
@@ -167,7 +188,7 @@ Deno.serve(async (req: Request) => {
       .lt('retry_count', MAX_RETRIES)
       .lte('scheduled_at', now.toISOString())
       .order('scheduled_at', { ascending: true })
-      .limit(BATCH_SIZE);
+      .limit(canSend);
 
     if (fetchErr) throw new Error(`lp_outreach query failed: ${fetchErr.message}`);
     if (!items || items.length === 0) {
