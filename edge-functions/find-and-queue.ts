@@ -33,10 +33,10 @@ const MIN_SCORE        = 40;
 // for llama-3.1-8b-instant), not requests/min — single-site calls at any pacing
 // blow the token budget. One batched call (~1800 tokens) covers 8 sites.
 const GROQ_BATCH_SIZE  = 8;
-// Min ms between batch calls — ~2.9 calls/min × ~1800 tokens ≈ 5.2k TPM, leaving
-// headroom for the tail of an overlapping previous run (runs fire every ~3 min
-// with a 110s budget, so adjacent runs share the same per-minute token window)
-const GROQ_PACE_MS     = 21_000;
+// Min ms between batch calls — 2 calls/min × ~1800 tokens ≈ 3600 TPM, well under
+// the 6000 TPM free-tier cap. Keeping max 2 batches in any rolling 60s window
+// prevents 429s even when the prompt runs slightly longer than estimated.
+const GROQ_PACE_MS     = 30_000;
 
 // Minus-words appended to every DDG query to cut noise
 const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk';
@@ -178,12 +178,19 @@ const EMAIL_AD  = ['advertis','ads@','partner','sponsor','commercial','business'
 const EMAIL_GEN = ['contact','info@','hello@','hi@','enquir','support'];
 const DISPOSABLE = ['mailinator.com','guerrillamail.com','10minutemail.com','tempmail','throwaway'];
 
+function isMalformedLocalPart(e: string): boolean {
+  // Catches scraped junk like "thenews.com.my@gmail.com" where a domain was
+  // concatenated with @gmail.com — the local part contains an embedded TLD pattern.
+  const local = e.split('@')[0].toLowerCase();
+  return /\.(com|net|org|co|info|me|io|news|blog|site|web)\.[a-z]{2,3}$/.test(local);
+}
 function isValidEmail(e: string): boolean {
   if (!e || e.length > 100 || !e.includes('@') || !e.includes('.')) return false;
   const l = e.toLowerCase();
   if (EMAIL_IGNORE.some(ig => l.includes(ig))) return false;
   if (isPlaceholderEmail(l))                   return false;
   if (DISPOSABLE.some(d => l.includes(d)))     return false;
+  if (isMalformedLocalPart(l))                 return false;
   return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(e);
 }
 function emailPriority(e: string): number {
@@ -405,7 +412,7 @@ let groqLastError = '';
 
 // Groq chat call with retry on 429 (rate limit) / 5xx. Returns parsed JSON content or null.
 async function groqChat(body: Record<string, unknown>): Promise<string | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       groqCount++;
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -416,8 +423,8 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
       });
       if (res.status === 429 || res.status >= 500) {
         groqLastError = `HTTP ${res.status}`;
-        // TPM window is per-minute — wait long enough for it to actually reset
-        await new Promise(r => setTimeout(r, 20000 * (attempt + 1)));
+        // Wait long enough for the 60s TPM window to fully reset before retrying
+        await new Promise(r => setTimeout(r, 60_000 * (attempt + 1)));
         continue;
       }
       if (!res.ok) {

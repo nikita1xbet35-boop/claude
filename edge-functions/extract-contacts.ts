@@ -42,11 +42,17 @@ const EMAIL_AD     = ['advertis', 'ads@', 'partner', 'sponsor', 'commercial', 'b
 const EMAIL_GEN    = ['contact', 'info@', 'hello@', 'hi@', 'enquir', 'support'];
 const DISPOSABLE   = ['mailinator.com', 'guerrillamail.com', '10minutemail.com', 'tempmail', 'throwaway'];
 
+function isMalformedLocalPart(e: string): boolean {
+  // Catches scraped junk like "thenews.com.my@gmail.com" — domain used as local part.
+  const local = e.split('@')[0].toLowerCase();
+  return /\.(com|net|org|co|info|me|io|news|blog|site|web)\.[a-z]{2,3}$/.test(local);
+}
 function isValidEmail(e: string): boolean {
   if (!e || e.length > 100 || !e.includes('@') || !e.includes('.')) return false;
   const l = e.toLowerCase();
   if (EMAIL_IGNORE.some(ig => l.includes(ig))) return false;
   if (DISPOSABLE.some(d => l.includes(d)))     return false;
+  if (isMalformedLocalPart(l))                 return false;
   return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(e);
 }
 function emailPriority(e: string): number {
