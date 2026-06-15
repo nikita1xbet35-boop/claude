@@ -104,7 +104,7 @@ const GEO_NAMES: Record<string, string> = {
   PK: 'Pakistan', TR: 'Turkey', AR: 'Argentina', CL: 'Chile',
   PH: 'Philippines', BF: 'Burkina Faso', SN: 'Senegal', CM: 'Cameroun',
   MA: 'Morocco', VN: 'Vietnam', MM: 'Myanmar', ZA: 'South Africa',
-  NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', TZ: 'Tanzania',
+  NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', TZ: 'Tanzania', KG: 'Kyrgyzstan',
   // fallbacks for other stored geo values
   'Africa FR': 'West Africa', 'CIS': 'the region', 'Global': 'the region',
 };
@@ -115,15 +115,15 @@ function geoName(geoCode: string): string {
 }
 
 /** Build the outreach email body from a fixed template. No Groq needed.
- *  Single 1xPartners template — only the site name is personalised. */
+ *  Soft intro — references the site name and its GEO. */
 function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
   const siteName = cleanSiteName(lead.name as string, lead.url as string || '');
+  const geo      = geoName((lead.geo as string) || '');
 
-  return `${siteName}, straight up — ${siteName} should have 1xBet on it. `
-    + `It's the most recognized betting brand across most of your GEOs, licensed, and it earns publishers strong, consistent monthly income. `
-    + `Clean RevShare with individual terms per GEO, full S2S/postback tracking, deeplinks, custom landings for your audience, and 1xCasino on top of 1xBet. `
-    + `No admin fee, payouts always on time, you run directly with me. `
-    + `I'll build the terms around your real numbers — want a concrete proposal?`;
+  return `Hi, I had a look at ${siteName} and really like what you're doing in ${geo}. `
+    + `I'm Nick from 1xPartners. 1xBet is one of the most recognized, licensed brands across your markets, `
+    + `and it earns partners solid recurring income. Clean RevShare, no admin fee, individual terms, `
+    + `and you'd run directly with me. I put together a short proposal — want me to send it over?`;
 }
 
 // Decode HTML entities so site names never show raw "&amp;" / "&#x27;" etc.
