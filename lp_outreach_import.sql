@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS lp_outreach (
 );
 
 CREATE INDEX IF NOT EXISTS lp_outreach_status_scheduled ON lp_outreach (status, scheduled_at);
-CREATE INDEX IF NOT EXISTS lp_outreach_email            ON lp_outreach (email);
+CREATE UNIQUE INDEX IF NOT EXISTS lp_outreach_email ON lp_outreach (email);
 
 INSERT INTO lp_outreach (email, site_name, url, geo, lang, partner_type) VALUES
   ('soporte@jb.ar', 'Sumate al programa de afiliados de JB Casino en Argentina', 'https://jbcasinoar.com/afiliados/', 'AR', 'es', 'review'),
@@ -969,4 +969,4 @@ INSERT INTO lp_outreach (email, site_name, url, geo, lang, partner_type) VALUES
   ('ads@nicegram.app', 'nicegram.app', 'https://nicegram.app/hub/group/ParisSportifsFaciles', 'Francophone Africa', 'French', 'Tipster'),
   ('support.digital@republicworld.com', 'republicworld.com', 'https://www.republicworld.com/cricket/ban-vs-nz-1st-odi-match-prediction-who-will-win-todays-game-between-bangladesh-and-new-zealand-in-dhaka', 'Bangladesh', 'English', 'Tipster'),
   ('parisport75006@gmail.com', 'PariSport', 'https://parisport.org/bookmakers/avis-bwin/', 'France', 'French', 'Review Site')
-ON CONFLICT DO NOTHING;
+ON CONFLICT (email) DO NOTHING;
