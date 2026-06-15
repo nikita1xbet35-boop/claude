@@ -1,0 +1,48 @@
+name: Import LuckyPari base
+
+# One-shot import of lp_outreach_import.sql into Supabase via the Management API.
+# Runs whenever the SQL file changes (or manually). The import is idempotent —
+# CREATE TABLE IF NOT EXISTS + UNIQUE index on email + ON CONFLICT (email) DO NOTHING,
+# so re-runs never duplicate rows.
+on:
+  push:
+    paths:
+      - 'lp_outreach_import.sql'
+      - '.github/workflows/import-lp-base.yml'
+  workflow_dispatch:
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load lp_outreach into Supabase
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -e
+          # Wrap the raw SQL file into a JSON {"query": "..."} body with jq (handles all escaping)
+          jq -Rs '{query: .}' lp_outreach_import.sql > /tmp/import_body.json
+          echo "Body size: $(wc -c < /tmp/import_body.json) bytes"
+
+          HTTP=$(curl -s -o /tmp/import_resp.json -w "%{http_code}" -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/import_body.json)
+
+          echo "HTTP $HTTP"
+          head -c 2000 /tmp/import_resp.json; echo ""
+          if [ "$HTTP" != "200" ] && [ "$HTTP" != "201" ]; then
+            echo "❌ Import failed"; exit 1
+          fi
+
+          # Verify row count
+          curl -s -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"SELECT count(*) AS total, count(*) FILTER (WHERE status = '\''pending'\'') AS pending FROM lp_outreach;"}'
+          echo ""
+          echo "✅ Import complete"

@@ -235,5 +235,11 @@ export default {
       await call('daily-report', {});
       return;
     }
+
+    if (cron === '*/4 * * * *') {
+      // LuckyPari outreach — separate brand, separate Outlook account, own quota
+      await call('process-queue-lp', {});
+      return;
+    }
   },
 };
