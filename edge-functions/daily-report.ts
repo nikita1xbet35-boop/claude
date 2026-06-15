@@ -1,15 +1,13 @@
 // Supabase Edge Function: daily-report
-// Sends the morning Telegram report at 09:00 GMT+3.
-// Aggregates yesterday's activity from api_usage, email_log, leads tables.
+// Sends morning Telegram report at 10:00 MSK (07:00 UTC).
+// Shows yesterday's results + current pipeline state ("starting work").
 // Deploy: supabase functions deploy daily-report
-// Env vars needed: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
-const SUPABASE_ANON = Deno.env.get('SUPABASE_ANON_KEY') || '';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -24,121 +22,94 @@ Deno.serve(async (req: Request) => {
   try {
     const now = new Date();
 
-    // Compute yesterday's date range in GMT+3
-    const gmt3offset  = 3 * 60 * 60 * 1000;
-    const todayGMT3   = new Date(now.getTime() + gmt3offset);
+    const gmt3offset   = 3 * 60 * 60 * 1000;
+    const todayGMT3    = new Date(now.getTime() + gmt3offset);
     todayGMT3.setUTCHours(0, 0, 0, 0);
     const yesterdayStart = new Date(todayGMT3.getTime() - 24 * 60 * 60 * 1000 - gmt3offset);
     const yesterdayEnd   = new Date(todayGMT3.getTime() - gmt3offset);
 
     const dateStr = todayGMT3.toLocaleDateString('ru-RU', {
-      day: 'numeric', month: 'long', timeZone: 'Europe/Moscow'
+      day: 'numeric', month: 'long', timeZone: 'Europe/Moscow',
     });
 
-    // ── Fetch data ──────────────────────────────────────────────────────────────
+    // ── Yesterday's data ───────────────────────────────────────────────────────
+    const [sentRes, leadsRes, pipelineRes, queueRes, reserveRes] = await Promise.all([
+      supabase.from('email_log').select('brand, bounced')
+        .gte('sent_at', yesterdayStart.toISOString())
+        .lt('sent_at',  yesterdayEnd.toISOString()),
 
-    // Current API usage counters
-    const { data: apis } = await supabase.from('api_usage').select('*');
+      supabase.from('leads').select('contact_email')
+        .gte('created_at', yesterdayStart.toISOString())
+        .lt('created_at',  yesterdayEnd.toISOString()),
 
-    // Emails sent yesterday
-    const { data: sentEmails } = await supabase
-      .from('email_log')
-      .select('brand, bounced')
-      .gte('sent_at', yesterdayStart.toISOString())
-      .lt('sent_at',  yesterdayEnd.toISOString());
+      supabase.from('leads').select('stage'),
 
-    // Leads discovered yesterday
-    const { data: newLeads } = await supabase
-      .from('leads')
-      .select('contact_email, contact_telegram')
-      .gte('created_at', yesterdayStart.toISOString())
-      .lt('created_at',  yesterdayEnd.toISOString());
+      // Today's queue state (as of morning)
+      supabase.from('send_queue').select('status', { count: 'exact', head: false })
+        .eq('status', 'pending'),
 
-    // Full pipeline stage distribution
-    const { data: pipeline } = await supabase.from('leads').select('stage');
+      // Contactable reserve: leads with email not yet emailed
+      supabase.from('leads').select('id', { count: 'exact', head: true })
+        .not('contact_email', 'is', null)
+        .neq('contact_email', '')
+        .in('stage', ['new', 'ready', 'researched', 'followup']),
+    ]);
 
-    // ── Aggregate ───────────────────────────────────────────────────────────────
+    const sentEmails = sentRes.data || [];
+    const newLeads   = leadsRes.data || [];
+    const pipeline   = pipelineRes.data || [];
 
-    const totalSent   = sentEmails?.length || 0;
-    const bounces     = sentEmails?.filter(e => e.bounced).length || 0;
+    const totalSent   = sentEmails.length;
+    const bounces     = sentEmails.filter(e => e.bounced).length;
     const bounceRate  = totalSent > 0 ? ((bounces / totalSent) * 100).toFixed(1) : '0';
+    const leadsFound  = newLeads.length;
+    const withContact = newLeads.filter(l => l.contact_email).length;
 
-    const sentBy1xbet  = sentEmails?.filter(e => e.brand === '1xbet').length     || 0;
-    const sentByCasino = sentEmails?.filter(e => e.brand === '1xcasino').length  || 0;
-    const sentByLP     = sentEmails?.filter(e => e.brand === 'luckypari').length || 0;
-
-    const leadsFound       = newLeads?.length || 0;
-    const leadsWithContact = newLeads?.filter(l => l.contact_email).length || 0;
-    const DAILY_GOAL       = 200;
-    const progressPct      = Math.round((leadsFound / DAILY_GOAL) * 100);
-
-    const stageCounts: Record<string, number> = {};
-    pipeline?.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage] || 0) + 1; });
-
-    // ── API usage section ───────────────────────────────────────────────────────
-
-    const SERVICE_DISPLAY: Record<string, string> = {
-      serpapi:    'SerpAPI',
-      groq:       'Groq',
-      gmail_main: 'Gmail (main)',
-      gmail_lp:   'Gmail (lp)',
-      jina:       'Jina',
+    const DAILY_GOAL = 200;
+    const sentGoalPct = Math.round((totalSent / DAILY_GOAL) * 100);
+    const bar = (pct: number) => {
+      const filled = Math.floor(Math.min(pct, 100) / 10);
+      return '█'.repeat(filled) + '░'.repeat(10 - filled);
     };
 
-    const apiLines = (apis || []).map(a => {
-      const pct  = Math.round(a.used / a.limit_value * 100);
-      const icon = pct >= 100 ? '🔴' : pct >= 80 ? '🟡' : '✅';
-      const name = SERVICE_DISPLAY[a.service] || a.service;
-      return `${icon} ${name}: ${a.used}/${a.limit_value} (${pct}%)`;
-    }).join('\n');
+    const stageCounts: Record<string, number> = {};
+    pipeline.forEach(l => { stageCounts[l.stage] = (stageCounts[l.stage] || 0) + 1; });
 
-    // ── Build message ───────────────────────────────────────────────────────────
+    const pendingCount = queueRes.count ?? 0;
+    const reserve      = reserveRes.count ?? 0;
 
-    const text = `📊 <b>AffiliateOS Daily Report — ${dateStr}</b>
+    // ── Build message ──────────────────────────────────────────────────────────
+    const text = `☀️ <b>AffiliateOS — доброе утро, ${dateStr}</b>
 
-<b>API Usage (yesterday):</b>
-${apiLines}
+<b>Вчера:</b>
+📧 Писем отправлено: <b>${totalSent}</b> / ${DAILY_GOAL} (${sentGoalPct}%)
+   ${bar(sentGoalPct)}
+🎯 Лидов найдено: ${leadsFound} (с контактом: ${withContact})
+↩️ Баунсы: ${bounces} (${bounceRate}%)
 
-<b>Activity (yesterday):</b>
-🎯 <b>Leads goal: ${leadsFound}/${DAILY_GOAL}</b> (${progressPct}%)
-   ${progressPct >= 100 ? '✅ Goal achieved!' : `Progress: ${'█'.repeat(Math.floor(progressPct / 10))}${'░'.repeat(10 - Math.floor(progressPct / 10))}`}
-💌 With contacts: ${leadsWithContact}
-📧 Emails sent: ${totalSent}
-   • 1xBet: ${sentBy1xbet}
-   • 1xCasino: ${sentByCasino}
-   • LuckyPari: ${sentByLP}
-↩️ Bounces: ${bounces} (${bounceRate}%)
+<b>Pipeline:</b>
+📋 new: ${stageCounts['new'] || 0}  •  ⏳ waiting: ${stageCounts['waiting'] || 0}  •  🔄 followup: ${stageCounts['followup'] || 0}
 
-<b>Pipeline status:</b>
-📋 New: ${stageCounts['new']        || 0}
-⏳ Waiting: ${stageCounts['waiting']   || 0}
-🔄 Followup: ${stageCounts['followup']  || 0}
-🔬 Researched: ${stageCounts['researched'] || 0}
-✅ Ready: ${stageCounts['ready']      || 0}`;
-
-    // ── Send via send-alert edge function ───────────────────────────────────────
+<b>Приступаю к работе:</b>
+📬 В очереди на сегодня: ${pendingCount} писем
+🔍 Контактный резерв: ${reserve} лидов`;
 
     await fetch(FUNCTIONS_URL + '/send-alert', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': SUPABASE_ANON,
-        'Authorization': 'Bearer ' + SUPABASE_ANON
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
       },
-      body: JSON.stringify({
-        level: 'info',
-        service: 'system',
-        message: 'daily report',
-        custom_text: text
-      })
+      body: JSON.stringify({ level: 'info', service: 'system', message: 'daily report', custom_text: text }),
     });
 
     return new Response(JSON.stringify({ success: true }), {
-      headers: { ...cors, 'Content-Type': 'application/json' }
+      headers: { ...cors, 'Content-Type': 'application/json' },
     });
   } catch (e: any) {
     return new Response(JSON.stringify({ success: false, error: e.message }), {
-      status: 500, headers: { ...cors, 'Content-Type': 'application/json' }
+      status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
     });
   }
 });

@@ -112,22 +112,28 @@ jobs:
           echo "=== CRON CADENCE: process-queue timestamps last 1h ==="
           q "SELECT created_at FROM error_log WHERE service='process-queue' AND created_at > now() - interval '1 hour' ORDER BY created_at DESC;"; echo ""
 
-          # ── Health verdict ────────────────────────────────────────────────
-          FAIL=0
+          # ── Health verdict — send Telegram alert, never fail the job ────────
+          ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM"
+          PROBLEMS=""
           if [ "$RESERVE" -lt "$MIN_RESERVE" ]; then
-            echo "::warning::Contactable reserve $RESERVE is below threshold $MIN_RESERVE"
-            FAIL=1
+            PROBLEMS="${PROBLEMS}⚠️ Контактный резерв: ${RESERVE} (мин. ${MIN_RESERVE})\n"
           fi
           if [ "$NEW1H" -lt "$MIN_NEW_LEADS_1H" ]; then
-            echo "::warning::Pipeline may be stalled — only $NEW1H leads added in the last hour"
-            FAIL=1
+            PROBLEMS="${PROBLEMS}⚠️ Новых лидов за час: ${NEW1H} — поиск встал\n"
           fi
 
-          if [ "$FAIL" -eq 1 ]; then
-            echo "::error::Pipeline health check FAILED — reserve=$RESERVE, new_leads_1h=$NEW1H, sent_today=$SENT"
-            exit 1
+          if [ -n "$PROBLEMS" ]; then
+            MSG="🔴 <b>AffiliateOS Pipeline</b>\n\n${PROBLEMS}\nРезерв: ${RESERVE} | Лидов за час: ${NEW1H} | Отправлено: ${SENT}"
+            curl -s -m 15 -X POST \
+              "https://lxsyrserfuighwxuymgb.supabase.co/functions/v1/send-alert" \
+              -H "Content-Type: application/json" \
+              -H "apikey: $ANON_KEY" \
+              -H "Authorization: Bearer $ANON_KEY" \
+              -d "{\"level\":\"warning\",\"service\":\"pipeline-health\",\"message\":\"reserve=${RESERVE} new_leads_1h=${NEW1H} sent=${SENT}\",\"custom_text\":\"${MSG}\"}" || true
+            echo "⚠️ Alert sent to Telegram — reserve=${RESERVE}, new_leads_1h=${NEW1H}, sent_today=${SENT}"
+          else
+            echo "✅ Healthy — reserve=${RESERVE}, new_leads_1h=${NEW1H}, sent_today=${SENT}"
           fi
-          echo "✅ Healthy — reserve=$RESERVE, new_leads_1h=$NEW1H, sent_today=$SENT"
 # ping 1780992379
 # ping 1781001097
 # ping 1781089791

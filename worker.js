@@ -230,14 +230,10 @@ export default {
       return;
     }
 
-    if (cron === '*/30 * * * *') {
+    if (cron === '0 7 * * *') {
+      // 10:00 MSK — one morning report per day
       await call('daily-report', {});
       return;
-    }
-
-    if (cron === '0 6 * * *') {
-      await call('daily-report', {});
-      return; // same handler — daily-report also fires at midnight UTC+3 via */30
     }
   },
 };
