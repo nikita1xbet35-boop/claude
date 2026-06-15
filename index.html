@@ -2151,25 +2151,6 @@
       </div>
     </div>
 
-    <!-- ── Section 1: Service Status ───────────────────────────────────────── -->
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
-      <div style="font-size:12px;font-weight:600;color:var(--text2);font-family:var(--font-mono);letter-spacing:.5px;text-transform:uppercase;margin-bottom:16px;">API / Сервисы</div>
-      <table style="width:100%;border-collapse:collapse;" id="automat-services-table">
-        <thead>
-          <tr style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.4px;text-transform:uppercase;">
-            <th style="text-align:left;padding:0 0 8px 0;font-weight:500;">Сервис</th>
-            <th style="text-align:right;padding:0 40px 8px 0;font-weight:500;">Использовано</th>
-            <th style="text-align:left;padding:0 0 8px 0;font-weight:500;width:180px;">Прогресс</th>
-            <th style="text-align:right;padding:0 0 8px 0;font-weight:500;">%</th>
-            <th style="text-align:right;padding:0 0 8px 8px;font-weight:500;"></th>
-          </tr>
-        </thead>
-        <tbody id="automat-services-body">
-          <tr><td colspan="5" style="color:var(--text3);font-size:12px;font-family:var(--font-mono);padding:12px 0;">Загрузка...</td></tr>
-        </tbody>
-      </table>
-    </div>
-
     <!-- ── Section 2: Today's Activity ────────────────────────────────────── -->
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
@@ -6155,82 +6136,13 @@ async function generateWeeklyReport(){
 //  АВТОМАТ TAB
 // ══════════════════════════════════════════
 
-const SERVICE_DISPLAY_AUTOMAT = {
-  serpapi:    'SerpAPI',
-  groq:       'Groq',
-  gmail_main: 'Gmail (main)',
-  gmail_lp:   'Gmail (lp)',
-  jina:       'Jina',
-};
-
 async function loadAutomatTab() {
   await Promise.allSettled([
-    loadAutomatServices(),
     loadAutomatToday(),
     loadAutomatTrend(),
     loadAutomatErrorLog(),
     loadAutomatKeywords(),
   ]);
-}
-
-// ── Section 1: Service Status ─────────────────────────────────────────────
-async function loadAutomatServices() {
-  const tbody = document.getElementById('automat-services-body');
-  if (!tbody) return;
-
-  try {
-    const { data: services, error } = await sb.from('api_usage').select('*').order('service');
-    if (error) throw error;
-
-    // Master toggle reflects the system_paused flag (master pause),
-    // independent of per-service limit pauses.
-    const pauseBtn  = document.getElementById('automat-pause-btn');
-    if (pauseBtn) {
-      const systemPaused = (services || []).some(s => s.system_paused);
-      if (systemPaused) {
-        pauseBtn.textContent = '⏸ Пауза';
-        pauseBtn.style.background    = 'var(--amber-bg)';
-        pauseBtn.style.borderColor   = 'var(--amber)';
-        pauseBtn.style.color         = 'var(--amber)';
-      } else {
-        pauseBtn.textContent = '🟢 Система работает';
-        pauseBtn.style.background    = 'var(--green-bg)';
-        pauseBtn.style.borderColor   = 'var(--green)';
-        pauseBtn.style.color         = 'var(--green)';
-      }
-    }
-
-    if (!services || services.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text3);font-size:12px;font-family:var(--font-mono);padding:12px 0;">Нет данных</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = services.map(svc => {
-      const pct  = svc.limit_value > 0 ? Math.round(svc.used / svc.limit_value * 100) : 0;
-      const icon = pct >= 100 ? '🔴' : pct >= 80 ? '🟡' : '🟢';
-      const name = SERVICE_DISPLAY_AUTOMAT[svc.service] || svc.service;
-      const barColor = pct >= 100 ? 'var(--red)' : pct >= 80 ? 'var(--amber)' : 'var(--green)';
-      const resumeBtn = svc.paused
-        ? `<button onclick="resumeService('${svc.service}')"
-             style="padding:3px 10px;background:var(--amber-bg);border:1px solid var(--amber);color:var(--amber);font-size:10px;font-family:var(--font-mono);border-radius:5px;cursor:pointer;white-space:nowrap;">
-             Resume
-           </button>`
-        : '';
-      return `<tr style="border-top:1px solid var(--border);">
-        <td style="padding:10px 0;font-size:12px;color:var(--text);font-family:var(--font-body);">${icon} ${name}</td>
-        <td style="padding:10px 40px 10px 0;font-size:11px;color:var(--text2);font-family:var(--font-mono);text-align:right;">${svc.used.toLocaleString()} / ${svc.limit_value.toLocaleString()}</td>
-        <td style="padding:10px 0;">
-          <div style="width:160px;height:5px;background:var(--bg3);border-radius:3px;overflow:hidden;">
-            <div style="width:${Math.min(pct,100)}%;height:100%;background:${barColor};border-radius:3px;transition:width .3s;"></div>
-          </div>
-        </td>
-        <td style="padding:10px 0;font-size:11px;color:var(--text2);font-family:var(--font-mono);text-align:right;">${pct}%</td>
-        <td style="padding:10px 0 10px 16px;text-align:right;">${resumeBtn}</td>
-      </tr>`;
-    }).join('');
-  } catch (e) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);font-size:12px;font-family:var(--font-mono);padding:12px 0;">Ошибка: ${e.message}</td></tr>`;
-  }
 }
 
 // ── Section 2: Today's Activity ───────────────────────────────────────────
@@ -6433,30 +6345,18 @@ async function toggleSystemPause() {
   if (btn) { btn.disabled = true; btn.style.opacity = '.5'; }
 
   try {
-    // Read the master pause flag (system_paused), toggle it on every row
     const { data: sysRow } = await sb.from('api_usage').select('system_paused').eq('service', 'gmail_main').single();
     const newPaused = !(sysRow?.system_paused || false);
-
     const { error } = await sb.from('api_usage').update({ system_paused: newPaused }).neq('service', '___never___');
     if (error) throw error;
-
-    // Reload services to reflect new state
-    await loadAutomatServices();
+    btn.textContent = newPaused ? '⏸ Пауза' : '🟢 Система работает';
+    btn.style.background  = newPaused ? 'var(--amber-bg)' : 'var(--green-bg)';
+    btn.style.borderColor = newPaused ? 'var(--amber)'    : 'var(--green)';
+    btn.style.color       = newPaused ? 'var(--amber)'    : 'var(--green)';
   } catch (e) {
     console.error('toggleSystemPause error:', e);
   } finally {
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-  }
-}
-
-// ── Resume a specific service ─────────────────────────────────────────────
-async function resumeService(service) {
-  try {
-    const { error } = await sb.from('api_usage').update({ used: 0, paused: false }).eq('service', service);
-    if (error) throw error;
-    await loadAutomatServices();
-  } catch (e) {
-    console.error('resumeService error:', e);
   }
 }
 

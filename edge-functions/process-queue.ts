@@ -197,8 +197,10 @@ function buildSubject(leadName: string, leadUrl: string, brand: string): string 
   return `${brandDisplay} × ${sitename} — partnership`;
 }
 
-async function markFailed(item: Record<string, unknown>, errMsg: string): Promise<boolean> {
-  const newRetryCount = ((item.retry_count as number) ?? 0) + 1;
+async function markFailed(item: Record<string, unknown>, errMsg: string, forceSkip = false): Promise<boolean> {
+  // 5xx SMTP errors (550/551/552/553) are permanent rejections — retrying wastes
+  // 6 minutes per item and blocks valid emails behind it in the queue.
+  const newRetryCount = forceSkip ? MAX_RETRIES : ((item.retry_count as number) ?? 0) + 1;
   const permanent     = newRetryCount >= MAX_RETRIES;
   await supabase.from('send_queue').update({
     status:      permanent ? 'skipped' : 'failed',
@@ -426,10 +428,10 @@ Deno.serve(async (req: Request) => {
         // Just mark this item as failed; if credentials are broken,
         // a few items get skipped but the system keeps trying.
         await logError('error', 'process-queue', `send-email failed item ${item.id} to=${lead.contact_email}: ${msg}`, item.lead_id);
-        const permanent = await markFailed(item, msg);
+        // 55x SMTP = permanent rejection (invalid address, mailbox unavailable, etc.)
+        const isPermanentSmtp = /got 5[5-9]\d/.test(msg);
+        const permanent = await markFailed(item, msg, isPermanentSmtp);
         if (permanent) {
-          await sendAlert('warning', 'process-queue',
-            `Item ${item.id} skipped after ${MAX_RETRIES} retries: ${msg}`);
           stats.skipped++;
         } else {
           stats.failed++;
