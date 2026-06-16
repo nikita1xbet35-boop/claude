@@ -76,6 +76,10 @@ jobs:
           q "SELECT count(*) AS total, count(contact_email) AS with_email FROM leads WHERE created_at >= (now() AT TIME ZONE 'UTC' + interval '3 hours')::date - interval '3 hours';"; echo ""
 
           echo ""
+          echo "=== SEND_QUEUE ACTIVITY LAST 30 MIN (by status) ==="
+          q "SELECT status, left(error,80) AS reason, count(*) FROM send_queue WHERE updated_at > now() - interval '30 minutes' GROUP BY 1,2 ORDER BY 3 DESC LIMIT 15;"; echo ""
+
+          echo ""
           echo "=== LAST 10 process-queue RUNS ==="
           q "SELECT created_at, message FROM error_log WHERE service='process-queue' ORDER BY created_at DESC LIMIT 10;"; echo ""
 
