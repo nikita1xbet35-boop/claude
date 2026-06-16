@@ -335,10 +335,20 @@ Deno.serve(async (req: Request) => {
         'betwinner.com','1win.com','parimatch.com','sportybet.com','bet9ja.com','stake.com',
       ]);
       const emailLower = (lead.contact_email || '').toLowerCase();
-      const emailLocal = emailLower.split('@')[0];
-      const emailDomain = emailLower.split('@')[1] || '';
+      const atIdx = emailLower.indexOf('@');
+      const emailLocal = atIdx > -1 ? emailLower.slice(0, atIdx) : '';
+      const emailDomain = atIdx > -1 ? emailLower.slice(atIdx + 1) : '';
       // Malformed: domain used as local part (e.g. site.com.ng@gmail.com)
-      const isMalformed   = /\.(com|net|org|co|info|me|io|news|blog|site|web)\.[a-z]{2,3}$/.test(emailLocal);
+      const isMalformedPattern = /\.(com|net|org|co|info|me|io|news|blog|site|web)\.[a-z]{2,3}$/.test(emailLocal);
+      // RFC 5321: local part must not start/end with dot, have consecutive dots, exceed 64 chars,
+      // or contain chars outside the allowed set. Gmail returns 553-5.1.3 on all of these.
+      const isRfc5321Invalid = !emailLocal || !emailDomain
+        || emailLocal.length > 64
+        || emailLocal.startsWith('.') || emailLocal.endsWith('.')
+        || /\.{2,}/.test(emailLocal)
+        || !/^[\w!#$%&'*+\-/=?^`{|}~.]+$/i.test(emailLocal)
+        || !emailDomain.includes('.');
+      const isMalformed   = isMalformedPattern || isRfc5321Invalid;
       const isPlaceholder = EMAIL_PLACEHOLDERS_PQ.some(p => emailLower.includes(p))
                          || PLACEHOLDER_LOCAL_PQ.has(emailLocal)
                          || JUNK_DOMAINS_PQ.has(emailDomain)
