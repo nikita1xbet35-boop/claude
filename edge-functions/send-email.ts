@@ -177,13 +177,14 @@ Deno.serve(async (req: Request) => {
       { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  // One mailbox (nick.adflow@gmail.com) serves both brands — they differ only by
-  // sender display name. LP uses GMAIL_*_LP if those secrets are set, otherwise it
-  // falls back to the proven-working GMAIL_*_MAIN credentials. This removes the
-  // single point of failure where a missing/stale LP secret silently blocks sends.
+  // One mailbox (nick.adflow@gmail.com) serves both brands — they differ ONLY by
+  // sender display name. Always authenticate with the proven MAIN App Password;
+  // we intentionally ignore GMAIL_*_LP because a stale/regular-password value there
+  // (e.g. a non-app password → Gmail 534 "Application-specific password required")
+  // would silently block every LuckyPari send while 1xBet keeps working.
   const useLp = account === 'lp';
-  const gmailUser = (useLp ? Deno.env.get('GMAIL_USER_LP') : null) || Deno.env.get('GMAIL_USER_MAIN');
-  const gmailPass = (useLp ? Deno.env.get('GMAIL_PASS_LP') : null) || Deno.env.get('GMAIL_PASS_MAIN');
+  const gmailUser = Deno.env.get('GMAIL_USER_MAIN');
+  const gmailPass = Deno.env.get('GMAIL_PASS_MAIN');
 
   if (!gmailUser || !gmailPass) {
     return new Response(JSON.stringify({ error: 'GMAIL_USER_MAIN or GMAIL_PASS_MAIN is not set in Supabase Secrets' }),
