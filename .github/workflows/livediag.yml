@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-16 #6: diagnose slow 1xBet send rate — queue fill vs send)
+# (probe bump 2026-06-16 #7: diagnose lead supply — what are the not_found leads really)
 on:
   workflow_dispatch:
   schedule:
@@ -77,6 +77,21 @@ jobs:
           q "SELECT min(scheduled_at) AS soonest, max(scheduled_at) AS latest, count(*) FROM send_queue WHERE status='pending' AND scheduled_at>now();"; echo ""
           echo "--- generate-queue cadence last 1h ---"
           q "SELECT created_at, level, left(message,160) AS msg FROM error_log WHERE service='generate-queue' AND created_at > now() - interval '1 hour' ORDER BY created_at DESC LIMIT 12;"; echo ""
+
+          echo ""
+          echo "=== LEAD SUPPLY DIAGNOSIS (why not_found backlog) ==="
+          echo "--- all leads by contact_email_type ---"
+          q "SELECT contact_email_type, count(*) FROM leads GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          echo "--- not_found leads: t.me vs website url ---"
+          q "SELECT CASE WHEN url ILIKE '%t.me/%' OR url ILIKE '%telegram.%' THEN 'telegram' WHEN url ILIKE 'http%' THEN 'website' ELSE 'other' END AS kind, count(*) FROM leads WHERE contact_email_type='not_found' GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          echo "--- not_found leads by channel_kind ---"
+          q "SELECT channel_kind, count(*) FROM leads WHERE contact_email_type='not_found' GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          echo "--- sample 20 not_found lead URLs ---"
+          q "SELECT left(url,70) AS url, brand FROM leads WHERE contact_email_type='not_found' ORDER BY created_at DESC LIMIT 20;"; echo ""
+          echo "--- leads WITH email: how was it found (by type) ---"
+          q "SELECT contact_email_type, count(*) FROM leads WHERE contact_email IS NOT NULL GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          echo "--- find-and-queue totals last 24h: found vs saved vs contacts ---"
+          q "SELECT count(*) AS runs, sum((regexp_match(message,'found=([0-9]+)'))[1]::int) AS found, sum((regexp_match(message,'saved=([0-9]+)'))[1]::int) AS saved, sum((regexp_match(message,'contacts=([0-9]+)'))[1]::int) AS contacts FROM error_log WHERE service='find-and-queue' AND created_at > now() - interval '24 hours';"; echo ""
 
           echo ""
           echo "=== API USAGE / LIMITS / PAUSE FLAGS ==="
