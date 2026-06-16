@@ -245,31 +245,73 @@ const clearCookie = () =>
 
 function loginPage(error) {
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AffiliateOS — вход</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>AffiliateOS</title>
 <style>
-  *{box-sizing:border-box}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
     font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e7e9ee}
-  .card{width:320px;max-width:90vw;background:#171a21;border:1px solid #262b35;
-    border-radius:14px;padding:28px 24px;box-shadow:0 10px 40px rgba(0,0,0,.4)}
-  h1{font-size:18px;margin:0 0 4px}
-  p{margin:0 0 20px;color:#8b93a3;font-size:13px}
-  input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #2c323d;
-    background:#0f1115;color:#e7e9ee;font-size:15px;outline:none}
-  input:focus{border-color:#4c8bf5}
-  button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:10px;
-    background:#4c8bf5;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
-  button:hover{background:#3b78e0}
-  .err{color:#ff6b6b;font-size:13px;margin-top:12px;min-height:16px}
+  .card{width:280px;text-align:center}
+  .logo{font-size:38px;margin-bottom:8px}
+  h1{font-size:17px;font-weight:600;margin:0 0 4px}
+  p{margin:0 0 28px;color:#8b93a3;font-size:13px}
+  .pins{display:flex;gap:14px;justify-content:center;margin-bottom:6px}
+  .pin{width:54px;height:62px;border-radius:14px;border:2px solid #2c323d;background:#171a21;
+    color:#e7e9ee;font-size:26px;font-weight:700;text-align:center;outline:none;
+    caret-color:transparent;transition:border-color .15s}
+  .pin:focus{border-color:#4c8bf5;background:#1b2030}
+  .pin.filled{border-color:#3a4050}
+  .pin.shake{animation:shake .3s}
+  @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+  .err{color:#ff6b6b;font-size:13px;height:18px;margin-top:8px;opacity:0;transition:opacity .2s}
+  .err.show{opacity:1}
 </style></head><body>
-<form class="card" method="POST" action="/__auth">
-  <h1>🔒 AffiliateOS</h1>
-  <p>Введите пароль для доступа к панели</p>
-  <input type="password" name="password" placeholder="Пароль" autofocus autocomplete="current-password">
-  <button type="submit">Войти</button>
-  <div class="err">${error ? '❌ Неверный пароль' : ''}</div>
-</form></body></html>`;
+<div class="card">
+  <div class="logo">🔐</div>
+  <h1>AffiliateOS</h1>
+  <p>Введите PIN-код</p>
+  <form id="f" method="POST" action="/__auth">
+    <input type="hidden" name="password" id="pw">
+    <div class="pins">
+      <input class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="1" id="p0">
+      <input class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="1" id="p1">
+      <input class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="1" id="p2">
+      <input class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="1" id="p3">
+    </div>
+    <div class="err${error ? ' show' : ''}" id="err">Неверный PIN</div>
+  </form>
+</div>
+<script>
+  const pins = [0,1,2,3].map(i=>document.getElementById('p'+i));
+  pins[0].focus();
+  pins.forEach((el,i)=>{
+    el.addEventListener('input',e=>{
+      const v = e.target.value.replace(/\D/g,'');
+      el.value = v ? v[0] : '';
+      el.classList.toggle('filled', !!el.value);
+      if(el.value && i < 3) pins[i+1].focus();
+      if(pins.every(p=>p.value)) submit();
+    });
+    el.addEventListener('keydown',e=>{
+      if(e.key==='Backspace' && !el.value && i>0){
+        pins[i-1].value=''; pins[i-1].classList.remove('filled'); pins[i-1].focus();
+      }
+    });
+    el.addEventListener('paste',e=>{
+      e.preventDefault();
+      const d=(e.clipboardData||window.clipboardData).getData('text').replace(/\D/g,'');
+      pins.forEach((p,j)=>{ p.value=d[j]||''; p.classList.toggle('filled',!!p.value); });
+      const next=pins.findIndex(p=>!p.value);
+      (next>-1?pins[next]:pins[3]).focus();
+      if(pins.every(p=>p.value)) submit();
+    });
+  });
+  function submit(){
+    document.getElementById('pw').value=pins.map(p=>p.value).join('');
+    document.getElementById('f').submit();
+  }
+</script>
+</body></html>`;
 }
 
 const htmlResponse = (body, status) =>
