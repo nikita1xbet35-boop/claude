@@ -101,6 +101,24 @@ jobs:
             -d '{}' ; echo ""
 
           echo ""
+          echo "=== LUCKYPARI (LP) OUTREACH STATUS ==="
+          q "SELECT status, count(*) FROM lp_outreach GROUP BY status ORDER BY count DESC;"; echo ""
+          q "SELECT count(*) AS sent_outlook FROM email_log WHERE gmail_account='outlook_lp';"; echo ""
+
+          echo ""
+          echo "=== PROBE: process-queue-lp direct invoke (runs LP send live) ==="
+          curl -s -m 150 -X POST \
+            "https://lxsyrserfuighwxuymgb.supabase.co/functions/v1/process-queue-lp" \
+            -H "Content-Type: application/json" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
+            -d '{}' ; echo ""
+
+          echo ""
+          echo "=== LAST 10 process-queue-lp RUNS ==="
+          q "SELECT created_at, level, left(message,200) AS msg FROM error_log WHERE service='process-queue-lp' ORDER BY created_at DESC LIMIT 10;"; echo ""
+
+          echo ""
           echo "=== NON-INFO ERRORS LAST 12H ==="
           q "SELECT created_at, service, level, left(message, 200) AS msg FROM error_log WHERE level <> 'info' AND created_at > now() - interval '12 hours' ORDER BY created_at DESC LIMIT 15;"; echo ""
 
