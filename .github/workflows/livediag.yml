@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-16 #5: add process-queue info logging + fix send_queue activity query)
+# (probe bump 2026-06-16 #6: diagnose slow 1xBet send rate — queue fill vs send)
 on:
   workflow_dispatch:
   schedule:
@@ -66,6 +66,17 @@ jobs:
           echo ""
           echo "=== FAIL/SKIP REASONS (24h) ==="
           q "SELECT status, error, count(*) FROM send_queue WHERE status IN ('failed','skipped') GROUP BY 1,2 ORDER BY 3 DESC LIMIT 12;"; echo ""
+
+          echo ""
+          echo "=== 1XBET QUEUE DIAGNOSIS (why slow) ==="
+          echo "--- pending: due now vs scheduled in future ---"
+          q "SELECT CASE WHEN scheduled_at <= now() THEN 'due_now' ELSE 'future' END AS bucket, count(*) FROM send_queue WHERE status='pending' GROUP BY 1;"; echo ""
+          echo "--- pending due-now split by has valid email ---"
+          q "SELECT (l.contact_email IS NOT NULL) AS has_email, count(*) FROM send_queue sq LEFT JOIN leads l ON l.id=sq.lead_id WHERE sq.status='pending' AND sq.scheduled_at<=now() GROUP BY 1;"; echo ""
+          echo "--- future pending: earliest scheduled_at (how far out is backlog spread) ---"
+          q "SELECT min(scheduled_at) AS soonest, max(scheduled_at) AS latest, count(*) FROM send_queue WHERE status='pending' AND scheduled_at>now();"; echo ""
+          echo "--- generate-queue cadence last 1h ---"
+          q "SELECT created_at, level, left(message,160) AS msg FROM error_log WHERE service='generate-queue' AND created_at > now() - interval '1 hour' ORDER BY created_at DESC LIMIT 12;"; echo ""
 
           echo ""
           echo "=== API USAGE / LIMITS / PAUSE FLAGS ==="
