@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-16: verify LP sends after Gmail MAIN app-password fix)
+# (probe bump 2026-06-16 #2: re-check LP send cadence — user reports nothing sent)
 on:
   workflow_dispatch:
   schedule:
