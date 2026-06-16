@@ -4,10 +4,10 @@ const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
-const ACCOUNT_DAILY_LIMIT = 200;
+const ACCOUNT_DAILY_LIMIT = 300;
 const BATCH_SIZE          = 10;
 const MAX_RETRIES         = 3;
-const WEEKEND_DAILY_CAP   = 100;
+const WEEKEND_DAILY_CAP   = 200;
 const SEND_DELAY_MS       = 500;
 
 const cors = {
@@ -323,16 +323,30 @@ Deno.serve(async (req: Request) => {
         'microsoft.com','samsung.com','huawei.com','xiaomi.com',
         'baidu.com','aliexpress.com','wordpress.com','wix.com','shopify.com','cloudflare.com',
       ]);
+      // Placeholder/junk domains that never accept mail → guaranteed bounces.
+      const JUNK_DOMAINS_PQ = new Set([
+        'email.com','mydomain.com','yourdomain.com','domain.com','company.com',
+        'yoursite.com','mysite.com','website.com','example.com','test.com',
+      ]);
+      // Betting operators — competitors, not affiliates. Never contact.
+      const COMPETITOR_DOMAINS_PQ = new Set([
+        'linebet.com','paripesa.com','1xbet.com','melbet.com','22bet.com','mostbet.com',
+        'betwinner.com','1win.com','parimatch.com','sportybet.com','bet9ja.com','stake.com',
+      ]);
       const emailLower = (lead.contact_email || '').toLowerCase();
       const emailLocal = emailLower.split('@')[0];
       const emailDomain = emailLower.split('@')[1] || '';
+      // Malformed: domain used as local part (e.g. site.com.ng@gmail.com)
+      const isMalformed   = /\.(com|net|org|co|info|me|io|news|blog|site|web)\.[a-z]{2,3}$/.test(emailLocal);
       const isPlaceholder = EMAIL_PLACEHOLDERS_PQ.some(p => emailLower.includes(p))
-                         || PLACEHOLDER_LOCAL_PQ.has(emailLocal);
-      const isCorpDomain = CORP_EMAIL_DOMAINS_PQ.has(emailDomain);
+                         || PLACEHOLDER_LOCAL_PQ.has(emailLocal)
+                         || JUNK_DOMAINS_PQ.has(emailDomain)
+                         || isMalformed;
+      const isCorpDomain  = CORP_EMAIL_DOMAINS_PQ.has(emailDomain) || COMPETITOR_DOMAINS_PQ.has(emailDomain);
 
       if (!lead.contact_email || isPlaceholder || isCorpDomain) {
-        const reason = isCorpDomain ? `corporate domain (not an affiliate): ${lead.contact_email}`
-          : isPlaceholder ? `placeholder email: ${lead.contact_email}` : 'no contact email';
+        const reason = isCorpDomain ? `corporate/competitor domain (not an affiliate): ${lead.contact_email}`
+          : isPlaceholder ? `placeholder/malformed email: ${lead.contact_email}` : 'no contact email';
         await supabase.from('send_queue')
           .update({ status: 'skipped', error: reason })
           .eq('id', item.id);

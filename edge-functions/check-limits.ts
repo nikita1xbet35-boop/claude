@@ -84,16 +84,21 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      // Only Gmail send-quota matters for alerting. The free/best-effort services
+      // (jina, groq, serpapi) self-heal — Jina is just a fallback page-fetcher, so
+      // hitting its quota never stops the pipeline. We never pause anything.
+      const isSendQuota = svc.service === 'gmail_main' || svc.service === 'gmail_lp';
+      if (!isSendQuota) continue;
+
       // ── Critical: 100%+ ────────────────────────────────────────────────────
       if (pct >= 1.0 && !svc.alert_sent_critical) {
         await sendAlert(
           'critical',
           name,
-          `Limit exhausted (${svc.used}/${svc.limit_value} ${svc.reset_period}). Service paused.`
+          `Daily send quota reached (${svc.used}/${svc.limit_value}).`
         );
         await supabase.from('api_usage').update({
           alert_sent_critical: true,
-          paused:              true,
           updated_at:          now.toISOString()
         }).eq('service', svc.service);
 
@@ -105,7 +110,7 @@ Deno.serve(async (req: Request) => {
         await sendAlert(
           'warning',
           name,
-          `80% of ${svc.reset_period} limit used (${svc.used}/${svc.limit_value}). ~${remaining} remaining.`
+          `80% of daily send quota used (${svc.used}/${svc.limit_value}). ~${remaining} remaining.`
         );
         await supabase.from('api_usage').update({
           alert_sent_warning: true,

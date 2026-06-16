@@ -129,6 +129,7 @@ const GLOBAL_SKIP = new Set([
   'draftkings.com','fanduel.com','betonline.com','bovada.lv','mybookie.ag',
   'melbet.com','22bet.com','mostbet.com','pinup.casino','pin-up.casino',
   'bet9ja.com','1win.com','1win.pro','betwinner.com','bk8.com','betwinner.ng',
+  'linebet.com','paripesa.com','paripesa.ng','betano.com','1xbet.ng',
   'stake.com','mystake.com','rollbit.com','bc.game','cloudbet.com',
   'bitstarz.com','bitcasino.io','mbitcasino.com','rocketpot.io','n1casino.com',
   'casinodays.com','jackpotcity.com','spinaway.com','casumo.com','leovegas.com',

@@ -54,6 +54,16 @@ const CORP_EMAIL_DOMAINS = new Set([
   'microsoft.com','samsung.com','huawei.com','xiaomi.com',
   'baidu.com','aliexpress.com','wordpress.com','wix.com','shopify.com','cloudflare.com',
 ]);
+// Placeholder/junk domains that never accept mail → guaranteed bounces.
+const JUNK_DOMAINS = new Set([
+  'email.com','mydomain.com','yourdomain.com','domain.com','company.com',
+  'yoursite.com','mysite.com','website.com','example.com','test.com',
+]);
+// Betting operators — competitors, not affiliates. Never contact.
+const COMPETITOR_DOMAINS = new Set([
+  'linebet.com','paripesa.com','1xbet.com','melbet.com','22bet.com','mostbet.com',
+  'betwinner.com','1win.com','parimatch.com','sportybet.com','bet9ja.com','stake.com',
+]);
 
 function isSendableEmail(e: string | null): boolean {
   if (!e) return false;
@@ -64,6 +74,10 @@ function isSendableEmail(e: string | null): boolean {
   const domain = l.split('@')[1] || '';
   if (PLACEHOLDER_LOCAL.has(local))          return false;
   if (CORP_EMAIL_DOMAINS.has(domain))        return false;
+  if (JUNK_DOMAINS.has(domain))              return false;
+  if (COMPETITOR_DOMAINS.has(domain))        return false;
+  // Malformed: domain used as local part (e.g. site.com.ng@gmail.com)
+  if (/\.(com|net|org|co|info|me|io|news|blog|site|web)\.[a-z]{2,3}$/.test(local)) return false;
   return EMAIL_RE.test(e);
 }
 
