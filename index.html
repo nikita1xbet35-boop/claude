@@ -6200,10 +6200,10 @@ async function loadAutomatToday() {
     const bounces       = emails.filter(e => e.bounced).length;
     const bounceRate    = emailsSent > 0 ? ((bounces / emailsSent) * 100).toFixed(1) : '0.0';
 
-    // Daily target (200 weekday / 100 weekend)
+    // Daily target (300 weekday / 200 weekend)
     const dayOfWeek     = nowGMT3.getUTCDay();
     const isWeekendNow  = dayOfWeek === 0 || dayOfWeek === 6;
-    const dailyTarget   = isWeekendNow ? 100 : 200;
+    const dailyTarget   = isWeekendNow ? 200 : 300;
     const pct           = Math.min(100, Math.round((emailsSent / dailyTarget) * 100));
     const sentLabel     = `${emailsSent}/${dailyTarget} (${pct}%)`;
 
