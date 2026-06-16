@@ -434,6 +434,14 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
+      // Telegram channels never expose emails — skip immediately
+      if (/^https?:\/\/(www\.)?t\.me\//i.test(url)) {
+        await supabase.from('leads')
+          .update({ contact_email_type: 'not_found' }).eq('id', lead.id);
+        stats.processed++; stats.not_found++;
+        continue;
+      }
+
       let result: ContactResult | null = null;
       try {
         result = await extractContacts(url);

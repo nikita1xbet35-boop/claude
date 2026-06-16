@@ -17,7 +17,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-const WEEKDAY_TARGET = 200;
+const WEEKDAY_TARGET = 250;
 const WEEKEND_TARGET = 100;
 // 30–90 s cadence gives ~360–1080 slots in the 09-18 window.
 // process-queue runs every 2 min and picks up whatever is due, so dense
