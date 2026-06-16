@@ -14,10 +14,11 @@ const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
-// 100/day × 12 working hours → max 10/hour keeps sends spread all day
+// 100/day over 12 working hours → ~8-9/hour. Cron fires every 7 min (~9x/hour)
+// and we send ONE per tick, so messages go out ~7 min apart with no bursts.
 const DAILY_LIMIT   = 100;
-const HOURLY_LIMIT  = 10;
-const BATCH_SIZE    = 3;
+const HOURLY_LIMIT  = 9;
+const BATCH_SIZE    = 1;
 const MAX_RETRIES   = 3;
 const SEND_DELAY_MS = 1500;
 

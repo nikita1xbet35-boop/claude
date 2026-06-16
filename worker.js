@@ -236,8 +236,9 @@ export default {
       return;
     }
 
-    if (cron === '*/4 * * * *') {
-      // LuckyPari outreach — separate brand, separate Outlook account, own quota
+    if (cron === '*/7 * * * *') {
+      // LuckyPari outreach — separate brand, own quota. Fires ~9x/hour and sends
+      // one email per tick, spreading 100/day evenly across working hours (no bursts).
       await call('process-queue-lp', {});
       return;
     }
