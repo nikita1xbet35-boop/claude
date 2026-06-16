@@ -206,16 +206,16 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      // Dedup — never send twice to the same address (checks email_log too for cross-brand safety)
-      const [{ count: lpSent }, { count: mainSent }] = await Promise.all([
-        supabase.from('lp_outreach').select('id', { count: 'exact', head: true })
-          .eq('email', item.email).eq('status', 'sent'),
-        supabase.from('email_log').select('id', { count: 'exact', head: true })
-          .eq('email', item.email),
-      ]);
-      if ((lpSent ?? 0) > 0 || (mainSent ?? 0) > 0) {
+      // Dedup — never send twice to the same address from LuckyPari itself.
+      // NOTE: cross-brand dedup (email_log) is intentionally NOT applied here.
+      // The LP base overlaps almost entirely with addresses 1xBet already mailed,
+      // and LuckyPari is a separate brand/offer, so we DO contact them again.
+      const { count: lpSent } = await supabase
+        .from('lp_outreach').select('id', { count: 'exact', head: true })
+        .eq('email', item.email).eq('status', 'sent');
+      if ((lpSent ?? 0) > 0) {
         await supabase.from('lp_outreach')
-          .update({ status: 'skipped', error: 'duplicate: already sent' }).eq('id', item.id);
+          .update({ status: 'skipped', error: 'duplicate: already sent by LP' }).eq('id', item.id);
         stats.skipped++;
         continue;
       }
