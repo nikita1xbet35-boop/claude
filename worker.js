@@ -12,6 +12,13 @@
 //
 // Env vars (optional — sane fallbacks below): SUPABASE_URL, SUPABASE_ANON_KEY
 // Secrets updated: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+//
+// Dashboard password gate (optional):
+//   DASHBOARD_PASSWORD — set this secret to require a password before the
+//     dashboard loads. While UNSET the gate is disabled (dashboard stays open),
+//     so deploying this code never locks you out before you configure it.
+//   SESSION_SECRET     — optional HMAC key for signing session cookies; falls
+//     back to DASHBOARD_PASSWORD when absent.
 
 const DEFAULT_SUPABASE_URL = 'https://lxsyrserfuighwxuymgb.supabase.co';
 const DEFAULT_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
@@ -158,6 +165,146 @@ async function handleTgUpdate(update, env) {
   await sendTg(chatId, `✅ Добавлено в pipeline\n\n🔗 ${url}\n📂 ${partner_type}\n🎯 ${brand}\n🌍 ${geo || '—'}`, env);
 }
 
+// ── Dashboard password gate ─────────────────────────────────────────────────
+// Login page + signed session cookie with a 3h sliding window: every authed
+// request refreshes the cookie, so 3h of inactivity (or a new device/browser
+// with no cookie) forces a fresh password entry.
+
+const SESSION_TTL_MS = 3 * 60 * 60 * 1000; // 3 hours of inactivity
+const COOKIE_NAME = 'aos_session';
+
+function authSecret(env) {
+  return env.SESSION_SECRET || env.DASHBOARD_PASSWORD || '';
+}
+
+// constant-time string compare (avoids password/signature timing leaks)
+function safeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function b64urlEncode(bytes) {
+  const arr = new Uint8Array(bytes);
+  let bin = '';
+  for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function b64urlDecode(str) {
+  str = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4) str += '=';
+  const bin = atob(str);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+async function hmac(secret, data) {
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data));
+  return b64urlEncode(sig);
+}
+
+async function makeSession(env) {
+  const payload = b64urlEncode(new TextEncoder().encode(JSON.stringify({ exp: Date.now() + SESSION_TTL_MS })));
+  return `${payload}.${await hmac(authSecret(env), payload)}`;
+}
+
+async function verifySession(token, env) {
+  if (!token) return false;
+  const dot = token.lastIndexOf('.');
+  if (dot < 0) return false;
+  const payload = token.slice(0, dot);
+  if (!safeEqual(token.slice(dot + 1), await hmac(authSecret(env), payload))) return false;
+  try {
+    const { exp } = JSON.parse(new TextDecoder().decode(b64urlDecode(payload)));
+    return typeof exp === 'number' && Date.now() < exp;
+  } catch {
+    return false;
+  }
+}
+
+function getCookie(request, name) {
+  const header = request.headers.get('Cookie') || '';
+  for (const part of header.split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return v.join('=');
+  }
+  return null;
+}
+
+const sessionCookie = token =>
+  `${COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_MS / 1000}`;
+const clearCookie = () =>
+  `${COOKIE_NAME}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+
+function loginPage(error) {
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AffiliateOS — вход</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e7e9ee}
+  .card{width:320px;max-width:90vw;background:#171a21;border:1px solid #262b35;
+    border-radius:14px;padding:28px 24px;box-shadow:0 10px 40px rgba(0,0,0,.4)}
+  h1{font-size:18px;margin:0 0 4px}
+  p{margin:0 0 20px;color:#8b93a3;font-size:13px}
+  input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #2c323d;
+    background:#0f1115;color:#e7e9ee;font-size:15px;outline:none}
+  input:focus{border-color:#4c8bf5}
+  button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:10px;
+    background:#4c8bf5;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+  button:hover{background:#3b78e0}
+  .err{color:#ff6b6b;font-size:13px;margin-top:12px;min-height:16px}
+</style></head><body>
+<form class="card" method="POST" action="/__auth">
+  <h1>🔒 AffiliateOS</h1>
+  <p>Введите пароль для доступа к панели</p>
+  <input type="password" name="password" placeholder="Пароль" autofocus autocomplete="current-password">
+  <button type="submit">Войти</button>
+  <div class="err">${error ? '❌ Неверный пароль' : ''}</div>
+</form></body></html>`;
+}
+
+const htmlResponse = (body, status) =>
+  new Response(body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+
+// Returns null when the request may proceed to the assets, or a Response (login
+// page / redirect) when the gate intercepts it. Disabled while no password set.
+async function gate(request, env) {
+  const password = env.DASHBOARD_PASSWORD;
+  if (!password) return null; // gate disabled until the secret is configured
+
+  const url = new URL(request.url);
+
+  if (request.method === 'POST' && url.pathname === '/__auth') {
+    const form = await request.formData();
+    if (safeEqual(String(form.get('password') || ''), password)) {
+      return new Response(null, {
+        status: 303,
+        headers: { 'Location': '/', 'Set-Cookie': sessionCookie(await makeSession(env)) },
+      });
+    }
+    return htmlResponse(loginPage(true), 401);
+  }
+
+  if (url.pathname === '/__logout') {
+    return new Response(null, { status: 303, headers: { 'Location': '/', 'Set-Cookie': clearCookie() } });
+  }
+
+  if (!(await verifySession(getCookie(request, COOKIE_NAME), env))) {
+    return htmlResponse(loginPage(false), 200);
+  }
+
+  return null; // authenticated — let the asset serve (cookie refreshed by caller)
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export default {
@@ -175,7 +322,21 @@ export default {
       return new Response('OK');
     }
 
-    return env.ASSETS.fetch(request);
+    // Password gate — intercepts with login page / redirect, or returns null
+    // to allow the request through. No-op until DASHBOARD_PASSWORD is set.
+    const gated = await gate(request, env);
+    if (gated) return gated;
+
+    const assetRes = await env.ASSETS.fetch(request);
+
+    // Refresh the sliding session on every authed asset hit (keeps the 3h
+    // inactivity window rolling). Only when the gate is active.
+    if (env.DASHBOARD_PASSWORD) {
+      const res = new Response(assetRes.body, assetRes);
+      res.headers.append('Set-Cookie', sessionCookie(await makeSession(env)));
+      return res;
+    }
+    return assetRes;
   },
 
   async scheduled(event, env, ctx) {
