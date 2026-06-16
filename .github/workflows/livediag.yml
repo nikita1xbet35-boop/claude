@@ -104,6 +104,12 @@ jobs:
           echo "=== LUCKYPARI (LP) OUTREACH STATUS ==="
           q "SELECT status, count(*) FROM lp_outreach GROUP BY status ORDER BY count DESC;"; echo ""
           q "SELECT count(*) AS sent_outlook FROM email_log WHERE gmail_account='outlook_lp';"; echo ""
+          echo "--- LP skip/fail reasons ---"
+          q "SELECT status, left(error,60) AS reason, count(*) FROM lp_outreach WHERE status IN ('skipped','failed') GROUP BY 1,2 ORDER BY 3 DESC LIMIT 12;"; echo ""
+          echo "--- LP base overlap with email_log (already-contacted addresses) ---"
+          q "SELECT count(*) AS overlap FROM lp_outreach lp WHERE EXISTS (SELECT 1 FROM email_log e WHERE lower(e.email)=lower(lp.email));"; echo ""
+          echo "--- LP truly-sendable pending (no email_log dupe) ---"
+          q "SELECT count(*) AS sendable FROM lp_outreach lp WHERE lp.status='pending' AND NOT EXISTS (SELECT 1 FROM email_log e WHERE lower(e.email)=lower(lp.email));"; echo ""
 
           echo ""
           echo "=== PROBE: process-queue-lp direct invoke (runs LP send live) ==="
