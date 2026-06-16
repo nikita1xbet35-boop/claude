@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-16 #4: verify 1xBet 553 fix post-deploy)
+# (probe bump 2026-06-16 #5: add process-queue info logging + fix send_queue activity query)
 on:
   workflow_dispatch:
   schedule:
@@ -77,7 +77,7 @@ jobs:
 
           echo ""
           echo "=== SEND_QUEUE ACTIVITY LAST 30 MIN (by status) ==="
-          q "SELECT status, left(error,80) AS reason, count(*) FROM send_queue WHERE updated_at > now() - interval '30 minutes' GROUP BY 1,2 ORDER BY 3 DESC LIMIT 15;"; echo ""
+          q "SELECT status, left(error,80) AS reason, count(*) FROM send_queue WHERE scheduled_at > now() - interval '30 minutes' OR sent_at > now() - interval '30 minutes' GROUP BY 1,2 ORDER BY 3 DESC LIMIT 15;"; echo ""
 
           echo ""
           echo "=== LAST 10 process-queue RUNS ==="

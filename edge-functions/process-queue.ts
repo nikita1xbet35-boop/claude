@@ -468,6 +468,10 @@ Deno.serve(async (req: Request) => {
 
     if (stats.reason === '') delete (stats as any).reason;
 
+    const summaryParts = [`sent=${stats.sent}`, `failed=${stats.failed}`, `skipped=${stats.skipped}`];
+    if (stats.reason) summaryParts.push(`reason=${stats.reason}`);
+    await logError('info', 'process-queue', summaryParts.join(' '));
+
     return new Response(JSON.stringify(stats), {
       headers: { ...cors, 'Content-Type': 'application/json' },
     });
