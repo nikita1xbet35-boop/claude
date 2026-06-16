@@ -103,7 +103,7 @@ jobs:
           echo ""
           echo "=== LUCKYPARI (LP) OUTREACH STATUS ==="
           q "SELECT status, count(*) FROM lp_outreach GROUP BY status ORDER BY count DESC;"; echo ""
-          q "SELECT count(*) AS sent_outlook FROM email_log WHERE gmail_account='outlook_lp';"; echo ""
+          q "SELECT count(*) AS sent_lp FROM email_log WHERE gmail_account IN ('gmail_lp','outlook_lp');"; echo ""
           echo "--- LP skip/fail reasons ---"
           q "SELECT status, left(error,60) AS reason, count(*) FROM lp_outreach WHERE status IN ('skipped','failed') GROUP BY 1,2 ORDER BY 3 DESC LIMIT 12;"; echo ""
           echo "--- LP base overlap with email_log (already-contacted addresses) ---"
@@ -121,7 +121,7 @@ jobs:
             -d '{}' ; echo ""
 
           echo ""
-          echo "--- LP fail reasons AFTER probe (fresh Outlook errors) ---"
+          echo "--- LP fail reasons AFTER probe (fresh Gmail errors) ---"
           q "SELECT status, left(error,120) AS reason, count(*) FROM lp_outreach WHERE status IN ('skipped','failed') GROUP BY 1,2 ORDER BY 3 DESC LIMIT 12;"; echo ""
 
           echo ""

@@ -1,9 +1,10 @@
 // Supabase Edge Function: process-queue-lp
-// LuckyPari outreach — reads lp_outreach table, sends via Outlook (send-email-outlook).
+// LuckyPari outreach — reads lp_outreach table, sends via Gmail (send-email, account='lp').
 // Completely separate from the 1xBet pipeline: own daily quota, own template, own log.
+// Uses the dedicated LuckyPari Gmail (nick.adflow@gmail.com via GMAIL_USER_LP/GMAIL_PASS_LP).
 //
 // Working hours: 08:00–20:00 GMT+3 (12h window)
-// Daily cap: 50 emails/day, spread across all 12h via hourly limit (≤5/hour)
+// Daily cap: 100 emails/day, spread across all 12h via hourly limit (≤10/hour)
 //
 // Deploy: supabase functions deploy process-queue-lp --no-verify-jwt
 
@@ -13,10 +14,11 @@ const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
-// 50/day × 12 working hours → max 5/hour keeps sends spread all day
-const DAILY_LIMIT   = 50;
-const HOURLY_LIMIT  = 5;
-const BATCH_SIZE    = 3;
+// 100/day over 12 working hours → ~8-9/hour. Cron fires every 7 min (~9x/hour)
+// and we send ONE per tick, so messages go out ~7 min apart with no bursts.
+const DAILY_LIMIT   = 100;
+const HOURLY_LIMIT  = 9;
+const BATCH_SIZE    = 1;
 const MAX_RETRIES   = 3;
 const SEND_DELAY_MS = 1500;
 
@@ -225,7 +227,7 @@ Deno.serve(async (req: Request) => {
 
       let result: { ok: boolean; data: Record<string, unknown> };
       try {
-        result = await callFunction('send-email-outlook', { to: item.email, subject, body }) as typeof result;
+        result = await callFunction('send-email', { to: item.email, subject, body, account: 'lp' }) as typeof result;
       } catch (e: any) {
         const msg = `Network error: ${e.message}`;
         const newRetry = (item.retry_count ?? 0) + 1;
@@ -248,7 +250,7 @@ Deno.serve(async (req: Request) => {
           email:         item.email,
           brand:         'luckypari',
           subject,
-          gmail_account: 'outlook_lp',
+          gmail_account: 'gmail_lp',
           sent_at:       sentAt,
           bounced:       false,
         }]);

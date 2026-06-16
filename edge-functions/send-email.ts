@@ -177,22 +177,25 @@ Deno.serve(async (req: Request) => {
       { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  // LP account disabled — always use main credentials regardless of `account` param
-  const gmailUser = Deno.env.get('GMAIL_USER_MAIN');
-  const gmailPass = Deno.env.get('GMAIL_PASS_MAIN');
+  // Route by account: 'lp' → LuckyPari Gmail (nick.adflow@gmail.com), else → main 1xBet Gmail
+  const useLp = account === 'lp';
+  const userSecret = useLp ? 'GMAIL_USER_LP' : 'GMAIL_USER_MAIN';
+  const passSecret = useLp ? 'GMAIL_PASS_LP' : 'GMAIL_PASS_MAIN';
+  const gmailUser = Deno.env.get(userSecret);
+  const gmailPass = Deno.env.get(passSecret);
 
   if (!gmailUser || !gmailPass) {
-    return new Response(JSON.stringify({ error: 'GMAIL_USER_MAIN or GMAIL_PASS_MAIN is not set in Supabase Secrets' }),
+    return new Response(JSON.stringify({ error: `${userSecret} or ${passSecret} is not set in Supabase Secrets` }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
   if (gmailPass === 'default' || gmailPass.length < 8) {
     return new Response(JSON.stringify({
-      error: `GMAIL_PASS_MAIN looks like a placeholder ("${gmailPass.slice(0,6)}..."). Set a real Gmail App Password in Supabase Secrets.`,
+      error: `${passSecret} looks like a placeholder ("${gmailPass.slice(0,6)}..."). Set a real Gmail App Password in Supabase Secrets.`,
     }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  const senderName = 'Nick - 1xPartners';
+  const senderName = useLp ? 'Nick - LuckyPari Partners' : 'Nick - 1xPartners';
 
   try {
     await smtpSend({
