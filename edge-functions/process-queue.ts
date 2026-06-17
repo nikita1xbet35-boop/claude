@@ -363,6 +363,11 @@ Deno.serve(async (req: Request) => {
           .eq('id', item.id);
         if (isCorpDomain) {
           await supabase.from('leads').update({ stage: 'excluded' }).eq('id', lead.id);
+        } else if (isPlaceholder) {
+          // Null out bad email so generate-queue stops re-queuing this lead
+          await supabase.from('leads')
+            .update({ contact_email: null, contact_email_type: 'not_found' })
+            .eq('id', lead.id);
         }
         stats.skipped++;
         continue;

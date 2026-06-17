@@ -107,6 +107,32 @@ const DEFAULT_PRESETS: Record<string, Preset[]> = {
   'luckypari': [],
 };
 
+// Cities per preset — appended to keywords on rotation so we surface local affiliate sites
+// that don't appear in country-level top results (which are dominated by operators).
+const PRESET_CITIES: Record<string, string[]> = {
+  '1xb-ng': ['lagos', 'abuja', 'kano', 'port harcourt'],
+  '1xb-ke': ['nairobi', 'mombasa', 'kisumu'],
+  '1xb-gh': ['accra', 'kumasi', 'takoradi'],
+  '1xb-kg': ['bishkek', 'almaty', 'tashkent', 'astana'],
+  '1xb-my': ['kuala lumpur', 'johor bahru', 'penang'],
+  '1xb-ph': ['manila', 'cebu', 'davao', 'quezon city'],
+  '1xb-np': ['kathmandu', 'pokhara', 'lalitpur'],
+  '1xb-pk': ['karachi', 'lahore', 'islamabad', 'rawalpindi'],
+  '1xb-in': ['mumbai', 'delhi', 'bengaluru', 'chennai', 'kolkata'],
+  '1xb-bd': ['dhaka', 'chittagong', 'sylhet'],
+  '1xb-ar': ['buenos aires', 'cordoba', 'rosario'],
+  '1xb-cl': ['santiago', 'valparaiso', 'concepcion'],
+  '1xb-ci': ['abidjan', 'bouake', 'yamoussoukro'],
+  '1xb-bf': ['ouagadougou', 'bobo-dioulasso'],
+  '1xb-sn': ['dakar', 'thies', 'saint-louis'],
+  '1xb-cm': ['douala', 'yaounde', 'bafoussam'],
+  '1xb-ma': ['casablanca', 'rabat', 'marrakech', 'fes'],
+  '1xb-za': ['johannesburg', 'cape town', 'durban', 'pretoria'],
+  '1xb-vn': ['hanoi', 'ho chi minh', 'da nang'],
+  '1xb-mm': ['yangon', 'mandalay'],
+  '1xb-agency': [], // global — no city variants
+};
+
 // Domains that are clearly not affiliate targets
 const GLOBAL_SKIP = new Set([
   // Social / general
@@ -262,6 +288,46 @@ function extractDataAttrs(html: string): string[] {
   return found;
 }
 
+// ── DDG HTML parsing helpers ─────────────────────────────────────────────
+
+function extractVqd(html: string): string {
+  // Hidden input: <input ... name="vqd" value="4-...">
+  const m1 = html.match(/name=["']vqd["'][^>]*value=["']([^"']+)["']/i)
+    || html.match(/value=["']([^"']+)["'][^>]*name=["']vqd["']/i);
+  if (m1) return m1[1];
+  // JS assignment: vqd='4-...' or vqd: "4-..."
+  const m2 = html.match(/vqd\s*[=:]\s*['"]([^'"]+)['"]/);
+  if (m2) return m2[1];
+  return '';
+}
+
+function parseDdgHtml(
+  html: string, num: number,
+): Array<{ link: string; title: string; snippet: string }> {
+  const results: Array<{ link: string; title: string; snippet: string }> = [];
+  if (!html) return results;
+  const linkRe  = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const snippRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|span|div)>/gi;
+  const links: Array<{ url: string; title: string }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = linkRe.exec(html)) !== null && links.length < num * 2) {
+    const rawHref = m[1];
+    const title   = m[2].replace(/<[^>]+>/g, '').trim();
+    let url = rawHref;
+    const uddg = rawHref.match(/[?&]uddg=([^&]+)/)?.[1];
+    if (uddg) url = decodeURIComponent(uddg);
+    if (url.startsWith('http') && !url.includes('duckduckgo.com')) links.push({ url, title });
+  }
+  const snippets: string[] = [];
+  while ((m = snippRe.exec(html)) !== null) {
+    snippets.push(m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+  }
+  for (let i = 0; i < Math.min(links.length, num); i++) {
+    results.push({ link: links[i].url, title: links[i].title, snippet: snippets[i] || '' });
+  }
+  return results;
+}
+
 function stripHtml(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -274,52 +340,52 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-/** Search DuckDuckGo HTML — free, no key required.
- *  offset: 0 = page 1, 30 = page 2, 60 = page 3, etc. (DDG s= param) */
+/** Search DuckDuckGo HTML.
+ *  page=1: plain GET. page=2/3: GET page 1 first (to extract vqd token),
+ *  then POST to the proper paginated endpoint so we really get page 2/3. */
 async function searchDuckDuckGo(
-  query: string, num: number, offset = 0,
+  query: string, num: number, page = 1,
 ): Promise<Array<{ link: string; title: string; snippet: string }>> {
-  const qs = offset > 0
-    ? `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&s=${offset}&dc=${offset + 1}`
-    : `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-  const res = await fetch(qs,
-    {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AffiliateOS/1.0)', 'Accept': 'text/html' },
+  const UA = 'Mozilla/5.0 (compatible; AffiliateOS/1.0)';
+  const baseUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+
+  // Always fetch page 1 — needed for vqd token and as fallback
+  let html1 = '';
+  try {
+    const res = await fetch(baseUrl,
+      { headers: { 'User-Agent': UA, 'Accept': 'text/html' }, signal: AbortSignal.timeout(12_000) });
+    if (res.ok) html1 = await res.text();
+  } catch (_) {}
+
+  if (page === 1 || !html1) return parseDdgHtml(html1, num);
+
+  // Extract vqd — DDG requires it for POST pagination
+  const vqd = extractVqd(html1);
+  if (!vqd) return parseDdgHtml(html1, num); // can't paginate; return page 1
+
+  const offset = (page - 1) * 30;
+  try {
+    const body = new URLSearchParams({
+      q: query, s: String(offset), dc: String(offset + 1),
+      v: 'l', o: 'json', api: '/d.js', nextParams: '', vqd, kl: '',
+    });
+    const res = await fetch('https://html.duckduckgo.com/html/', {
+      method: 'POST',
+      headers: {
+        'User-Agent': UA,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'text/html',
+        'Referer': 'https://duckduckgo.com/',
+      },
+      body: body.toString(),
       signal: AbortSignal.timeout(12_000),
-    },
-  );
-  if (!res.ok) return [];
-  const html = await res.text();
-
-  const results: Array<{ link: string; title: string; snippet: string }> = [];
-
-  // DDG HTML: result links are <a class="result__a" href="/l/?uddg=<encoded>&...">Title</a>
-  const linkRe  = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  const snippRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|span|div)>/gi;
-
-  const links: Array<{ url: string; title: string }> = [];
-  let m: RegExpExecArray | null;
-  while ((m = linkRe.exec(html)) !== null && links.length < num * 2) {
-    const rawHref = m[1];
-    const title   = m[2].replace(/<[^>]+>/g, '').trim();
-    let url = rawHref;
-    // Decode the actual URL from the DDG redirect wrapper
-    const uddg = rawHref.match(/[?&]uddg=([^&]+)/)?.[1];
-    if (uddg) url = decodeURIComponent(uddg);
-    if (url.startsWith('http') && !url.includes('duckduckgo.com')) {
-      links.push({ url, title });
-    }
-  }
-
-  const snippets: string[] = [];
-  while ((m = snippRe.exec(html)) !== null) {
-    snippets.push(m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
-  }
-
-  for (let i = 0; i < Math.min(links.length, num); i++) {
-    results.push({ link: links[i].url, title: links[i].title, snippet: snippets[i] || '' });
-  }
-  return results;
+    });
+    if (!res.ok) return parseDdgHtml(html1, num);
+    const html2 = await res.text();
+    const paged = parseDdgHtml(html2, num);
+    // If POST returned garbage (<3 results), fall back to page 1
+    return paged.length >= 3 ? paged : parseDdgHtml(html1, num);
+  } catch (_) { return parseDdgHtml(html1, num); }
 }
 
 /** Extract the footer section of a page (last 20% of HTML) for targeted email scanning */
@@ -717,13 +783,19 @@ Deno.serve(async (req: Request) => {
     );
 
     // 4. Run ALL keyword searches in PARALLEL on DDG.
-    //    DDG paginates through pages 1-5 (offset 0/30/60/90/120) to surface
-    //    fresh sites beyond the exhausted first page.
-    const DDG_OFFSET = (slotIndex % 5) * 30;
+    //    visitNum = how many full preset-cycles have passed for this preset.
+    //    Page cycles 1→2→3 per visit. City rotates after every 3 visits (full page cycle).
+    //    This means: base keywords × pages 1-3, then city-A × pages 1-3, city-B × pages 1-3…
+    //    so every run hits a genuinely different slice of results.
+    const visitNum   = Math.floor(slotIndex / (BRANDS.length * allPresets.length));
+    const DDG_PAGE   = (visitNum % 3) + 1; // 1, 2, 3 cycling per visit
+    const cityList   = PRESET_CITIES[preset.id] || [];
+    const cityIdx    = Math.floor(visitNum / 3) % (cityList.length + 1); // +1 for base (no city)
+    const cityAppend = cityIdx < cityList.length ? ' ' + cityList[cityIdx] : '';
 
     const serpBatches = await Promise.all(
       keywords.map(kw =>
-        searchDuckDuckGo(`${kw} ${DDG_MINUS}`, RESULTS_PER_KW, DDG_OFFSET)
+        searchDuckDuckGo(`${kw}${cityAppend} ${DDG_MINUS}`, RESULTS_PER_KW, DDG_PAGE)
           .then(r => { stats.keywords_run++; return { kw, results: r }; })
           .catch(e => { stats.errors.push(`DDG "${kw}": ${e.message}`); return { kw, results: [] }; }),
       ),
@@ -842,7 +914,7 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'find-and-queue',
-      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} page=${DDG_OFFSET/30+1} `
+      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} page=${DDG_PAGE}${cityAppend ? ` city="${cityAppend.trim()}"` : ''} `
         + `found=${stats.found} analyzed=${stats.analyzed} `
         + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
         + `saved=${stats.saved} contacts=${stats.contacts} groqCalls=${groqCount}`

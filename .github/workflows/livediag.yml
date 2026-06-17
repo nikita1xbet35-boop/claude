@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-16 #7: diagnose lead supply — what are the not_found leads really)
+# (probe bump 2026-06-17 #8: fresh diagnostics)
 on:
   workflow_dispatch:
   schedule:
