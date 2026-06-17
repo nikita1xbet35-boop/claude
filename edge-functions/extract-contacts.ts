@@ -45,7 +45,11 @@ const DISPOSABLE   = ['mailinator.com', 'guerrillamail.com', '10minutemail.com',
 function isMalformedLocalPart(e: string): boolean {
   // Catches scraped junk like "thenews.com.my@gmail.com" — domain used as local part.
   const local = e.split('@')[0].toLowerCase();
-  return /\.(com|net|org|co|info|me|io|news|blog|site|web)\.[a-z]{2,3}$/.test(local);
+  if (/\.(com|net|org|co|info|me|io|news|blog|site|web)\.[a-z]{2,3}$/.test(local)) return true;
+  // RFC 5321: local part must not start/end with a dot or contain consecutive
+  // dots. Catches website placeholders scraped literally like "...@gmail.com".
+  if (/^\.|\.$|\.\./.test(local)) return true;
+  return false;
 }
 function isValidEmail(e: string): boolean {
   if (!e || e.length > 100 || !e.includes('@') || !e.includes('.')) return false;

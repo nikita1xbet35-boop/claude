@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-17 #9: check DDG pagination + city variants in prod)
+# (probe bump 2026-06-17 #10: kill ...@gmail.com at source + verify deep-page/city breakdown)
 on:
   workflow_dispatch:
   schedule:
@@ -92,6 +92,10 @@ jobs:
           q "SELECT contact_email_type, count(*) FROM leads WHERE contact_email IS NOT NULL GROUP BY 1 ORDER BY 2 DESC;"; echo ""
           echo "--- find-and-queue totals last 24h: found vs saved vs contacts ---"
           q "SELECT count(*) AS runs, sum((regexp_match(message,'found=([0-9]+)'))[1]::int) AS found, sum((regexp_match(message,'saved=([0-9]+)'))[1]::int) AS saved, sum((regexp_match(message,'contacts=([0-9]+)'))[1]::int) AS contacts FROM error_log WHERE service='find-and-queue' AND created_at > now() - interval '24 hours';"; echo ""
+          echo "--- find-and-queue by SEARCH PAGE last 24h (proves deep-page pagination works) ---"
+          q "SELECT (regexp_match(message,'page=([0-9]+)'))[1] AS page, count(*) AS runs, sum((regexp_match(message,'found=([0-9]+)'))[1]::int) AS found, sum((regexp_match(message,'saved=([0-9]+)'))[1]::int) AS saved FROM error_log WHERE service='find-and-queue' AND created_at > now() - interval '24 hours' GROUP BY 1 ORDER BY 1;"; echo ""
+          echo "--- find-and-queue runs WITH a city variant last 24h ---"
+          q "SELECT count(*) AS city_runs, sum((regexp_match(message,'saved=([0-9]+)'))[1]::int) AS saved FROM error_log WHERE service='find-and-queue' AND message LIKE '%city=%' AND created_at > now() - interval '24 hours';"; echo ""
 
           echo ""
           echo "=== API USAGE / LIMITS / PAUSE FLAGS ==="
