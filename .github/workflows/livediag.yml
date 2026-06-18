@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-17 #10: kill ...@gmail.com at source + verify deep-page/city breakdown)
+# (probe bump 2026-06-17 #11: sync api_usage.gmail_lp counter so LP volume stops reading 0)
 on:
   workflow_dispatch:
   schedule:

@@ -255,6 +255,15 @@ Deno.serve(async (req: Request) => {
           bounced:       false,
         }]);
 
+        // Keep the api_usage.gmail_lp counter in sync with reality so the
+        // dashboard/diagnostics reflect LP volume (LP's own caps are enforced
+        // via lp_outreach counts, this row is purely for reporting).
+        const { data: lpCur } = await supabase.from('api_usage')
+          .select('used').eq('service', 'gmail_lp').single();
+        await supabase.from('api_usage')
+          .update({ used: ((lpCur?.used ?? 0) as number) + 1, updated_at: sentAt })
+          .eq('service', 'gmail_lp');
+
         stats.sent++;
       } else {
         const d   = result.data;
