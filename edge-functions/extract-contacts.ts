@@ -383,6 +383,27 @@ function buildResult(state: {
   };
 }
 
+async function maybeAutoBlacklist(lead: { id: string; url?: string; extract_attempts?: number }) {
+  // Increment extract_attempts counter
+  const { data: attemptData } = await supabase.from('leads')
+    .update({ extract_attempts: (lead.extract_attempts ?? 0) + 1 })
+    .eq('id', lead.id)
+    .select('extract_attempts, url')
+    .single();
+
+  if ((attemptData?.extract_attempts ?? 0) >= 3 && attemptData?.url) {
+    try {
+      const domain = new URL(
+        attemptData.url.startsWith('http') ? attemptData.url : 'https://' + attemptData.url,
+      ).hostname.replace(/^www\./i, '').toLowerCase();
+      await supabase.from('blacklist').upsert(
+        [{ value: domain, type: 'domain', reason: 'no_contact', auto_added: true, added_at: new Date().toISOString() }],
+        { onConflict: 'value', ignoreDuplicates: true },
+      );
+    } catch (_) {}
+  }
+}
+
 async function bumpUsage(service: string, delta: number) {
   if (delta <= 0) return;
   const { data } = await supabase.from('api_usage').select('used').eq('service', service).single();
@@ -407,7 +428,7 @@ Deno.serve(async (req: Request) => {
     // rotates away from any lead whose site crashes the function.
     const { data: leads, error } = await supabase
       .from('leads')
-      .select('id, url, name')
+      .select('id, url, name, extract_attempts')
       .is('contact_email', null)
       .is('contact_email_type', null)
       .not('stage', 'eq', 'excluded')
@@ -469,6 +490,8 @@ Deno.serve(async (req: Request) => {
         await supabase.from('leads')
           .update({ contact_email_type: 'not_found', contact_source_url: null })
           .eq('id', lead.id);
+        // Increment attempt counter and auto-blacklist after 3 failures
+        await maybeAutoBlacklist(lead);
         stats.not_found++;
       }
       stats.processed++;

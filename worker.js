@@ -173,6 +173,10 @@ async function handleTgUpdate(update, env) {
 const SESSION_TTL_MS = 3 * 60 * 60 * 1000; // 3 hours of inactivity
 const COOKIE_NAME = 'aos_session';
 
+// Supabase credentials for rate-limiting login_attempts table
+const SUPABASE_URL_W = 'https://lxsyrserfuighwxuymgb.supabase.co';
+const SUPABASE_ANON  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
+
 function authSecret(env) {
   return env.SESSION_SECRET || env.DASHBOARD_PASSWORD || '';
 }
@@ -183,6 +187,50 @@ function safeEqual(a, b) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+async function hashPassword(password, salt) {
+  const enc = new TextEncoder();
+  const keyData = enc.encode(password + salt);
+  const hashBuf = await crypto.subtle.digest('SHA-256', keyData);
+  const hashArr = Array.from(new Uint8Array(hashBuf));
+  return hashArr.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyPassword(input, env) {
+  const storedHash = env.DASHBOARD_PASSWORD_HASH; // "salt:hash" format
+  const plainPw    = env.DASHBOARD_PASSWORD;       // legacy plain fallback
+  if (!storedHash && !plainPw) return false;
+  if (storedHash) {
+    const [salt, hash] = storedHash.split(':');
+    const inputHash = await hashPassword(input, salt || '');
+    return safeEqual(inputHash, hash);
+  }
+  // Legacy plain text fallback (still works if only DASHBOARD_PASSWORD is set)
+  return safeEqual(input, plainPw);
+}
+
+async function getFailedAttempts(ip) {
+  const url = `${SUPABASE_URL_W}/rest/v1/login_attempts?ip=eq.${encodeURIComponent(ip)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id`;
+  const res = await fetch(url, {
+    headers: { 'apikey': SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_ANON}` }
+  }).catch(() => null);
+  if (!res?.ok) return 0;
+  const data = await res.json().catch(() => []);
+  return Array.isArray(data) ? data.length : 0;
+}
+
+async function recordFailedAttempt(ip) {
+  await fetch(`${SUPABASE_URL_W}/rest/v1/login_attempts`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_ANON,
+      'Authorization': `Bearer ${SUPABASE_ANON}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal',
+    },
+    body: JSON.stringify({ ip, failed_at: new Date().toISOString(), expires_at: new Date(Date.now() + 3600_000).toISOString() }),
+  }).catch(() => null);
 }
 
 function b64urlEncode(bytes) {
@@ -243,8 +291,9 @@ const sessionCookie = token =>
 const clearCookie = () =>
   `${COOKIE_NAME}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 
-function loginPage(error) {
+function loginPage(error, blocked) {
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>AffiliateOS</title>
 <style>
@@ -278,7 +327,7 @@ function loginPage(error) {
       <input class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="1" id="p2">
       <input class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="1" id="p3">
     </div>
-    <div class="err${error ? ' show' : ''}" id="err">Неверный PIN</div>
+    <div class="err${(error || blocked) ? ' show' : ''}" id="err">${blocked ? 'Слишком много попыток. Подождите 1 час.' : 'Неверный PIN'}</div>
   </form>
 </div>
 <script>
@@ -321,19 +370,30 @@ const htmlResponse = (body, status) =>
 // page / redirect) when the gate intercepts it. Disabled while no password set.
 async function gate(request, env) {
   const password = env.DASHBOARD_PASSWORD;
-  if (!password) return null; // gate disabled until the secret is configured
+  const passwordHash = env.DASHBOARD_PASSWORD_HASH;
+  if (!password && !passwordHash) return null; // gate disabled until the secret is configured
 
   const url = new URL(request.url);
 
   if (request.method === 'POST' && url.pathname === '/__auth') {
+    const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
+
+    // Rate limiting: block after 2 failed attempts
+    if (await getFailedAttempts(ip) >= 2) {
+      return htmlResponse(loginPage(false, true), 429);
+    }
+
     const form = await request.formData();
-    if (safeEqual(String(form.get('password') || ''), password)) {
+    const submittedPassword = String(form.get('password') || '');
+    if (await verifyPassword(submittedPassword, env)) {
       return new Response(null, {
         status: 303,
         headers: { 'Location': '/', 'Set-Cookie': sessionCookie(await makeSession(env)) },
       });
     }
-    return htmlResponse(loginPage(true), 401);
+    // Record failed attempt
+    await recordFailedAttempt(ip);
+    return htmlResponse(loginPage(true, false), 401);
   }
 
   if (url.pathname === '/__logout') {
@@ -341,7 +401,7 @@ async function gate(request, env) {
   }
 
   if (!(await verifySession(getCookie(request, COOKIE_NAME), env))) {
-    return htmlResponse(loginPage(false), 200);
+    return htmlResponse(loginPage(false, false), 200);
   }
 
   return null; // authenticated — let the asset serve (cookie refreshed by caller)

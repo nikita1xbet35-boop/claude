@@ -3,3 +3,6 @@ telegram-leads.csv
 telegram-leads.html
 *.local.csv
 *.local.html
+
+# Claude Code internal
+.claude/

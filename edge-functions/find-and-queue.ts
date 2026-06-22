@@ -688,6 +688,14 @@ function getDomain(url: string): string {
     return new URL(url.startsWith('http') ? url : 'https://' + url).hostname.replace(/^www\./, '');
   } catch { return ''; }
 }
+function normalizeDomain(url: string): string {
+  try {
+    const u = url.startsWith('http') ? url : 'https://' + url;
+    return new URL(u).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return url.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0].toLowerCase();
+  }
+}
 function decodeEntities(s: string): string {
   return s
     .replace(/&#x27;/gi, "'").replace(/&#39;/g, "'").replace(/&apos;/gi, "'")
@@ -765,18 +773,20 @@ Deno.serve(async (req: Request) => {
 
     // 3. Load dedup sets upfront
     const { data: existingLeadRows } = await supabase
-      .from('leads').select('url').order('created_at', { ascending: false }).limit(3000);
+      .from('leads').select('domain_normalized, url')
+      .not('domain_normalized', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(5000);
     const existingDomains = new Set(
-      (existingLeadRows || []).map((l: any) => getDomain(l.url || '')).filter(Boolean),
+      (existingLeadRows || []).map((l: any) => (l.domain_normalized || normalizeDomain(l.url || '')).toLowerCase()).filter(Boolean),
     );
 
     let blRows: any[] = [];
     try {
-      const { data } = await supabase
-        .from('blacklist').select('domain').or(`brand.eq.${brand},brand.is.null`);
+      const { data } = await supabase.from('blacklist').select('value');
       blRows = data || [];
     } catch (_) {}
-    const blacklistSet = new Set(blRows.map((r: any) => (r.domain || '').toLowerCase()));
+    const blacklistSet = new Set(blRows.map((r: any) => (r.value || '').toLowerCase()));
 
     // Hard dedup: ALL-TIME — never re-add a lead whose email was ever contacted
     // (email_log is the source of truth — every successful send is recorded there)
@@ -815,15 +825,16 @@ Deno.serve(async (req: Request) => {
       for (const result of results) {
         const url    = result.link || '';
         const domain = getDomain(url);
-        if (!domain || seenThisRun.has(domain)) continue;
-        if (GLOBAL_SKIP.has(domain) || existingDomains.has(domain) || blacklistSet.has(domain)) continue;
+        const domNorm = normalizeDomain(url);
+        if (!domain || seenThisRun.has(domNorm)) continue;
+        if (GLOBAL_SKIP.has(domain) || existingDomains.has(domNorm) || blacklistSet.has(domNorm) || blacklistSet.has(domain)) continue;
         if (isNoisyResult(url, result.title || '', result.snippet || '')) { stats.irrelevant++; continue; }
         if (isExcludedByTld(domain)) { stats.geo_excluded++; continue; }
         let origin: string;
         try {
           origin = new URL(url.startsWith('http') ? url : 'https://' + url).origin;
         } catch { continue; }
-        seenThisRun.add(domain);
+        seenThisRun.add(domNorm);
         candidates.push({ url, title: result.title || '', snippet: result.snippet || '', origin, keyword: kw });
       }
     }
@@ -874,6 +885,8 @@ Deno.serve(async (req: Request) => {
       for (const { cand, analysis, contact } of extracted) {
         const { url, title, keyword } = cand;
         if (contact.email && emailedSet.has(contact.email.toLowerCase())) continue;
+        const domNorm = normalizeDomain(url);
+        if (existingDomains.has(domNorm)) continue;
 
         const leadData: Record<string, unknown> = {
           url,
@@ -888,6 +901,7 @@ Deno.serve(async (req: Request) => {
           priority: analysis.priority,
           lang:     analysis.lang,
           found_keyword: keyword,
+          domain_normalized: domNorm,
         };
         if (contact.email) {
           leadData.contact_email      = contact.email;
@@ -902,6 +916,7 @@ Deno.serve(async (req: Request) => {
 
         const { error: insErr } = await supabase.from('leads').insert([leadData]);
         if (!insErr) {
+          existingDomains.add(domNorm); // prevent same-run duplicates
           if (contact.email) emailedSet.add(contact.email.toLowerCase());
           stats.saved++;
         } else {
