@@ -1006,17 +1006,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab active" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right">
       <span class="badge-count" id="dash-badge">0 лидов</span>
@@ -1053,17 +1053,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab active" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right">
       <span class="badge-count" id="total-badge">8 лидов</span>
@@ -1282,17 +1282,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab active" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right">
       <span class="badge-count" id="db-badge">8 лидов</span>
@@ -1353,6 +1353,11 @@
         <tbody id="db-tbody"></tbody>
       </table>
     </div>
+    <div id="db-pagination" style="display:none;padding:10px 16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;">
+      <button onclick="dbPagePrev()" id="db-prev-btn" style="padding:5px 14px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);font-family:var(--font-mono);font-size:11px;cursor:pointer;">← Пред</button>
+      <span id="db-page-info" style="font-size:11px;font-family:var(--font-mono);color:var(--text3);flex:1;text-align:center;"></span>
+      <button onclick="dbPageNext()" id="db-next-btn" style="padding:5px 14px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);font-family:var(--font-mono);font-size:11px;cursor:pointer;">След →</button>
+    </div>
   </div>
 </div>
 
@@ -1382,17 +1387,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab active" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right">
       <span class="badge-count" id="partners-badge">0 партнёров</span>
@@ -1508,17 +1513,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab active" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right">
       <div class="status-dot"></div>
@@ -1635,17 +1640,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab active" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right"><div class="status-dot"></div></div>
   </header>
@@ -1757,17 +1762,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab active" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right"><div class="status-dot"></div></div>
   </header>
@@ -1802,17 +1807,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab active" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right"><div class="status-dot"></div></div>
   </header>
@@ -2114,17 +2119,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab active" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right"><div class="status-dot"></div></div>
   </header>
@@ -2279,17 +2284,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab active" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right">
       <span class="badge-count" id="tg-badge">0 каналов</span>
@@ -2469,17 +2474,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab active" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right">
       <span class="badge-count" id="bl-badge" style="background:var(--red-bg);color:var(--red);">0 доменов</span>
@@ -2574,17 +2579,17 @@
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab active" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right">
       <span class="badge-count" id="yt-badge">0 каналов</span>
@@ -2814,22 +2819,12 @@ function brandBadge(brand){
 }
 
 function brandPresenceBadges(l, compact = false){
-  const brands = [
-    { key: 'has_1xbet',     label: '1xBet',    color: '#7B61FF' },
-    { key: 'has_1xcasino',  label: 'Casino',   color: '#10b981' },
-    { key: 'has_luckypari', label: 'LuckyPari', color: '#f97316' },
-  ];
-  const pad = compact ? '1px 6px' : '2px 10px';
+  // Показываем только бренд, под который лид был найден (без маркеров присутствия)
+  const cfg = BRAND_CONFIG[l.brand] || BRAND_CONFIG[currentBrand] || BRAND_CONFIG['1xbet'];
+  if(!cfg) return '';
+  const pad = compact ? '1px 8px' : '3px 11px';
   const sz  = compact ? '10px' : '11px';
-  return brands.map(b => {
-    const detected = !!l[b.key];
-    // Подсвечиваем бренд которого НЕТ на сайте — это потенциальный партнёр
-    const bg  = !detected ? `${b.color}22` : 'var(--bg3)';
-    const col = !detected ? b.color : 'var(--text3)';
-    const brd = !detected ? `${b.color}55` : 'var(--border)';
-    const ico = detected ? '✓ ' : '○ ';
-    return `<span style="background:${bg};color:${col};border:1px solid ${brd};padding:${pad};border-radius:20px;font-size:${sz};font-family:var(--font-mono);" title="${detected ? 'Уже есть на сайте' : 'Нет на сайте — потенциальный партнёр'}">${ico}${b.label}</span>`;
-  }).join('');
+  return `<span style="background:${cfg.accent}1f;color:${cfg.accent2};border:1px solid ${cfg.accent}55;padding:${pad};border-radius:20px;font-size:${sz};font-family:var(--font-mono);white-space:nowrap;" title="Найден под брендом ${cfg.display}">${cfg.display}</span>`;
 }
 
 const BS_HTML = (brand) => {
@@ -3184,12 +3179,8 @@ function renderContactSection(leadId){
     </span></div>` : ''}
     ${l.contact_telegram ? `<div class="kv-row"><span class="kv-key">✈ Telegram</span><span class="kv-val" style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">${l.contact_telegram}</span></div>` : ''}
     ${l.contact_whatsapp ? `<div class="kv-row"><span class="kv-key">📱 WhatsApp</span><span class="kv-val" style="color:var(--green);font-family:var(--font-mono);font-size:11px;">${l.contact_whatsapp}</span></div>` : ''}
-    ${l.contact_source_url ? `<div class="kv-row"><span class="kv-key">📄 Источник</span><span class="kv-val" style="font-size:10px;color:var(--text3);font-family:var(--font-mono);word-break:break-all;">${l.contact_source_url.replace(/^https?:\/\//,'')}</span></div>` : ''}
     ${notFound ? `<div style="font-size:11px;color:var(--text3);padding:4px 0;">Контакты не найдены</div>` : ''}
-    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
-      ${notFound ? `<button onclick="runContactExtraction('${leadId}')" style="font-size:10px;font-family:var(--font-mono);padding:3px 8px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text3);cursor:pointer;">🔄 Повторить</button>` : ''}
-      ${(l.contact_email||l.email) ? `<button onclick="openGmailDraft('${leadId}')" style="font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:5px;border:1px solid rgba(59,130,246,.3);background:rgba(59,130,246,.1);color:var(--blue);cursor:pointer;">✉ Gmail черновик</button>` : ''}
-    </div>
+    ${notFound ? `<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;"><button onclick="runContactExtraction('${leadId}')" style="font-size:10px;font-family:var(--font-mono);padding:3px 8px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text3);cursor:pointer;">🔄 Повторить</button></div>` : ''}
   `;
 }
 
@@ -3270,8 +3261,10 @@ function leadRowHTML(l, i){
   const hasContact = !!(l.contact_email || l.email || l.contact_telegram || l.tg);
   return `<div class="lead-row${activeId === l.id ? ' active' : ''}" onclick="openLead('${l.id}')" id="lc-${l.id}"${anim}>
     <span class="lr-score ${scCls}">${score || '—'}</span>
-    <span class="lr-name">${hasContact ? '<span class="lr-contact-dot" title="есть контакт"></span>' : ''}${l.name || '—'}</span>
-    <span class="lr-domain">${getDomain(l.url || '') || ''}</span>
+    <div class="lr-main">
+      <span class="lr-name">${l.name || '—'}${hasContact ? '<span class="lr-contact-dot" title="есть контакт"></span>' : ''}</span>
+      <span class="lr-domain">${getDomain(l.url || '') || ''}</span>
+    </div>
     <span class="lr-geo">${l.geo || ''}</span>
     <span class="lr-stage ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage || ''}</span>
   </div>`;
@@ -3521,20 +3514,13 @@ function openLead(id){
         <div class="kv-grid">
           <div class="kv-row"><span class="kv-key">Язык</span><span class="kv-val">${l.lang || '—'}</span></div>
           <div class="kv-row"><span class="kv-key">Приоритет</span><span class="kv-val">${prioRU[l.priority] || l.priority || '—'}</span></div>
-          <div class="kv-row"><span class="kv-key">Добавлен</span><span class="kv-val">${l.created_at ? new Date(l.created_at).toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'}) : '—'}</span></div>
-          ${l.found_keyword ? `<div class="kv-row"><span class="kv-key">Ключ</span><span class="kv-val" title="${l.found_keyword}">${l.found_keyword}</span></div>` : ''}
         </div>
+        <div class="meta-line"><span class="meta-line-key">Добавлен</span><span class="meta-line-val">${l.created_at ? new Date(l.created_at).toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}) : '—'}</span></div>
+        ${l.found_keyword ? `<div class="meta-line"><span class="meta-line-key">Ключ</span><span class="meta-line-val">${l.found_keyword}</span></div>` : ''}
       </div>
       ${l.why ? `<div class="detail-section">
         <div class="dsec-title">Почему релевантен</div>
         <div class="summary-text">${l.why}</div>
-      </div>` : ''}
-      ${l.next_action ? `<div class="detail-section">
-        <div class="dsec-title">Следующий шаг</div>
-        <div class="next-action-box">
-          <div class="next-label">Рекомендация</div>
-          <div class="next-text">${l.next_action}</div>
-        </div>
       </div>` : ''}
       <div class="detail-section">
         <div class="dsec-title" style="display:flex;justify-content:space-between;align-items:center;">
@@ -3561,10 +3547,6 @@ function openLead(id){
             </select>
           </div>
         </div>
-        <div style="margin-bottom:8px;">
-          <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;">СЛЕДУЮЩИЙ ШАГ</div>
-          <textarea id="edit-next-${l.id}" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-body);font-size:12px;padding:8px;border-radius:6px;outline:none;resize:vertical;line-height:1.5;">${l.next_action||''}</textarea>
-        </div>
         <div>
           <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;">ЗАМЕТКА / УГОЛ</div>
           <textarea id="edit-note-${l.id}" rows="2" style="width:100%;background:var(--amber-bg);border:1px solid var(--amber)20;color:var(--amber);font-family:var(--font-body);font-size:12px;padding:8px;border-radius:6px;outline:none;resize:vertical;line-height:1.5;">${l.note||''}</textarea>
@@ -3574,22 +3556,6 @@ function openLead(id){
           <input type="date" id="edit-followup-${l.id}"
             value="${l.followup_due_at ? new Date(l.followup_due_at).toISOString().slice(0,10) : ''}"
             style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:6px 8px;border-radius:6px;outline:none;color-scheme:dark;">
-        </div>
-      </div>
-      <div class="detail-section">
-        <div class="dsec-title">Аутрич</div>
-        <div class="outreach-box">
-          <div class="outreach-tabs">
-            <button class="outreach-tab active" onclick="setOutreachLang('en','${l.id}',this)">EN</button>
-            <button class="outreach-tab" onclick="setOutreachLang('ru','${l.id}',this)">RU</button>
-            <button class="outreach-tab" onclick="setOutreachLang('es','${l.id}',this)">ES</button>
-            <button class="outreach-tab" onclick="setOutreachLang('pt','${l.id}',this)">PT</button>
-          </div>
-          <button class="outreach-gen-btn" id="outreach-btn-${l.id}" onclick="generateOutreach('${l.id}')">✦ Сгенерировать сообщение</button>
-          <div class="outreach-result" id="outreach-text-${l.id}">Нажми кнопку чтобы сгенерировать аутрич-сообщение для этого партнёра.</div>
-          <div class="outreach-footer">
-            <button class="outreach-copy" onclick="copyOutreach('${l.id}')">Скопировать</button>
-          </div>
         </div>
       </div>
     </div>`;
@@ -3774,7 +3740,6 @@ async function saveLead_(id){
   const updates = {
     stage:           stageEl.value,
     priority:        prioEl.value,
-    next_action:     nextEl.value,
     note:            noteEl.value,
     followup_due_at: followupEl?.value ? new Date(followupEl.value).toISOString() : null
   };
@@ -3910,23 +3875,22 @@ function goToLead(id){
 }
 
 // ══════════════════════════════════════════
-//  БАЗА ЛИДОВ (DB PAGE) — paginated
+//  БАЗА ЛИДОВ (DB PAGE)
 // ══════════════════════════════════════════
-const DB_PAGE_SIZE = 100;
 let dbSort = {col:'score', dir:-1};
-let dbPage = 0;
-let dbTotal = 0;
-let _dbFiltered = []; // full filtered+sorted dataset, paginated for display
-
 function sortDB(col){
   dbSort = dbSort.col === col ? {col, dir: dbSort.dir * -1} : {col, dir: -1};
-  dbPage = 0;
   filterDB();
 }
+const DB_PAGE_SIZE = 100;
+let dbCurrentPage = 0;
+let _dbSorted = [];
+
 function filterDB(){
-  dbPage = 0;
+  dbCurrentPage = 0;
   _applyDBFilter();
 }
+
 function _applyDBFilter(){
   const q     = (document.getElementById('db-search').value || '').toLowerCase();
   const stage = document.getElementById('db-stage-filter').value;
@@ -3939,24 +3903,21 @@ function _applyDBFilter(){
     if(type  && l.type !== type) return false;
     return true;
   });
-  _dbFiltered = [...data].sort((a,b) => {
+  _dbSorted = [...data].sort((a,b) => {
     const av = a[dbSort.col], bv = b[dbSort.col];
     return typeof av === 'number' ? (av - bv) * dbSort.dir : String(av).localeCompare(String(bv)) * dbSort.dir;
   });
-  dbTotal = _dbFiltered.length;
+  document.getElementById('db-total').textContent   = data.length;
+  document.getElementById('db-high').textContent    = data.filter(l => l.priority === 'High').length;
+  document.getElementById('db-contact').textContent = data.filter(l => l.email || l.tg).length;
   _renderDBPage();
+  _renderDBPagination();
 }
-function _renderDBPage(){
-  const totalPages = Math.max(1, Math.ceil(dbTotal / DB_PAGE_SIZE));
-  if(dbPage >= totalPages) dbPage = totalPages - 1;
-  const start = dbPage * DB_PAGE_SIZE;
-  const pageRows = _dbFiltered.slice(start, start + DB_PAGE_SIZE);
-  const allData = _dbFiltered;
 
-  document.getElementById('db-total').textContent   = dbTotal;
-  document.getElementById('db-high').textContent    = allData.filter(l => l.priority === 'High').length;
-  document.getElementById('db-contact').textContent = allData.filter(l => l.email || l.tg || l.contact_email || l.contact_telegram).length;
-  document.getElementById('db-tbody').innerHTML = pageRows.map((l,i) => `
+function _renderDBPage(){
+  const start = dbCurrentPage * DB_PAGE_SIZE;
+  const page  = _dbSorted.slice(start, start + DB_PAGE_SIZE);
+  document.getElementById('db-tbody').innerHTML = page.map((l,i) => `
     <tr>
       <td style="color:var(--text3);font-family:var(--font-mono);">${start + i + 1}</td>
       <td class="td-name">${l.name || '—'}</td>
@@ -3964,10 +3925,10 @@ function _renderDBPage(){
       <td><span class="chip chip-type">${l.type || '—'}</span></td>
       <td><span class="chip chip-geo">${l.geo || '—'}</span></td>
       <td>${l.lang || '—'}</td>
-      <td>${(l.contact_email || l.email)
-        ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✉ ${l.contact_email || l.email}</span>`
-        : (l.contact_telegram || l.tg)
-          ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✈ ${l.contact_telegram || l.tg}</span>`
+      <td>${l.email
+        ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✉ ${l.email}</span>`
+        : l.tg
+          ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✈ ${l.tg}</span>`
           : '<span style="color:var(--text3)">—</span>'}</td>
       <td><span class="chip ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage}</span></td>
       <td><span class="score-badge ${sc(l.score || 0)}">${l.score || '—'}</span></td>
@@ -3979,31 +3940,21 @@ function _renderDBPage(){
         <button class="db-btn" style="color:var(--red);" onclick="deleteLeadDB('${l.id}')">✕</button>
       </div></td>
     </tr>`).join('');
-  // Render pagination controls
-  _renderDBPagination(totalPages);
 }
-function _renderDBPagination(totalPages){
-  let ctrl = document.getElementById('db-pagination');
-  if(!ctrl){
-    const wrap = document.querySelector('.db-table-wrap');
-    if(wrap){
-      ctrl = document.createElement('div');
-      ctrl.id = 'db-pagination';
-      ctrl.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 16px;font-size:13px;color:var(--text2);border-top:1px solid var(--border);';
-      wrap.appendChild(ctrl);
-    }
-  }
-  if(!ctrl) return;
-  if(totalPages <= 1){ ctrl.style.display = 'none'; return; }
-  ctrl.style.display = 'flex';
-  ctrl.innerHTML = `
-    <button onclick="dbPagePrev()" ${dbPage === 0 ? 'disabled' : ''} style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:5px;cursor:pointer;font-size:12px;">← Назад</button>
-    <span>Страница ${dbPage + 1} из ${totalPages}</span>
-    <button onclick="dbPageNext()" ${dbPage >= totalPages - 1 ? 'disabled' : ''} style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:5px;cursor:pointer;font-size:12px;">Вперёд →</button>
-    <span style="color:var(--text3);margin-left:4px;">(${dbTotal} лидов)</span>`;
+
+function _renderDBPagination(){
+  const totalPages = Math.ceil(_dbSorted.length / DB_PAGE_SIZE);
+  const pag = document.getElementById('db-pagination');
+  if(totalPages <= 1){ pag.style.display = 'none'; return; }
+  pag.style.display = 'flex';
+  document.getElementById('db-page-info').textContent =
+    `Стр. ${dbCurrentPage + 1} / ${totalPages} (${_dbSorted.length} лидов)`;
+  document.getElementById('db-prev-btn').disabled = dbCurrentPage === 0;
+  document.getElementById('db-next-btn').disabled = dbCurrentPage >= totalPages - 1;
 }
-function dbPagePrev(){ if(dbPage > 0){ dbPage--; _renderDBPage(); } }
-function dbPageNext(){ const tp = Math.ceil(dbTotal / DB_PAGE_SIZE); if(dbPage < tp - 1){ dbPage++; _renderDBPage(); } }
+
+function dbPagePrev(){ if(dbCurrentPage > 0){ dbCurrentPage--; _renderDBPage(); _renderDBPagination(); } }
+function dbPageNext(){ if((dbCurrentPage + 1) * DB_PAGE_SIZE < _dbSorted.length){ dbCurrentPage++; _renderDBPage(); _renderDBPagination(); } }
 
 // ══════════════════════════════════════════
 //  ПОИСК — реальный вызов Edge Function
@@ -4988,8 +4939,8 @@ function _renderDashboard(){
     <!-- KPI ROW -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
       ${kpiData.map((c,i) => `
-        <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;position:relative;overflow:hidden;animation:fadeUp .4s ${i*0.07}s cubic-bezier(.16,1,.3,1) both;">
-          <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${c.color};opacity:.7;"></div>
+        <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;position:relative;overflow:hidden;animation:fadeUp .4s ${i*0.07}s cubic-bezier(.16,1,.3,1) both;">
+          <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${c.color};opacity:0;"></div>
           <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">${c.label}</div>
           <div style="font-size:32px;font-weight:500;font-family:var(--font-mono);color:${c.color};margin-bottom:4px;" id="${c.id}">0</div>
           <div style="font-size:11px;color:var(--text3);">${c.sub}</div>
@@ -5000,7 +4951,7 @@ function _renderDashboard(){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
 
       <!-- TODO -->
-      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
+      <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
           <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;">Сегодня нужно сделать</div>
           <span style="background:var(--amber-bg);color:var(--amber);font-size:11px;font-family:var(--font-mono);padding:2px 8px;border-radius:20px;">${todoLeads.length}</span>
@@ -5020,17 +4971,17 @@ function _renderDashboard(){
       </div>
 
       <!-- FUNNEL -->
-      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
+      <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:14px;">Pipeline воронка</div>
         <div style="color:var(--text3);font-size:12px;">Загрузка...</div>
       </div>
     </div>
 
     <!-- DAILY DIGEST -->
-    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;margin-bottom:14px;" id="dash-digest"></div>
+    <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;margin-bottom:14px;" id="dash-digest"></div>
 
     <!-- TOP NEW LEADS -->
-    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;" id="dash-top-leads-wrap">
+    <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;" id="dash-top-leads-wrap">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;">Топ новые лиды</div>
         <div style="display:flex;align-items:center;gap:8px;">
@@ -6058,7 +6009,7 @@ function renderAnalytics(){
 
   body.innerHTML = `
     <!-- FUNNEL -->
-    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:22px;margin-bottom:16px;">
+    <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:22px;margin-bottom:16px;">
       <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:18px;">Воронка</div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         ${funnel.map((s, i) => {
@@ -6087,7 +6038,7 @@ function renderAnalytics(){
 
     <!-- CHANNEL + STREAM -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
-      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
+      <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:14px;">Каналы отправки</div>
         ${Object.keys(channelMap).length
           ? Object.entries(channelMap).sort((a,b)=>b[1]-a[1]).map(([ch, cnt]) =>
@@ -6097,7 +6048,7 @@ function renderAnalytics(){
               '</div>').join('')
           : '<div style="font-size:12px;color:var(--text3);">Нет данных</div>'}
       </div>
-      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
+      <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:14px;">Потоки A/B</div>
         <div style="display:flex;flex-direction:column;gap:10px;">
           ${[{l:'A — ручной',v:streamA,c:'var(--green)'},{l:'B — шаблон',v:streamB,c:'var(--blue)'}].map(s =>
@@ -6115,7 +6066,7 @@ function renderAnalytics(){
     </div>
 
     <!-- GEO TABLE -->
-    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;overflow:hidden;margin-bottom:16px;">
+    <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;overflow:hidden;margin-bottom:16px;">
       <div style="padding:14px 20px;border-bottom:1px solid var(--border);">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;">По GEO</div>
       </div>
@@ -6126,7 +6077,7 @@ function renderAnalytics(){
     </div>
 
     <!-- TYPE TABLE -->
-    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;overflow:hidden;">
+    <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;overflow:hidden;">
       <div style="padding:14px 20px;border-bottom:1px solid var(--border);">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;">По типу партнёра</div>
       </div>
@@ -10492,7 +10443,7 @@ try {
 
 <script>
   const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
-    "accent": "violet",
+    "accent": "amber",
     "density": "comfortable",
     "mesh": "on",
     "theme": "dark"
@@ -10901,17 +10852,17 @@ try {
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('tg',this)">Telegram</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">YouTube</button>
+      
+      
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('reports',this)">Отчёты</button>
-      <button class="nav-tab" onclick="goTo('analyze',this)">Анализ URL</button>
+      
+      
       <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
       <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab active" onclick="goTo('gmail',this)">✉ Outreach</button>
+      
     </nav>
     <div class="topbar-right">
       <span class="badge-count" id="gmail-badge">0 лидов</span>
@@ -10922,7 +10873,7 @@ try {
     <!-- left: template editor -->
     <div style="width:380px;flex-shrink:0;display:flex;flex-direction:column;gap:14px;">
       <!-- template card -->
-      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
+      <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:12px;">Шаблон письма</div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
           <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">МЕНЕДЖЕР:</span>
@@ -10948,7 +10899,7 @@ try {
         </div>
       </div>
       <!-- gmail accounts switcher -->
-      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
+      <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:12px;">Gmail аккаунты</div>
         <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.5;">Укажи email каждого аккаунта и его порядковый номер в Chrome (0 = первый залогиненный).</div>
         <!-- account 1: 1xBet + Casino -->
@@ -10985,7 +10936,7 @@ try {
         <button onclick="saveGmailConfig()" style="width:100%;font-size:11px;font-family:var(--font-mono);padding:7px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;">💾 Сохранить аккаунты</button>
       </div>
       <!-- auto-send info card -->
-      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
+      <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">Авто-отправка</div>
         <div id="gmail-auth-status" style="font-size:11px;font-family:var(--font-mono);margin-bottom:12px;"><span style="color:var(--green);">● Отправка через сервер (Supabase)</span></div>
         <div style="font-size:10px;color:var(--text2);line-height:1.7;">
@@ -11002,7 +10953,7 @@ try {
     </div>
     <!-- right: leads list -->
     <div style="flex:1;min-width:0;">
-      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
+      <div class="dash-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap;">
           <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;">Новые лиды с email</div>
           <div style="display:flex;gap:8px;align-items:center;">
@@ -11019,6 +10970,341 @@ try {
   </div>
   <div id="gmail-notif" style="position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:9999;display:none;padding:10px 22px;border-radius:10px;font-size:13px;font-family:var(--font-mono);box-shadow:0 4px 20px rgba(0,0,0,.4);transition:opacity .2s;"></div>
 </div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     ✦ REDESIGN LAYER v3 — "Calm Operator" (2026)
+     Spacious dark UI · centered lead column · slide-down filter drawer
+     ════════════════════════════════════════════════════════════════ -->
+<style>
+  /* ─── PIPELINE: drop the static sidebar column, give the work area room ─── */
+  #page-pipeline .pipeline-layout{
+    grid-template-columns: minmax(0,1fr) 400px !important;
+    position: relative;
+  }
+  #page-pipeline .main-col{ padding-top: 4px; }
+
+  /* centered, breathable work column — no more full-screen stretch */
+  #page-pipeline .stats-bar,
+  #page-pipeline .leads-header,
+  #page-pipeline #leads-list{
+    max-width: 960px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    width: 100% !important;
+  }
+  #page-pipeline .stats-bar{
+    background: transparent !important;
+    border-bottom: none !important;
+    padding: 18px 24px 4px !important;
+    gap: 6px !important;
+    backdrop-filter: none !important;
+    overflow: visible !important;
+  }
+  #page-pipeline .stat-item{
+    border-radius: 13px !important;
+    padding: 13px 8px !important;
+    background: color-mix(in oklab, white 2.5%, transparent) !important;
+    border: 1px solid var(--hairline) !important;
+  }
+  #page-pipeline .stat-item::after{ display: none !important; }
+  #page-pipeline .stat-item:hover{ background: color-mix(in oklab, white 5%, transparent) !important; border-color: var(--border2) !important; }
+  #page-pipeline .stat-item.active{
+    background: var(--accent-soft) !important;
+    border-color: color-mix(in oklab, var(--accent) 40%, transparent) !important;
+  }
+  #page-pipeline .stat-num{ font-size: 21px !important; }
+
+  #page-pipeline .leads-header{
+    padding: 8px 24px 14px !important;
+    border-bottom: none !important;
+    gap: 10px !important;
+    align-items: center !important;
+  }
+  #page-pipeline #pipeline-search{
+    flex: 1 !important;
+    background: color-mix(in oklab, white 3%, transparent) !important;
+    border: 1px solid var(--hairline) !important;
+    padding: 9px 14px !important;
+    border-radius: 11px !important;
+    font-size: 12.5px !important;
+  }
+  #page-pipeline #leads-list{ padding: 2px 24px 32px !important; }
+
+  /* ─── FILTER TOGGLE BUTTON (sits in the leads toolbar) ─── */
+  .pipe-filters-btn{
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 9px 14px; border-radius: 11px;
+    font-size: 12px; font-weight: 500; font-family: var(--font-body);
+    color: var(--text2); cursor: pointer; white-space: nowrap;
+    background: color-mix(in oklab, white 3%, transparent);
+    border: 1px solid var(--hairline);
+    transition: all .18s var(--ease);
+  }
+  .pipe-filters-btn:hover{ color: var(--text); border-color: var(--border2); background: color-mix(in oklab, white 5%, transparent); }
+  .pipe-filters-btn.active{
+    color: var(--accent3); background: var(--accent-soft);
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  }
+  .pipe-filters-btn .chev{ font-size: 9px; opacity: .6; transition: transform .25s var(--ease); }
+  .pipe-filters-btn.active .chev{ transform: rotate(180deg); }
+  .pipe-filters-btn .fcount{
+    min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px;
+    display: none; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600; font-family: var(--font-mono);
+    background: var(--accent); color: #fff;
+  }
+  .pipe-filters-btn.has-active .fcount{ display: inline-flex; }
+
+  /* ─── SLIDE-DOWN FILTER DRAWER (the old sidebar, repositioned) ─── */
+  #page-pipeline .sidebar{
+    position: absolute !important;
+    z-index: 60; top: 0; left: 0;
+    width: 360px; height: 100%;
+    background: oklch(0.155 0.008 280) !important;
+    border-right: 1px solid var(--border2) !important;
+    border-bottom-right-radius: 20px;
+    box-shadow: 30px 0 80px -28px rgba(0,0,0,.75), 0 0 0 0.5px var(--hairline);
+    transform: translateY(calc(-100% - 24px));
+    opacity: 0; pointer-events: none;
+    transition: transform .38s var(--ease), opacity .26s var(--ease);
+    will-change: transform;
+  }
+  #page-pipeline .pipeline-layout.filters-open .sidebar{
+    transform: translateY(0); opacity: 1; pointer-events: auto;
+  }
+  /* drawer header (injected) */
+  .drawer-head{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 18px 14px; border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
+  }
+  .drawer-head .dh-title{ font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+  .drawer-head .dh-close{
+    width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in oklab, white 4%, transparent);
+    border: 1px solid var(--hairline); color: var(--text3);
+    cursor: pointer; font-size: 14px; transition: all .15s var(--ease);
+  }
+  .drawer-head .dh-close:hover{ color: var(--text); border-color: var(--border2); background: color-mix(in oklab, white 7%, transparent); }
+
+  /* backdrop */
+  .pipe-backdrop{
+    position: absolute; inset: 0; z-index: 55;
+    background: color-mix(in oklab, oklch(0.10 0.008 280) 55%, transparent);
+    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+    opacity: 0; pointer-events: none; transition: opacity .26s var(--ease);
+  }
+  #page-pipeline .pipeline-layout.filters-open .pipe-backdrop{ opacity: 1; pointer-events: auto; }
+
+  /* ─── REWORKED LEAD ROW — aligned, airy, low-noise ─── */
+  #leads-list .lead-row{
+    display: grid !important;
+    grid-template-columns: 46px minmax(0,1fr) auto auto !important;
+    gap: 16px !important;
+    align-items: center !important;
+    padding: 12px 16px !important;
+    border-radius: 14px !important;
+    margin-bottom: 8px !important;
+    background: color-mix(in oklab, white 2.5%, transparent) !important;
+    border: 1px solid var(--hairline) !important;
+    transition: background .15s, border-color .15s, transform .18s var(--ease) !important;
+  }
+  #leads-list .lead-row:hover{
+    background: color-mix(in oklab, white 5%, transparent) !important;
+    border-color: var(--border2) !important;
+  }
+  #leads-list .lead-row.active{
+    background: var(--accent-soft) !important;
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent) !important;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 25%, transparent), 0 10px 28px -12px var(--accent-glow) !important;
+  }
+  .lr-score{
+    width: 46px; height: 46px; border-radius: 12px !important;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px !important; font-weight: 600 !important;
+    font-variant-numeric: tabular-nums; padding: 0 !important;
+  }
+  .lr-score.good{ background: color-mix(in oklab, var(--green) 14%, transparent) !important; color: var(--green) !important; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--green) 22%, transparent); }
+  .lr-score.mid{  background: color-mix(in oklab, var(--amber) 14%, transparent) !important; color: var(--amber) !important; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--amber) 22%, transparent); }
+  .lr-score.low{  background: color-mix(in oklab, white 4%, transparent) !important; color: var(--text3) !important; box-shadow: inset 0 0 0 1px var(--hairline); }
+  .lr-main{ display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .lr-name{
+    font-size: 13.5px !important; font-weight: 550 !important;
+    letter-spacing: -0.01em; color: var(--text) !important;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: flex; align-items: center;
+  }
+  .lr-domain{
+    font-size: 11px !important; color: var(--text4) !important;
+    font-family: var(--font-mono);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .lr-contact-dot{
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--green); margin: 0 0 0 8px; flex-shrink: 0;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--green) 16%, transparent);
+  }
+  .lr-geo{
+    font-size: 11.5px !important; color: var(--text3) !important;
+    font-family: var(--font-mono); text-align: right; white-space: nowrap;
+  }
+  .lr-stage{
+    justify-self: end;
+    font-size: 11px !important; font-family: var(--font-mono) !important;
+    padding: 4px 12px !important; border-radius: 999px !important;
+    white-space: nowrap; max-width: none !important;
+  }
+
+  /* ─── EMPTY DETAIL — calmer ─── */
+  #page-pipeline .detail-col{ background: color-mix(in oklab, white 1.5%, transparent) !important; }
+  .empty-detail{ padding: 40px !important; }
+
+  /* full-width meta rows — key always fully visible, long values wrap */
+  .meta-line{
+    display: flex; justify-content: space-between; gap: 16px; align-items: baseline;
+    padding: 8px 0; border-top: 1px solid var(--hairline);
+  }
+  .meta-line:first-of-type{ margin-top: 4px; }
+  .meta-line-key{ color: var(--text4); font-size: 12.5px; white-space: nowrap; flex-shrink: 0; }
+  .meta-line-val{
+    color: var(--text); font-family: var(--font-mono); font-size: 11.5px;
+    text-align: right; word-break: break-word; line-height: 1.5;
+  }
+
+  /* ─── CONSISTENT PAGE PADDING ACROSS SCREENS ─── */
+  #dashboard-content{ padding: 44px 48px !important; max-width: 1320px !important; }
+  .db-toolbar{ padding: 16px 28px !important; gap: 10px !important; }
+  .db-table-wrap{ padding: 0 12px; }
+  td, th{ padding: 13px 18px !important; }
+
+  /* slightly larger, calmer nav now that there are fewer tabs */
+  .nav-tab{ padding: 6px 13px !important; }
+
+  /* ════════ EDITORIAL OPERATOR — new character ════════ */
+  /* calm, translucent cards across dashboard / stats / outreach */
+  .dash-card{
+    background: color-mix(in oklab, white 2.5%, transparent) !important;
+    border: 1px solid var(--hairline) !important;
+    border-radius: 18px !important;
+    padding: 22px 24px !important;
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 4%, transparent) !important;
+    transition: border-color .18s var(--ease), background .18s var(--ease) !important;
+  }
+  .dash-card:hover{ border-color: var(--border2) !important; }
+
+  /* editorial serif numerals for the KPI hero figures */
+  #kpi-total, #kpi-week, #kpi-high, #dash-partners-count{
+    font-family: var(--font-display) !important;
+    font-weight: 400 !important;
+    font-size: 52px !important;
+    line-height: 1 !important;
+    letter-spacing: -0.01em !important;
+    margin-bottom: 6px !important;
+    color: var(--text) !important;
+  }
+  /* greeting as an editorial headline */
+  #dash-greeting{
+    font-family: var(--font-display) !important;
+    font-weight: 400 !important;
+    font-size: 38px !important;
+    line-height: 1.05 !important;
+    letter-spacing: -0.01em !important;
+    color: var(--text) !important;
+  }
+  /* KPI label sits quietly above the big number */
+  #dashboard-content .dash-card{ padding: 24px 26px !important; }
+
+  /* more breathing room between dashboard blocks */
+  #dashboard-content > div{ margin-bottom: 18px !important; }
+
+  /* lead detail name — editorial serif to match */
+  .detail-name{
+    font-family: var(--font-display) !important;
+    font-weight: 400 !important;
+    font-size: 30px !important;
+    letter-spacing: -0.01em !important;
+    line-height: 1.1 !important;
+  }
+
+  /* top-new-lead mini cards inside dashboard — align with new card language */
+  #dash-top-leads > div > div{
+    background: color-mix(in oklab, white 2.5%, transparent) !important;
+    border: 1px solid var(--hairline) !important;
+    border-radius: 14px !important;
+  }
+</style>
+
+<script>
+(function(){
+  function buildPipelineFilters(){
+    const layout = document.querySelector('#page-pipeline .pipeline-layout');
+    if(!layout || layout.dataset.filtersWired) return;
+    const sidebar = layout.querySelector('.sidebar');
+    const header  = layout.querySelector('.leads-header');
+    if(!sidebar || !header) return;
+    layout.dataset.filtersWired = '1';
+
+    // backdrop
+    const backdrop = document.createElement('div');
+    backdrop.className = 'pipe-backdrop';
+    backdrop.addEventListener('click', () => setOpen(false));
+    layout.appendChild(backdrop);
+
+    // drawer header with close
+    const dh = document.createElement('div');
+    dh.className = 'drawer-head';
+    dh.innerHTML = '<span class="dh-title">Поиск и фильтры</span><button class="dh-close" title="Закрыть" aria-label="Закрыть">✕</button>';
+    dh.querySelector('.dh-close').addEventListener('click', () => setOpen(false));
+    sidebar.insertBefore(dh, sidebar.firstChild);
+
+    // toggle button in toolbar
+    const btn = document.createElement('button');
+    btn.className = 'pipe-filters-btn';
+    btn.id = 'pipe-filters-btn';
+    btn.innerHTML = '<span style="font-size:13px;line-height:1;">⚲</span><span>Фильтры</span><span class="fcount" id="pipe-fcount">0</span><span class="chev">▾</span>';
+    btn.addEventListener('click', () => setOpen(!layout.classList.contains('filters-open')));
+    header.insertBefore(btn, header.firstChild);
+
+    function setOpen(open){
+      layout.classList.toggle('filters-open', open);
+      btn.classList.toggle('active', open);
+    }
+    window.pipeSetFilters = setOpen;
+
+    // close on Esc
+    document.addEventListener('keydown', (e) => {
+      if(e.key === 'Escape' && layout.classList.contains('filters-open')) setOpen(false);
+    });
+
+    // active-filter counter
+    function updateCount(){
+      let n = 0;
+      ['filter-priority','filter-contact','filter-1xbet','filter-stage','filter-geo'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el && el.value) n++;
+      });
+      n += sidebar.querySelectorAll('.tag.active, .geo-item.active').length;
+      const c = document.getElementById('pipe-fcount');
+      if(c) c.textContent = n;
+      btn.classList.toggle('has-active', n > 0);
+    }
+    sidebar.addEventListener('change', updateCount);
+    sidebar.addEventListener('click', () => setTimeout(updateCount, 0));
+    updateCount();
+  }
+
+  function tryBuild(){
+    buildPipelineFilters();
+    // pipeline DOM is static; one pass after load is enough, but retry briefly
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryBuild);
+  else tryBuild();
+  // safety retries in case of late hydration
+  let tries = 0;
+  const iv = setInterval(() => { buildPipelineFilters(); if(++tries > 12 || document.querySelector('.pipeline-layout[data-filters-wired]')) clearInterval(iv); }, 250);
+})();
+</script>
 
 </body>
 </html>
