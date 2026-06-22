@@ -106,9 +106,8 @@ function cleanSiteName(leadName: string, leadUrl: string): string {
   return cleaned || domain || 'your site';
 }
 
-function buildSubject(siteName: string, url: string): string {
-  const name = cleanSiteName(siteName, url);
-  return `Lucky Pari × ${name} — partnership`;
+function buildSubject(_siteName: string, _url: string): string {
+  return `Your traffic deserves better`;
 }
 
 function buildBody(siteName: string, url: string, geo: string): string {

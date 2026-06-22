@@ -192,11 +192,8 @@ function cleanSiteName(leadName: string, leadUrl: string): string {
   return cleaned || domain || 'your site';
 }
 
-// Subject exactly as per template: "1xBet × [Сайт] — partnership"
-function buildSubject(leadName: string, leadUrl: string, brand: string): string {
-  const brandDisplay = brand === '1xcasino' ? '1xCasino' : '1xBet';
-  const sitename     = cleanSiteName(leadName, leadUrl);
-  return `${brandDisplay} × ${sitename} — partnership`;
+function buildSubject(_leadName: string, _leadUrl: string, _brand: string): string {
+  return `Your traffic deserves better`;
 }
 
 async function markFailed(item: Record<string, unknown>, errMsg: string, forceSkip = false): Promise<boolean> {
