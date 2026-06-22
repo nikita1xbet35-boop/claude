@@ -114,12 +114,12 @@ function buildSubject(siteName: string, url: string): string {
 function buildBody(siteName: string, url: string, geo: string): string {
   const name = cleanSiteName(siteName, url);
   const place = geoName(geo);
-  return `Hi, I had a look at ${name} and really like what you're doing in ${place}.\n\n`
-    + `I'm Nick from Lucky Pari Partners — the official affiliate program for Lucky Pari, `
-    + `a licensed betting and casino brand with real traction in your market.\n\n`
-    + `We offer clean RevShare, fast approval, and you'd be working directly with me — `
-    + `no account managers, no waiting. I put together a short proposal for you.\n\n`
-    + `Want me to send it over? You can also reach me straight on Telegram: @af_luckypari`;
+  return `Hi, I came by ${name}, you've built real trust with your audience in ${place}, `
+    + `and that's worth more than most programs pay for it. I'm Nick from Lucky Pari Partners. `
+    + `You're already monetising this traffic — I'll make it pay you more: clean RevShare on Lucky Pari, `
+    + `no admin fee, no hidden cuts, terms built around your actual numbers. `
+    + `You deal with me directly, not a support desk. I put together a short proposal — want me to send it over? `
+    + `Or message me on Telegram: @af_luckypari`;
 }
 
 const PLACEHOLDER_LOCAL = new Set([
