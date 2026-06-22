@@ -83,27 +83,34 @@ function toAsciiSafe(s: string): string {
   return s.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
 }
 
-function cleanSiteName(leadName: string, leadUrl: string): string {
-  let domain = '';
+function nameFromDomain(leadUrl: string): string {
   try {
-    const h = new URL(leadUrl).hostname.replace(/^www\./, '');
-    domain = h.split('.')[0].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  } catch (_) { /* ignore */ }
+    const raw = leadUrl.startsWith('http') ? leadUrl : 'https://' + leadUrl;
+    const h   = new URL(raw).hostname.replace(/^www\./, '');
+    return h.split('.')[0].replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+  } catch (_) { return ''; }
+}
 
-  if (!leadName) return domain || 'your site';
-  const ascii = toAsciiSafe(decodeEntities(leadName));
-  if (!ascii) return domain || 'your site';
+function looksLikeCleanBrand(s: string): boolean {
+  if (!s || s.length < 3) return false;
+  if (s.includes(',')) return false;
+  if (/\b(in|for|the|best|top|new|newest|latest|sites?|review|guide|list|bonus|grand|opening)\b/i.test(s)) return false;
+  if (s.trim().split(/\s+/).length > 3) return false;
+  return true;
+}
 
-  let cleaned = ascii
-    .replace(/\([^)]*\d{4}[^)]*\)/g, '')
-    .replace(/\b(19|20)\d{2}\b/g, '')
-    .replace(/\b\d+\s+(best|top|new|latest)\b/gi, '')
-    .replace(/[-|:,–]\s*(review|guide|list|sportsbook|bookmaker|casino|betting|sites?|bonus|offers?|ratings?|vs\.?|comparison|roundup|overview|news|tips?|blog|analysis|rankings?).*$/i, '')
-    .replace(/\s{2,}/g, ' ').trim();
-
-  if (cleaned.length < 3) return domain || 'your site';
-  if (cleaned.length > 40) cleaned = cleaned.slice(0, 40).replace(/\s+\S*$/, '').trim();
-  return cleaned || domain || 'your site';
+function cleanSiteName(leadName: string, leadUrl: string): string {
+  const domain = nameFromDomain(leadUrl);
+  if (leadName) {
+    const ascii = toAsciiSafe(decodeEntities(leadName));
+    const cleaned = ascii
+      .replace(/\([^)]*\d{4}[^)]*\)/g, '')
+      .replace(/\b(19|20)\d{2}\b/g, '')
+      .replace(/[-|:,–].*$/, '')
+      .replace(/\s{2,}/g, ' ').trim();
+    if (looksLikeCleanBrand(cleaned)) return cleaned;
+  }
+  return domain || 'your site';
 }
 
 function buildSubject(_siteName: string, _url: string): string {
@@ -111,9 +118,11 @@ function buildSubject(_siteName: string, _url: string): string {
 }
 
 function buildBody(siteName: string, url: string, geo: string): string {
-  const name = cleanSiteName(siteName, url);
-  const place = geoName(geo);
-  return `Hi, I came by ${name}, you've built real trust with your audience in ${place}, `
+  const name      = cleanSiteName(siteName, url);
+  const place     = geoName(geo);
+  const hasGeo    = !!place && place !== 'the region' && place !== 'your market';
+  const geoClause = hasGeo ? ` in ${place}` : '';
+  return `Hi, I came by ${name}, you've built real trust with your audience${geoClause}, `
     + `and that's worth more than most programs pay for it. I'm Nick from Lucky Pari Partners. `
     + `You're already monetising this traffic — I'll make it pay you more: clean RevShare on Lucky Pari, `
     + `no admin fee, no hidden cuts, terms built around your actual numbers. `

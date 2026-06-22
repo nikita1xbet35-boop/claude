@@ -115,12 +115,14 @@ function geoName(geoCode: string): string {
 }
 
 /** Build the outreach email body from a fixed template. No Groq needed.
- *  Soft intro — references the site name and its GEO. */
+ *  Soft intro — references the site name and (when known) its GEO. */
 function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
-  const siteName = cleanSiteName(lead.name as string, lead.url as string || '');
-  const geo      = geoName((lead.geo as string) || '');
+  const siteName  = cleanSiteName(lead.name as string, lead.url as string || '');
+  const geoRaw    = geoName((lead.geo as string) || '');
+  const hasGeo    = !!geoRaw && geoRaw !== 'the region' && geoRaw !== 'your market';
+  const geoClause = hasGeo ? ` in ${geoRaw}` : '';
 
-  return `Hi, I came by ${siteName}, you've built real trust with your audience in ${geo}, `
+  return `Hi, I came by ${siteName}, you've built real trust with your audience${geoClause}, `
     + `and that's worth more than most programs pay for it. I'm Nick from 1xPartners. `
     + `You're already monetising this traffic — I'll make it pay you more: clean RevShare on 1xBet, `
     + `no admin fee, no hidden cuts, terms built around your actual numbers. `
@@ -146,50 +148,50 @@ function toAsciiSafe(s: string): string {
   return s.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
 }
 
+/** Derive a clean brand-ish name from the domain.
+ *  "gooners-guide.com" → "Gooners Guide", "betpro9.net" → "Betpro9". */
+function nameFromDomain(leadUrl: string): string {
+  try {
+    const raw = leadUrl.startsWith('http') ? leadUrl : 'https://' + leadUrl;
+    const h   = new URL(raw).hostname.replace(/^www\./, '');
+    return h.split('.')[0]
+      .replace(/[-_]/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase())
+      .trim();
+  } catch (_) { return ''; }
+}
+
+/** A title is only usable as a name if it reads like a short brand,
+ *  not a full SEO sentence. Reject commas, leftover prepositions,
+ *  long phrases and obvious listicle wording. */
+function looksLikeCleanBrand(s: string): boolean {
+  if (!s || s.length < 3) return false;
+  if (s.includes(',')) return false;                       // "casinos in , grand"
+  if (/\b(in|for|the|best|top|new|newest|latest|sites?|review|guide|list|bonus|grand|opening)\b/i.test(s)) return false;
+  if (s.trim().split(/\s+/).length > 3) return false;      // too wordy to be a brand
+  return true;
+}
+
 /**
- * Extract a clean short company name from the lead.
- * lead.name is often a full SEO page title like
- *   "New Betting Sites (May 2026) 77 Best & Newest UK..."
- * We want just "New Betting Sites" or fall back to the domain.
+ * Pick the site name to greet. Domain is the reliable identifier, so we
+ * prefer it; the SEO page title is only used when it's a clean short brand.
  */
 function cleanSiteName(leadName: string, leadUrl: string): string {
-  // Try to get hostname as fallback
-  let domain = '';
-  try {
-    const h = new URL(leadUrl).hostname.replace(/^www\./, '');
-    // Convert domain to title: "gooners-guide.com" → "Gooners Guide"
-    domain = h.split('.')[0]
-      .replace(/-/g, ' ')
-      .replace(/\b\w/g, c => c.toUpperCase());
-  } catch (_) { /* ignore */ }
+  const domain = nameFromDomain(leadUrl);
 
-  if (!leadName) return domain || 'your site';
-
-  const ascii = toAsciiSafe(decodeEntities(leadName));
-  if (!ascii) return domain || 'your site';
-
-  // Remove common SEO noise patterns:
-  // - years: (May 2026), 2026, 2025
-  // - ordinals/counts: "77 Best", "Top 10"
-  // - trailing review words
-  let cleaned = ascii
-    .replace(/\([^)]*\d{4}[^)]*\)/g, '')          // (May 2026), (2026)
-    .replace(/\b(19|20)\d{2}\b/g, '')              // standalone years
-    .replace(/\b\d+\s+(best|top|new|latest|newest|great)\b/gi, '') // "77 Best"
-    .replace(/\b(top|best|new|latest|newest)\s+\d+\b/gi, '')       // "Top 10"
-    .replace(/[-|:,–]\s*(review|guide|list|sportsbook|bookmaker|casino|betting|sites?|bonus|offers?|ratings?|pros?|cons?|vs\.?|comparison|roundup|overview|news|tips?|blog|analysis|rankings?).*$/i, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-
-  // If it got too short after cleaning, fall back to domain
-  if (cleaned.length < 3) return domain || 'your site';
-
-  // Truncate to 40 chars at a word boundary
-  if (cleaned.length > 40) {
-    cleaned = cleaned.slice(0, 40).replace(/\s+\S*$/, '').trim();
+  // Try the page title, but only accept it if it reads like a brand.
+  if (leadName) {
+    const ascii = toAsciiSafe(decodeEntities(leadName));
+    const cleaned = ascii
+      .replace(/\([^)]*\d{4}[^)]*\)/g, '')
+      .replace(/\b(19|20)\d{2}\b/g, '')
+      .replace(/[-|:,–].*$/, '')                            // drop everything after first separator
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    if (looksLikeCleanBrand(cleaned)) return cleaned;
   }
 
-  return cleaned || domain || 'your site';
+  return domain || 'your site';
 }
 
 function buildSubject(_leadName: string, _leadUrl: string, _brand: string): string {
