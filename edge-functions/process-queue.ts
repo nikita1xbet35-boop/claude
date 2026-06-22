@@ -120,11 +120,12 @@ function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
   const siteName = cleanSiteName(lead.name as string, lead.url as string || '');
   const geo      = geoName((lead.geo as string) || '');
 
-  return `Hi, I had a look at ${siteName} and really like what you're doing in ${geo}. `
-    + `I'm Nick from 1xPartners. 1xBet is one of the most recognized, licensed brands across your markets, `
-    + `and it earns partners solid recurring income. Clean RevShare, no admin fee, individual terms, `
-    + `and you'd run directly with me. I put together a short proposal — want me to send it over? `
-    + `You can also reach me straight on Telegram: @aff_manager_xbet`;
+  return `Hi, I came by ${siteName}, you've built real trust with your audience in ${geo}, `
+    + `and that's worth more than most programs pay for it. I'm Nick from 1xPartners. `
+    + `You're already monetising this traffic — I'll make it pay you more: clean RevShare on 1xBet, `
+    + `no admin fee, no hidden cuts, terms built around your actual numbers. `
+    + `You deal with me directly, not a support desk. I put together a short proposal — want me to send it over? `
+    + `Or message me on Telegram: @aff_manager_xbet`;
 }
 
 // Decode HTML entities so site names never show raw "&amp;" / "&#x27;" etc.
