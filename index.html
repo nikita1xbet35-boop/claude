@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AffiliateOS — AI Sourcing Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3909,14 +3910,24 @@ function goToLead(id){
 }
 
 // ══════════════════════════════════════════
-//  БАЗА ЛИДОВ (DB PAGE)
+//  БАЗА ЛИДОВ (DB PAGE) — paginated
 // ══════════════════════════════════════════
+const DB_PAGE_SIZE = 100;
 let dbSort = {col:'score', dir:-1};
+let dbPage = 0;
+let dbTotal = 0;
+let _dbFiltered = []; // full filtered+sorted dataset, paginated for display
+
 function sortDB(col){
   dbSort = dbSort.col === col ? {col, dir: dbSort.dir * -1} : {col, dir: -1};
+  dbPage = 0;
   filterDB();
 }
 function filterDB(){
+  dbPage = 0;
+  _applyDBFilter();
+}
+function _applyDBFilter(){
   const q     = (document.getElementById('db-search').value || '').toLowerCase();
   const stage = document.getElementById('db-stage-filter').value;
   const prio  = document.getElementById('db-priority-filter').value;
@@ -3928,25 +3939,35 @@ function filterDB(){
     if(type  && l.type !== type) return false;
     return true;
   });
-  const sorted = [...data].sort((a,b) => {
+  _dbFiltered = [...data].sort((a,b) => {
     const av = a[dbSort.col], bv = b[dbSort.col];
     return typeof av === 'number' ? (av - bv) * dbSort.dir : String(av).localeCompare(String(bv)) * dbSort.dir;
   });
-  document.getElementById('db-total').textContent   = data.length;
-  document.getElementById('db-high').textContent    = data.filter(l => l.priority === 'High').length;
-  document.getElementById('db-contact').textContent = data.filter(l => l.email || l.tg).length;
-  document.getElementById('db-tbody').innerHTML = sorted.map((l,i) => `
+  dbTotal = _dbFiltered.length;
+  _renderDBPage();
+}
+function _renderDBPage(){
+  const totalPages = Math.max(1, Math.ceil(dbTotal / DB_PAGE_SIZE));
+  if(dbPage >= totalPages) dbPage = totalPages - 1;
+  const start = dbPage * DB_PAGE_SIZE;
+  const pageRows = _dbFiltered.slice(start, start + DB_PAGE_SIZE);
+  const allData = _dbFiltered;
+
+  document.getElementById('db-total').textContent   = dbTotal;
+  document.getElementById('db-high').textContent    = allData.filter(l => l.priority === 'High').length;
+  document.getElementById('db-contact').textContent = allData.filter(l => l.email || l.tg || l.contact_email || l.contact_telegram).length;
+  document.getElementById('db-tbody').innerHTML = pageRows.map((l,i) => `
     <tr>
-      <td style="color:var(--text3);font-family:var(--font-mono);">${i+1}</td>
+      <td style="color:var(--text3);font-family:var(--font-mono);">${start + i + 1}</td>
       <td class="td-name">${l.name || '—'}</td>
       <td class="td-url">${l.url || '—'}</td>
       <td><span class="chip chip-type">${l.type || '—'}</span></td>
       <td><span class="chip chip-geo">${l.geo || '—'}</span></td>
       <td>${l.lang || '—'}</td>
-      <td>${l.email
-        ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✉ ${l.email}</span>`
-        : l.tg
-          ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✈ ${l.tg}</span>`
+      <td>${(l.contact_email || l.email)
+        ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✉ ${l.contact_email || l.email}</span>`
+        : (l.contact_telegram || l.tg)
+          ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✈ ${l.contact_telegram || l.tg}</span>`
           : '<span style="color:var(--text3)">—</span>'}</td>
       <td><span class="chip ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage}</span></td>
       <td><span class="score-badge ${sc(l.score || 0)}">${l.score || '—'}</span></td>
@@ -3958,7 +3979,31 @@ function filterDB(){
         <button class="db-btn" style="color:var(--red);" onclick="deleteLeadDB('${l.id}')">✕</button>
       </div></td>
     </tr>`).join('');
+  // Render pagination controls
+  _renderDBPagination(totalPages);
 }
+function _renderDBPagination(totalPages){
+  let ctrl = document.getElementById('db-pagination');
+  if(!ctrl){
+    const wrap = document.querySelector('.db-table-wrap');
+    if(wrap){
+      ctrl = document.createElement('div');
+      ctrl.id = 'db-pagination';
+      ctrl.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 16px;font-size:13px;color:var(--text2);border-top:1px solid var(--border);';
+      wrap.appendChild(ctrl);
+    }
+  }
+  if(!ctrl) return;
+  if(totalPages <= 1){ ctrl.style.display = 'none'; return; }
+  ctrl.style.display = 'flex';
+  ctrl.innerHTML = `
+    <button onclick="dbPagePrev()" ${dbPage === 0 ? 'disabled' : ''} style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:5px;cursor:pointer;font-size:12px;">← Назад</button>
+    <span>Страница ${dbPage + 1} из ${totalPages}</span>
+    <button onclick="dbPageNext()" ${dbPage >= totalPages - 1 ? 'disabled' : ''} style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:5px;cursor:pointer;font-size:12px;">Вперёд →</button>
+    <span style="color:var(--text3);margin-left:4px;">(${dbTotal} лидов)</span>`;
+}
+function dbPagePrev(){ if(dbPage > 0){ dbPage--; _renderDBPage(); } }
+function dbPageNext(){ const tp = Math.ceil(dbTotal / DB_PAGE_SIZE); if(dbPage < tp - 1){ dbPage++; _renderDBPage(); } }
 
 // ══════════════════════════════════════════
 //  ПОИСК — реальный вызов Edge Function

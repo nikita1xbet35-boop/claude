@@ -463,6 +463,19 @@ Deno.serve(async (req: Request) => {
         const permanent = await markFailed(item, msg, isPermanentSmtp);
         if (permanent) {
           stats.skipped++;
+          // Auto-blacklist bounced domain (non-consumer providers only)
+          if (isPermanentSmtp && lead.contact_email) {
+            try {
+              const bounceEmail = (lead.contact_email as string).toLowerCase();
+              const bounceDomain = bounceEmail.split('@')[1];
+              if (bounceDomain && !['gmail.com','yahoo.com','hotmail.com','outlook.com'].includes(bounceDomain)) {
+                await supabase.from('blacklist').upsert(
+                  [{ value: bounceDomain, type: 'email_domain', reason: 'bounced', auto_added: true, added_at: new Date().toISOString() }],
+                  { onConflict: 'value', ignoreDuplicates: true },
+                );
+              }
+            } catch (_) {}
+          }
         } else {
           stats.failed++;
         }
