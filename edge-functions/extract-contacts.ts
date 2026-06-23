@@ -383,25 +383,27 @@ function buildResult(state: {
   };
 }
 
-async function maybeAutoBlacklist(lead: { id: string; url?: string; extract_attempts?: number }) {
-  // Increment extract_attempts counter
-  const { data: attemptData } = await supabase.from('leads')
-    .update({ extract_attempts: (lead.extract_attempts ?? 0) + 1 })
-    .eq('id', lead.id)
-    .select('extract_attempts, url')
-    .single();
-
-  if ((attemptData?.extract_attempts ?? 0) >= 3 && attemptData?.url) {
-    try {
+async function maybeAutoBlacklist(lead: { id: string; url?: string }) {
+  // Try to increment extract_attempts (column may not exist if migration not yet run — ignore error)
+  try {
+    const { data: cur } = await supabase.from('leads')
+      .select('extract_attempts')
+      .eq('id', lead.id)
+      .single();
+    const attempts = ((cur as any)?.extract_attempts ?? 0) + 1;
+    await supabase.from('leads')
+      .update({ extract_attempts: attempts } as any)
+      .eq('id', lead.id);
+    if (attempts >= 3 && lead.url) {
       const domain = new URL(
-        attemptData.url.startsWith('http') ? attemptData.url : 'https://' + attemptData.url,
+        lead.url.startsWith('http') ? lead.url : 'https://' + lead.url,
       ).hostname.replace(/^www\./i, '').toLowerCase();
       await supabase.from('blacklist').upsert(
         [{ value: domain, type: 'domain', reason: 'no_contact', auto_added: true, added_at: new Date().toISOString() }],
         { onConflict: 'value', ignoreDuplicates: true },
       );
-    } catch (_) {}
-  }
+    }
+  } catch (_) { /* column not yet added — skip auto-blacklist until migration runs */ }
 }
 
 async function bumpUsage(service: string, delta: number) {
@@ -428,7 +430,7 @@ Deno.serve(async (req: Request) => {
     // rotates away from any lead whose site crashes the function.
     const { data: leads, error } = await supabase
       .from('leads')
-      .select('id, url, name, extract_attempts')
+      .select('id, url, name')
       .is('contact_email', null)
       .is('contact_email_type', null)
       .not('stage', 'eq', 'excluded')

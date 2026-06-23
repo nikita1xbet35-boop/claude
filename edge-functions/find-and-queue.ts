@@ -771,14 +771,26 @@ Deno.serve(async (req: Request) => {
     if (rawKw.length < KW_PER_RUN) rawKw.push(...preset.keywords.slice(0, KW_PER_RUN - rawKw.length));
     const keywords = [...new Set(rawKw)];
 
-    // 3. Load dedup sets upfront
-    const { data: existingLeadRows } = await supabase
-      .from('leads').select('domain_normalized, url')
-      .not('domain_normalized', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(5000);
+    // 3. Load dedup sets upfront (domain_normalized may not exist before migration — fallback to url)
+    let existingLeadRows: any[] | null = null;
+    try {
+      const { data } = await supabase
+        .from('leads').select('domain_normalized, url')
+        .not('domain_normalized', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(5000);
+      existingLeadRows = data;
+    } catch (_) {}
+    if (!existingLeadRows) {
+      // Column doesn't exist yet — fall back to url-only dedup
+      const { data } = await supabase
+        .from('leads').select('url')
+        .order('created_at', { ascending: false })
+        .limit(5000);
+      existingLeadRows = (data || []).map((r: any) => ({ url: r.url, domain_normalized: null }));
+    }
     const existingDomains = new Set(
-      (existingLeadRows || []).map((l: any) => (l.domain_normalized || normalizeDomain(l.url || '')).toLowerCase()).filter(Boolean),
+      existingLeadRows.map((l: any) => (l.domain_normalized || normalizeDomain(l.url || '')).toLowerCase()).filter(Boolean),
     );
 
     let blRows: any[] = [];
@@ -914,7 +926,14 @@ Deno.serve(async (req: Request) => {
         if (contact.phone)     leadData.contact_phone      = contact.phone;
         if (contact.sourceUrl) leadData.contact_source_url = contact.sourceUrl;
 
-        const { error: insErr } = await supabase.from('leads').insert([leadData]);
+        let { error: insErr } = await supabase.from('leads').insert([leadData]);
+        // If domain_normalized column doesn't exist (migration not yet run), retry without it
+        if (insErr?.message?.includes('domain_normalized')) {
+          const fallbackData = { ...leadData };
+          delete fallbackData.domain_normalized;
+          const { error: retryErr } = await supabase.from('leads').insert([fallbackData]);
+          insErr = retryErr ?? null;
+        }
         if (!insErr) {
           existingDomains.add(domNorm); // prevent same-run duplicates
           if (contact.email) emailedSet.add(contact.email.toLowerCase());
