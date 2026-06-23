@@ -39,12 +39,20 @@ jobs:
 
           echo ""
           echo "=== Verify: new columns exist ==="
+          # retry helper — Management API occasionally returns transient 5xx/429
           q() {
-            curl -sf -X POST \
-              "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
-              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{\"query\":\"$1\"}"
+            for attempt in 1 2 3 4 5; do
+              RESP=$(curl -s -w "\n%{http_code}" -X POST \
+                "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+                -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"query\":\"$1\"}")
+              C=$(echo "$RESP" | tail -n 1)
+              B=$(echo "$RESP" | head -n -1)
+              if [ "$C" -lt 300 ]; then echo "$B"; return 0; fi
+              sleep $((attempt * 2))
+            done
+            echo "(verify query failed after retries, HTTP $C: $B)"
           }
           q "SELECT column_name FROM information_schema.columns WHERE table_name='leads' AND column_name IN ('domain_normalized','extract_attempts','source') ORDER BY 1;"; echo ""
           echo "--- leads count after dedup ---"
