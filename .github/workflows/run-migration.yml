@@ -2,13 +2,9 @@ name: Run DB Migration
 
 # One-shot migration runner. Applies supabase/migrations/001_dedup_perf_blacklist.sql
 # to the live database via the Supabase Management API using the existing
-# SUPABASE_ACCESS_TOKEN secret. Triggers automatically when this file changes on main.
+# SUPABASE_ACCESS_TOKEN secret. Manual trigger only (Actions tab → Run workflow).
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/run-migration.yml'
 
 jobs:
   migrate:
