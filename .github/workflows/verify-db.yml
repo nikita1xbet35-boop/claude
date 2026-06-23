@@ -1,13 +1,9 @@
 name: Verify DB Migration
 
 # Lightweight verification that 001_dedup_perf_blacklist.sql was applied.
-# Only runs SELECT queries (no heavy DDL) so it won't time out.
+# Only runs SELECT queries (no heavy DDL). Manual trigger only.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/verify-db.yml'
 
 jobs:
   verify:
