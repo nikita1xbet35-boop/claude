@@ -1,0 +1,43 @@
+name: Verify DB Migration
+
+# Lightweight verification that 001_dedup_perf_blacklist.sql was applied.
+# Only runs SELECT queries (no heavy DDL) so it won't time out.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-db.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify columns + tables via Management API
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          q() {
+            for attempt in 1 2 3 4 5; do
+              RESP=$(curl -s -w "\n%{http_code}" -X POST \
+                "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+                -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"query\":\"$1\"}")
+              C=$(echo "$RESP" | tail -n 1)
+              B=$(echo "$RESP" | head -n -1)
+              if [ "$C" -lt 300 ]; then echo "$B"; return 0; fi
+              sleep $((attempt * 3))
+            done
+            echo "(query failed after retries, HTTP $C)"
+          }
+          echo "=== leads: new columns present? ==="
+          q "SELECT column_name FROM information_schema.columns WHERE table_name='leads' AND column_name IN ('domain_normalized','extract_attempts','source') ORDER BY 1;"; echo ""
+          echo "=== leads count + domain_normalized populated ==="
+          q "SELECT count(*) AS total, count(domain_normalized) AS with_domain FROM leads;"; echo ""
+          echo "=== UNIQUE constraint on domain_normalized? ==="
+          q "SELECT conname FROM pg_constraint WHERE conname='leads_domain_normalized_key';"; echo ""
+          echo "=== login_attempts table? ==="
+          q "SELECT count(*) AS rows FROM login_attempts;"; echo ""
+          echo "=== blacklist new columns? ==="
+          q "SELECT column_name FROM information_schema.columns WHERE table_name='blacklist' AND column_name IN ('reason','auto_added','added_at') ORDER BY 1;"; echo ""
