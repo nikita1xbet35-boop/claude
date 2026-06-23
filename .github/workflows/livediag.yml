@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-17 #11: sync api_usage.gmail_lp counter so LP volume stops reading 0)
+# (probe bump 2026-06-23 #12: post-migration health check + diagnose why LP stalled at 22/day)
 on:
   workflow_dispatch:
   schedule:
