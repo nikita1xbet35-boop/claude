@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-23 #12: post-migration health check + diagnose why LP stalled at 22/day)
+# (probe bump 2026-06-24 #13: fix find-and-queue timeout + add live probe)
 on:
   workflow_dispatch:
   schedule:
@@ -166,6 +166,15 @@ jobs:
           echo ""
           echo "=== NON-INFO ERRORS LAST 12H ==="
           q "SELECT created_at, service, level, left(message, 200) AS msg FROM error_log WHERE level <> 'info' AND created_at > now() - interval '12 hours' ORDER BY created_at DESC LIMIT 15;"; echo ""
+
+          echo ""
+          echo "=== PROBE: find-and-queue direct invoke (runs function live) ==="
+          curl -s -m 150 -X POST \
+            "https://lxsyrserfuighwxuymgb.supabase.co/functions/v1/find-and-queue" \
+            -H "Content-Type: application/json" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
+            -d '{}' ; echo ""
 
           echo ""
           echo "=== CRON CADENCE: find-and-queue timestamps last 2h ==="

@@ -33,10 +33,9 @@ const MIN_SCORE        = 40;
 // for llama-3.1-8b-instant), not requests/min — single-site calls at any pacing
 // blow the token budget. One batched call (~1800 tokens) covers 8 sites.
 const GROQ_BATCH_SIZE  = 8;
-// Min ms between batch calls — 2 calls/min × ~1800 tokens ≈ 3600 TPM, well under
-// the 6000 TPM free-tier cap. Keeping max 2 batches in any rolling 60s window
-// prevents 429s even when the prompt runs slightly longer than estimated.
-const GROQ_PACE_MS     = 30_000;
+// Min ms between batch calls — 5 calls/min × ~1800 tokens ≈ 9000 TPM. Keeping
+// 12s spacing leaves headroom and fits 3 batches inside the 150s edge-fn timeout.
+const GROQ_PACE_MS     = 12_000;
 
 // Minus-words appended to every DDG query to cut noise
 const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk';
@@ -492,10 +491,15 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(20_000),
       });
-      if (res.status === 429 || res.status >= 500) {
+      if (res.status === 429) {
+        // Don't wait inside the edge function — this run is killed at 150s.
+        // The Cloudflare cron retriggers in 3 min; Groq quota refreshes in 60s.
+        groqLastError = 'HTTP 429 (rate limited — skipping)';
+        return null;
+      }
+      if (res.status >= 500) {
         groqLastError = `HTTP ${res.status}`;
-        // Wait long enough for the 60s TPM window to fully reset before retrying
-        await new Promise(r => setTimeout(r, 60_000 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 3_000 * (attempt + 1)));
         continue;
       }
       if (!res.ok) {
@@ -736,6 +740,12 @@ Deno.serve(async (req: Request) => {
   const deadline  = startedAt + TIME_BUDGET_MS;
 
   try {
+    // Write a "started" entry immediately so the function is visible in logs
+    // even if a downstream step (Groq, Supabase) kills the run before completion.
+    await supabase.from('error_log').insert([{
+      level: 'info', service: 'find-and-queue', message: 'started',
+    }]);
+
     // find-and-queue never pauses — finding new leads is always valuable
 
     // 2. Determine brand + preset — slot advances every 3 min (matches the find-and-queue
