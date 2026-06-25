@@ -122,12 +122,12 @@ function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
   const hasGeo    = !!geoRaw && geoRaw !== 'the region' && geoRaw !== 'your market';
   const geoClause = hasGeo ? ` in ${geoRaw}` : '';
 
-  return `Hi, I came by ${siteName}, you've built real trust with your audience${geoClause}, `
-    + `and that's worth more than most programs pay for it. I'm Nick from 1xPartners. `
-    + `You're already monetising this traffic — I'll make it pay you more: clean RevShare on 1xBet, `
-    + `no admin fee, no hidden cuts, terms built around your actual numbers. `
-    + `You deal with me directly, not a support desk. I put together a short proposal — want me to send it over? `
-    + `Or message me on Telegram: @aff_manager_xbet`;
+  return `Hi, I came across ${siteName} — you've built real trust with your audience${geoClause}, `
+    + `and that's worth more than most programs actually pay for it. I'm Nick from 1xPartners. `
+    + `You're already monetising this traffic; I can make it pay you more — and here's why: `
+    + `clean RevShare on 1xBet with no admin fee, so you're not losing 20-30% to hidden cuts like most programs take. `
+    + `Individual terms, and you deal with me directly, not a support desk. `
+    + `I put together a short proposal — want me to send it over? Or ping me on Telegram: @aff_manager_xbet`;
 }
 
 // Decode HTML entities so site names never show raw "&amp;" / "&#x27;" etc.

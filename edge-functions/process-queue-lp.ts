@@ -122,12 +122,12 @@ function buildBody(siteName: string, url: string, geo: string): string {
   const place     = geoName(geo);
   const hasGeo    = !!place && place !== 'the region' && place !== 'your market';
   const geoClause = hasGeo ? ` in ${place}` : '';
-  return `Hi, I came by ${name}, you've built real trust with your audience${geoClause}, `
-    + `and that's worth more than most programs pay for it. I'm Nick from Lucky Pari Partners. `
-    + `You're already monetising this traffic — I'll make it pay you more: clean RevShare on Lucky Pari, `
-    + `no admin fee, no hidden cuts, terms built around your actual numbers. `
-    + `You deal with me directly, not a support desk. I put together a short proposal — want me to send it over? `
-    + `Or message me on Telegram: @af_luckypari`;
+  return `Hi, I came across ${name} — you've built real trust with your audience${geoClause}, `
+    + `and that's worth more than most programs actually pay for it. I'm Nick from Lucky Pari Partners. `
+    + `You're already monetising this traffic; I can make it pay you more — and here's why: `
+    + `clean RevShare on Lucky Pari with no admin fee, so you're not losing 20-30% to hidden cuts like most programs take. `
+    + `Individual terms, and you deal with me directly, not a support desk. `
+    + `I put together a short proposal — want me to send it over? Or ping me on Telegram: @af_luckypari`;
 }
 
 const PLACEHOLDER_LOCAL = new Set([
