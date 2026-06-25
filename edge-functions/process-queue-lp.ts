@@ -113,8 +113,23 @@ function cleanSiteName(leadName: string, leadUrl: string): string {
   return domain || 'your site';
 }
 
-function buildSubject(_siteName: string, _url: string): string {
-  return `Your traffic deserves better`;
+function buildSubject(siteName: string, url: string, geo?: string): string {
+  const site = cleanSiteName(siteName, url);
+  const place = geoName(geo || '');
+  const hasGeo = !!place && place !== 'the region' && place !== 'your market';
+  const SUBJECTS = [
+    hasGeo ? `${place} traffic is worth more than you're getting` : `Your traffic is worth more than you're getting`,
+    `Your traffic deserves better`,
+    `Quick one about ${site}`,
+    `This is for ${site}`,
+    `Let's talk numbers`,
+    `Saw ${site} — let's talk`,
+    `Quick idea for ${site}`,
+    hasGeo ? `${place} — and your traffic` : `Your traffic`,
+    `Worth a quick look, ${site}`,
+    `What's your traffic actually worth?`,
+  ];
+  return SUBJECTS[Math.floor(Math.random() * SUBJECTS.length)];
 }
 
 function buildBody(siteName: string, url: string, geo: string): string {
@@ -230,7 +245,7 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      const subject = buildSubject(item.site_name || '', item.url || '');
+      const subject = buildSubject(item.site_name || '', item.url || '', item.geo || '');
       const body    = buildBody(item.site_name || '', item.url || '', item.geo || '');
 
       let result: { ok: boolean; data: Record<string, unknown> };
