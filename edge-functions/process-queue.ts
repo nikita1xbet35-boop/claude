@@ -122,12 +122,12 @@ function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
   const hasGeo    = !!geoRaw && geoRaw !== 'the region' && geoRaw !== 'your market';
   const geoClause = hasGeo ? ` in ${geoRaw}` : '';
 
-  return `Hi, I came by ${siteName}, you've built real trust with your audience${geoClause}, `
-    + `and that's worth more than most programs pay for it. I'm Nick from 1xPartners. `
-    + `You're already monetising this traffic — I'll make it pay you more: clean RevShare on 1xBet, `
-    + `no admin fee, no hidden cuts, terms built around your actual numbers. `
-    + `You deal with me directly, not a support desk. I put together a short proposal — want me to send it over? `
-    + `Or message me on Telegram: @aff_manager_xbet`;
+  return `Hi, I came across ${siteName} — you've built real trust with your audience${geoClause}, `
+    + `and that's worth more than most programs actually pay for it. I'm Nick from 1xPartners. `
+    + `You're already monetising this traffic; I can make it pay you more — and here's why: `
+    + `clean RevShare on 1xBet with no admin fee, so you're not losing 20-30% to hidden cuts like most programs take. `
+    + `Individual terms, and you deal with me directly, not a support desk. `
+    + `I put together a short proposal — want me to send it over? Or ping me on Telegram: @aff_manager_xbet`;
 }
 
 // Decode HTML entities so site names never show raw "&amp;" / "&#x27;" etc.
@@ -194,8 +194,23 @@ function cleanSiteName(leadName: string, leadUrl: string): string {
   return domain || 'your site';
 }
 
-function buildSubject(_leadName: string, _leadUrl: string, _brand: string): string {
-  return `Your traffic deserves better`;
+function buildSubject(leadName: string, leadUrl: string, _brand: string, leadGeo?: string): string {
+  const site = cleanSiteName(leadName, leadUrl);
+  const geo  = geoName(leadGeo || '');
+  const hasGeo = !!geo && geo !== 'the region' && geo !== 'your market';
+  const SUBJECTS = [
+    hasGeo ? `${geo} traffic is worth more than you're getting` : `Your traffic is worth more than you're getting`,
+    `Your traffic deserves better`,
+    `Quick one about ${site}`,
+    `This is for ${site}`,
+    `Let's talk numbers`,
+    `Saw ${site} — let's talk`,
+    `Quick idea for ${site}`,
+    hasGeo ? `${geo} — and your traffic` : `Your traffic`,
+    `Worth a quick look, ${site}`,
+    `What's your traffic actually worth?`,
+  ];
+  return SUBJECTS[Math.floor(Math.random() * SUBJECTS.length)];
 }
 
 async function markFailed(item: Record<string, unknown>, errMsg: string, forceSkip = false): Promise<boolean> {
@@ -403,7 +418,7 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      const subject = buildSubject(lead.name, lead.url || '', item.brand);
+      const subject = buildSubject(lead.name, lead.url || '', item.brand, lead.geo as string);
       const body    = buildEmailBody(lead, item.brand);
 
       // Send

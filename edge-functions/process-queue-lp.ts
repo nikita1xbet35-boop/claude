@@ -113,8 +113,23 @@ function cleanSiteName(leadName: string, leadUrl: string): string {
   return domain || 'your site';
 }
 
-function buildSubject(_siteName: string, _url: string): string {
-  return `Your traffic deserves better`;
+function buildSubject(siteName: string, url: string, geo?: string): string {
+  const site = cleanSiteName(siteName, url);
+  const place = geoName(geo || '');
+  const hasGeo = !!place && place !== 'the region' && place !== 'your market';
+  const SUBJECTS = [
+    hasGeo ? `${place} traffic is worth more than you're getting` : `Your traffic is worth more than you're getting`,
+    `Your traffic deserves better`,
+    `Quick one about ${site}`,
+    `This is for ${site}`,
+    `Let's talk numbers`,
+    `Saw ${site} — let's talk`,
+    `Quick idea for ${site}`,
+    hasGeo ? `${place} — and your traffic` : `Your traffic`,
+    `Worth a quick look, ${site}`,
+    `What's your traffic actually worth?`,
+  ];
+  return SUBJECTS[Math.floor(Math.random() * SUBJECTS.length)];
 }
 
 function buildBody(siteName: string, url: string, geo: string): string {
@@ -122,12 +137,12 @@ function buildBody(siteName: string, url: string, geo: string): string {
   const place     = geoName(geo);
   const hasGeo    = !!place && place !== 'the region' && place !== 'your market';
   const geoClause = hasGeo ? ` in ${place}` : '';
-  return `Hi, I came by ${name}, you've built real trust with your audience${geoClause}, `
-    + `and that's worth more than most programs pay for it. I'm Nick from Lucky Pari Partners. `
-    + `You're already monetising this traffic — I'll make it pay you more: clean RevShare on Lucky Pari, `
-    + `no admin fee, no hidden cuts, terms built around your actual numbers. `
-    + `You deal with me directly, not a support desk. I put together a short proposal — want me to send it over? `
-    + `Or message me on Telegram: @af_luckypari`;
+  return `Hi, I came across ${name} — you've built real trust with your audience${geoClause}, `
+    + `and that's worth more than most programs actually pay for it. I'm Nick from Lucky Pari Partners. `
+    + `You're already monetising this traffic; I can make it pay you more — and here's why: `
+    + `clean RevShare on Lucky Pari with no admin fee, so you're not losing 20-30% to hidden cuts like most programs take. `
+    + `Individual terms, and you deal with me directly, not a support desk. `
+    + `I put together a short proposal — want me to send it over? Or ping me on Telegram: @af_luckypari`;
 }
 
 const PLACEHOLDER_LOCAL = new Set([
@@ -230,7 +245,7 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      const subject = buildSubject(item.site_name || '', item.url || '');
+      const subject = buildSubject(item.site_name || '', item.url || '', item.geo || '');
       const body    = buildBody(item.site_name || '', item.url || '', item.geo || '');
 
       let result: { ok: boolean; data: Record<string, unknown> };

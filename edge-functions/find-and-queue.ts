@@ -33,10 +33,9 @@ const MIN_SCORE        = 40;
 // for llama-3.1-8b-instant), not requests/min — single-site calls at any pacing
 // blow the token budget. One batched call (~1800 tokens) covers 8 sites.
 const GROQ_BATCH_SIZE  = 8;
-// Min ms between batch calls — 2 calls/min × ~1800 tokens ≈ 3600 TPM, well under
-// the 6000 TPM free-tier cap. Keeping max 2 batches in any rolling 60s window
-// prevents 429s even when the prompt runs slightly longer than estimated.
-const GROQ_PACE_MS     = 30_000;
+// Min ms between batch calls — 5 calls/min × ~1800 tokens ≈ 9000 TPM. Keeping
+// 12s spacing leaves headroom and fits 3 batches inside the 150s edge-fn timeout.
+const GROQ_PACE_MS     = 12_000;
 
 // Minus-words appended to every DDG query to cut noise
 const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk';
@@ -61,47 +60,47 @@ interface Preset { id: string; name: string; geo: string; keywords: string[]; br
 const DEFAULT_PRESETS: Record<string, Preset[]> = {
   '1xbet': [
     { id:'1xb-ng', name:'Nigeria', geo:'NG',
-      keywords:["betting affiliate nigeria","betting cpa nigeria","nigeria betting blog","betting influencer nigeria","naija betting tips","sure prediction nigeria","betting promo code nigeria","casino bonus codes nigeria","gambling guest post nigeria","sports prediction blog nigeria","betting odds review nigeria"] },
+      keywords:["how to make money betting nigeria","best bookmaker nigeria 2026","paystack betting site","nigeria sports blog sponsored post","free booking codes nigeria","accumulator tips naija","nairaland betting thread","football accumulator nigeria","betting site with bonus nigeria"] },
     { id:'1xb-ke', name:'Kenya', geo:'KE',
-      keywords:["betting affiliate kenya","kenya betting blog","sportpesa prediction","betting tips kenya site","sure odds kenya","casino bonus kenya","betting promo code kenya","gambling write for us kenya","soccer prediction blog kenya","mozzart kenya review"] },
+      keywords:["mpesa betting site kenya","best odds kenya","aviator kenya tricks","betting site with free bonus kenya","jackpot prediction kenya","kenya sports news blog","advertise betting kenya","paybill betting kenya","ligi kuu prediction"] },
     { id:'1xb-gh', name:'Ghana', geo:'GH',
-      keywords:["betting affiliate ghana","ghana betting blog","sure odds ghana","betting tips ghana site","football prediction ghana blog","casino bonus ghana","betting promo code ghana","gambling guest post ghana","sports betting blog ghana"] },
+      keywords:["mtn momo betting ghana","how to win bet ghana","best odds ghana 2026","aviator ghana strategy","ghana sports blog advertise","ghana premier league prediction","free bet ghana"] },
     { id:'1xb-kg', name:'Kyrgyzstan', geo:'KG',
-      keywords:["букмекерский партнер","бонусы казино промокод","прогнозы на спорт блог","ставки блог обзор","беттинг блог снг","партнёрка букмекер снг","прогнозы экспресс","обзор ставок кыргызстан"] },
+      keywords:["как заработать на ставках","экспресс дня бесплатно","стратегия ставок на спорт","авиатор сигналы стратегия","промокод на ставку","разместить рекламу ставки","прогноз на матч сегодня","отзывы букмекеров снг","ставки через смс","заработок на авиаторе"] },
     { id:'1xb-my', name:'Malaysia', geo:'MY',
-      keywords:["betting affiliate malaysia","judi online blog","malaysia betting tips","casino bonus malaysia","betting promo malaysia","sports prediction malaysia","4d prediction blog","gambling guest post malaysia","judi bola tips"] },
+      keywords:["trusted online casino malaysia 2026","duitnow casino malaysia","how to win 4d","malaysia football tips telegram","casino sponsored post malaysia","online betting reload bonus","judi dalam talian malaysia","tips bola sepak hari ini"] },
     { id:'1xb-ph', name:'Philippines', geo:'PH',
-      keywords:["betting affiliate philippines","pinoy betting blog","jili affiliate philippines","pinoy gambling guest post","sabong tips site","betting promo philippines","gambling blog philippines","sports prediction pinoy","online casino guide philippines"] },
+      keywords:["gcash casino philippines","maya online casino","how to win jili games","sabong live betting","paano manalo sa casino","pba prediction today","philippines casino sponsored","e-bingo online","pinoy slots tips"] },
     { id:'1xb-np', name:'Nepal', geo:'NP',
-      keywords:["betting affiliate nepal","nepal betting blog","esewa betting blog nepal","casino bonus nepal","betting tips nepal blog","sports prediction nepal","ipl prediction nepal","gambling guest post nepal"] },
+      keywords:["khalti betting nepal","how to bet in nepal","ipl prediction nepal today","esewa casino deposit","nepali betting telegram","online juwa nepal","cricket tips nepali","nepal casino guide"] },
     { id:'1xb-pk', name:'Pakistan', geo:'PK',
-      keywords:["betting affiliate pakistan","pakistan betting blog","cricket prediction pakistan site","casino affiliate pakistan","pakistan betting promo code","betting tips pakistan blog","psl prediction site","jazzcash betting blog pakistan","urdu betting blog"] },
+      keywords:["easypaisa betting pakistan","how to bet on cricket pakistan","psl winning prediction","jazzcash casino deposit","cricket betting urdu guide","aviator game pakistan trick","free cricket tips telegram pakistan","online cricket id pakistan","t20 prediction today"] },
     { id:'1xb-in', name:'India', geo:'IN',
-      keywords:["betting affiliate india","india betting blog","cricket prediction india site","ipl prediction blog","casino affiliate india","rummy affiliate india","teen patti blog","sure betting tips india","gambling guest post india","betting influencer india"] },
+      keywords:["upi casino india","how to win dream11","online cricket id india","paytm betting app","color prediction game india","ipl satta tips","indian rummy cash game","andar bahar real money","aviator hack india","best betting app india 2026","telegram cricket prediction india"] },
     { id:'1xb-bd', name:'Bangladesh', geo:'BD',
-      keywords:["betting affiliate bangladesh","bangladesh betting blog","bkash betting blog bangladesh","casino affiliate bangladesh","bpl prediction site","betting tips bangladesh blog","aviator prediction bangladesh","gambling guest post bangladesh"] },
+      keywords:["bkash casino bangladesh","nagad betting deposit","how to bet bpl","cricket prediction bangla","online casino bd review","aviator game bd trick","betting tips bangla telegram","real money game bangladesh"] },
     { id:'1xb-ar', name:'Argentina', geo:'AR',
-      keywords:["afiliados casino argentina","casino blog argentina","pronosticos deportivos argentina","código promocional apuestas argentina","bono casino argentina codigo","tips apuestas argentina","blog apuestas deportivas argentina","influencer apuestas argentina"] },
+      keywords:["mercadopago casino argentina","como ganar en aviator","casino con bono sin deposito argentina","ruleta en vivo argentina","tragamonedas dinero real","apuestas mercado pago","predicciones liga argentina"] },
     { id:'1xb-cl', name:'Chile', geo:'CL',
-      keywords:["afiliados casino chile","casino blog chile","pronosticos deportivos chile","código promocional apuestas chile","bono casino chile codigo","tips apuestas chile","blog apuestas chile"] },
+      keywords:["como ganar en casino chile","casino webpay chile","pronostico futbol chileno","aviator estrategia chile","tragamonedas chile dinero real","apuestas deportivas chile bono","predicciones primera division chile"] },
     { id:'1xb-ci', name:'Côte d\'Ivoire', geo:'CI',
-      keywords:["affilié casino côte d'ivoire","blog paris sportifs CIV","pronostic foot abidjan","blog parieur abidjan","bonus casino CIV code","conseils paris CIV","blog casino abidjan"] },
+      keywords:["pari sportif wave côte d'ivoire","comment gagner au paris","pronostic ligue 1 abidjan","orange money casino civ","astuce aviator côte d'ivoire","meilleur site pari abidjan","code promo paris civ"] },
     { id:'1xb-bf', name:'Burkina Faso', geo:'BF',
-      keywords:["affilié casino burkina","blog paris sportifs burkina","pronostic foot ouagadougou","influenceur paris burkina","bonus casino burkina code","conseils paris burkina"] },
+      keywords:["pari sportif orange money burkina","comment gagner pari burkina","pronostic foot ouaga","astuce aviator burkina","meilleur site pari burkina","moov money casino"] },
     { id:'1xb-sn', name:'Senegal', geo:'SN',
-      keywords:["affilié casino sénégal","blog paris sportifs dakar","pronostic foot sénégal","programme affiliation paris sénégal","bonus casino sénégal code","conseils paris sénégal"] },
+      keywords:["pari sportif wave sénégal","comment gagner au pari sénégal","pronostic foot dakar","orange money casino sénégal","astuce aviator sénégal","meilleur bookmaker sénégal"] },
     { id:'1xb-cm', name:'Cameroun', geo:'CM',
-      keywords:["affilié casino cameroun","blog paris sportifs douala","pronostic foot cameroun","blog parieur cameroun","bonus casino cameroun code","conseils paris cameroun"] },
+      keywords:["pari sportif mtn money cameroun","comment gagner pari cameroun","pronostic elite one","orange money casino cameroun","astuce aviator cameroun","meilleur site pari douala"] },
     { id:'1xb-ma', name:'Morocco', geo:'MA',
-      keywords:["affilié casino maroc","blog paris sportifs maroc","pronostic foot maroc","influenceur paris maroc","bonus casino maroc code","كازينو بونص المغرب","نصائح الرهان المغرب"] },
+      keywords:["pari sportif maroc cih","comment gagner au pari maroc","pronostic botola pro","طريقة الربح من الرهان","كازينو الدفع عند","astuce aviator maroc","موقع رهان مغربي"] },
     { id:'1xb-za', name:'South Africa', geo:'ZA',
-      keywords:["betting affiliate south africa","south africa betting blog","sports prediction SA site","casino affiliate south africa","aviator prediction SA","betting tips SA blog","rugby betting tips","gambling guest post SA"] },
+      keywords:["how to win betting south africa","capitec betting site","aviator predictor SA","psl betting tips","sponsored betting post SA","best betting app south africa 2026","soccer betting telegram SA"] },
     { id:'1xb-vn', name:'Vietnam', geo:'VN',
-      keywords:["casino affiliate vietnam","nhà cái blog","soi kèo bóng đá","aviator dự đoán vietnam","khuyến mãi casino vietnam","mẹo cá cược vietnam","blog cá cược việt nam"] },
+      keywords:["casino momo vietnam","cách thắng aviator","soi kèo ngoại hạng anh","nhà cái uy tín 2026","đánh bài đổi thưởng","casino tặng tiền cược","mẹo cá độ bóng đá"] },
     { id:'1xb-mm', name:'Myanmar', geo:'MM',
-      keywords:["casino affiliate myanmar","myanmar betting blog","aviator prediction myanmar","myanmar gambling guest post","sports prediction myanmar","betting tips myanmar blog"] },
+      keywords:["wave money casino myanmar","how to bet myanmar","2d 3d online myanmar","football betting myanmar tips","aviator myanmar trick","online casino myanmar deposit"] },
     { id:'1xb-agency', name:'Agencies / Media', geo:'Global',
-      keywords:["revshare igaming traffic","igaming traffic provider","betting affiliate network","casino traffic agency","igaming media buying","performance marketing igaming","igaming user acquisition","betting cpa network","mobile traffic igaming","igaming affiliate company","betting traffic monetization","gambling media network"] },
+      keywords:["buy igaming traffic","casino smartlink network","betting offers affiliate program","igaming advertiser direct","traffic arbitrage casino","push traffic gambling","pop traffic betting","igaming media buyer hiring","casino affiliate manager direct","sweepstakes traffic network","in-app traffic igaming","programmatic gambling traffic"] },
   ],
   '1xcasino': [],
   'luckypari': [],
@@ -492,10 +491,15 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(20_000),
       });
-      if (res.status === 429 || res.status >= 500) {
+      if (res.status === 429) {
+        // Don't wait inside the edge function — this run is killed at 150s.
+        // The Cloudflare cron retriggers in 3 min; Groq quota refreshes in 60s.
+        groqLastError = 'HTTP 429 (rate limited — skipping)';
+        return null;
+      }
+      if (res.status >= 500) {
         groqLastError = `HTTP ${res.status}`;
-        // Wait long enough for the 60s TPM window to fully reset before retrying
-        await new Promise(r => setTimeout(r, 60_000 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 3_000 * (attempt + 1)));
         continue;
       }
       if (!res.ok) {
@@ -736,6 +740,12 @@ Deno.serve(async (req: Request) => {
   const deadline  = startedAt + TIME_BUDGET_MS;
 
   try {
+    // Write a "started" entry immediately so the function is visible in logs
+    // even if a downstream step (Groq, Supabase) kills the run before completion.
+    await supabase.from('error_log').insert([{
+      level: 'info', service: 'find-and-queue', message: 'started',
+    }]);
+
     // find-and-queue never pauses — finding new leads is always valuable
 
     // 2. Determine brand + preset — slot advances every 3 min (matches the find-and-queue
