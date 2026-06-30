@@ -4745,12 +4745,20 @@ async function fillStatsSent(){
   if(!valEl) return;
   const { start, end } = getStatsPeriodRange();
   try {
-    let q = sb.from('email_log').select('brand');
-    if(start) q = q.gte('sent_at', start.toISOString());
-    if(end)   q = q.lte('sent_at', end.toISOString());
-    const { data, error } = await q;
-    if(error) throw error;
-    const rows = data || [];
+    // Supabase отдаёт максимум 1000 строк за запрос — пагинируем, чтобы получить
+    // реальное число отправленных, а не обрезанное по лимиту.
+    const PAGE = 1000;
+    let from = 0, rows = [];
+    while(true){
+      let q = sb.from('email_log').select('brand');
+      if(start) q = q.gte('sent_at', start.toISOString());
+      if(end)   q = q.lte('sent_at', end.toISOString());
+      const { data, error } = await q.range(from, from + PAGE - 1);
+      if(error) throw error;
+      rows = rows.concat(data || []);
+      if(!data || data.length < PAGE) break;
+      from += PAGE;
+    }
     valEl.textContent = rows.length;
     if(subEl){
       const brands = {};
