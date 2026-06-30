@@ -4700,16 +4700,76 @@ function renderSearchHistory(){
 // ══════════════════════════════════════════
 //  СТАТИСТИКА
 // ══════════════════════════════════════════
+// ── Фильтр статистики по периоду ───────────────────────────────────────────
+let statsPeriod = { mode: 'all', from: null, to: null };
+
+function setStatsPeriod(mode){
+  statsPeriod = { mode, from: null, to: null };
+  renderStats();
+}
+function setStatsCustom(){
+  const f = (document.getElementById('stats-from')||{}).value || null;
+  const t = (document.getElementById('stats-to')||{}).value || null;
+  if(!f && !t){ setStatsPeriod('all'); return; }
+  statsPeriod = { mode: 'custom', from: f, to: t };
+  renderStats();
+}
+function filterLeadsByPeriod(list){
+  const { mode, from, to } = statsPeriod;
+  if(mode === 'all') return list;
+  const now = new Date();
+  let start = null, end = null;
+  if(mode === 'today'){ start = new Date(now); start.setHours(0,0,0,0); }
+  else if(mode === '7d'){ start = new Date(now); start.setDate(now.getDate()-6); start.setHours(0,0,0,0); }
+  else if(mode === '30d'){ start = new Date(now); start.setDate(now.getDate()-29); start.setHours(0,0,0,0); }
+  else if(mode === 'custom'){
+    if(from){ start = new Date(from); start.setHours(0,0,0,0); }
+    if(to){ end = new Date(to); end.setHours(23,59,59,999); }
+  }
+  return list.filter(l => {
+    if(!l.created_at) return false;
+    const d = new Date(l.created_at);
+    if(start && d < start) return false;
+    if(end && d > end) return false;
+    return true;
+  });
+}
+function statsPeriodBar(){
+  const m = statsPeriod.mode;
+  const btn = (mode,label) =>
+    `<button onclick="setStatsPeriod('${mode}')" style="padding:7px 14px;border-radius:9px;border:1px solid ${m===mode?'var(--accent2)':'var(--border2)'};background:${m===mode?'var(--accent2)':'var(--bg)'};color:${m===mode?'#fff':'var(--text2)'};font-size:12px;font-family:var(--font-mono);cursor:pointer;transition:all .15s;">${label}</button>`;
+  return `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:22px;">
+      ${btn('today','Сегодня')}
+      ${btn('7d','7 дней')}
+      ${btn('30d','30 дней')}
+      ${btn('all','Всё время')}
+      <div style="width:1px;height:24px;background:var(--border2);margin:0 4px;"></div>
+      <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">от</span>
+      <input type="date" id="stats-from" value="${statsPeriod.from||''}" onchange="setStatsCustom()"
+        style="padding:6px 10px;border-radius:8px;border:1px solid ${m==='custom'?'var(--accent2)':'var(--border2)'};background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);">
+      <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">до</span>
+      <input type="date" id="stats-to" value="${statsPeriod.to||''}" onchange="setStatsCustom()"
+        style="padding:6px 10px;border-radius:8px;border:1px solid ${m==='custom'?'var(--accent2)':'var(--border2)'};background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);">
+    </div>`;
+}
+
 function renderStats(){
   const el = document.getElementById('stats-content');
   if(!el) return;
   if(!leads.length){ el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:80px;font-size:13px;">Нет данных. Сначала загрузите лиды.</div>'; return; }
 
-  // aggregate data
-  const total = leads.length;
-  const highPrio = leads.filter(l => l.priority==='High').length;
-  const withContact = leads.filter(l => l.email||l.tg).length;
-  const clean = leads.filter(l => !l.has_1xbet).length;
+  const filtered = filterLeadsByPeriod(leads);
+  if(!filtered.length){
+    el.innerHTML = statsPeriodBar() + '<div style="text-align:center;color:var(--text3);padding:60px;font-size:13px;">Нет лидов за выбранный период.</div>';
+    return;
+  }
+
+  // aggregate data (по отфильтрованному периоду)
+  const total = filtered.length;
+  const highPrio = filtered.filter(l => l.priority==='High').length;
+  const withContact = filtered.filter(l => l.email||l.tg).length;
+  const clean = filtered.filter(l => !l.has_1xbet).length;
 
   const byStage = {};
   const byGeo = {};
@@ -4717,7 +4777,7 @@ function renderStats(){
   const byPrio = {High:0,Medium:0,Low:0};
   const scoreRanges = {'80-100':0,'60-79':0,'40-59':0,'0-39':0};
 
-  leads.forEach(l => {
+  filtered.forEach(l => {
     byStage[l.stage||'new'] = (byStage[l.stage||'new']||0) + 1;
     byGeo[l.geo||'—'] = (byGeo[l.geo||'—']||0) + 1;
     byType[l.type||'—'] = (byType[l.type||'—']||0) + 1;
@@ -4757,7 +4817,7 @@ function renderStats(){
   const stageSegs = Object.entries(byStage).map(([k,v])=>({val:v,color:stageColors[k]||'var(--text3)',label:stageNames[k]||k}));
   const prioSegs = [{val:byPrio.High,color:'var(--green)',label:'High'},{val:byPrio.Medium,color:'var(--amber)',label:'Medium'},{val:byPrio.Low,color:'var(--text3)',label:'Low'}];
 
-  el.innerHTML = `
+  el.innerHTML = statsPeriodBar() + `
     <!-- KPI CARDS -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px;">
       ${[
