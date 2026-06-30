@@ -4761,9 +4761,15 @@ async function fillStatsSent(){
     }
     valEl.textContent = rows.length;
     if(subEl){
+      // Нормализуем бренд (в email_log встречается разный регистр: "1xbet" и "1xBet")
+      const LABELS = { '1xbet':'1xBet', 'luckypari':'Lucky Pari', '1xcasino':'1xCasino' };
       const brands = {};
-      rows.forEach(e => { const b = e.brand || '1xbet'; brands[b] = (brands[b]||0)+1; });
-      subEl.textContent = Object.entries(brands).sort((a,b)=>b[1]-a[1]).map(([b,c])=>`${b}: ${c}`).join(' · ') || 'за период';
+      rows.forEach(e => {
+        const key = (e.brand || '1xbet').toLowerCase();
+        brands[key] = (brands[key]||0)+1;
+      });
+      subEl.textContent = Object.entries(brands).sort((a,b)=>b[1]-a[1])
+        .map(([b,c])=>`${LABELS[b]||b}: ${c}`).join(' · ') || 'за период';
     }
   } catch(e){
     valEl.textContent = '—';
