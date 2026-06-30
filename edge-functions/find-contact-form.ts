@@ -112,6 +112,12 @@ function normalizeBase(url: string): string | null {
   } catch (_) { return null; }
 }
 
+function domainOf(url: string): string {
+  try {
+    return new URL(url.startsWith('http') ? url : 'https://' + url).hostname.replace(/^www\./, '').toLowerCase();
+  } catch { return ''; }
+}
+
 // ── HTML form parsing (deterministic) ───────────────────────────────────────
 interface ParsedField {
   tag: 'input' | 'textarea' | 'select';
@@ -332,6 +338,13 @@ Deno.serve(async (req: Request) => {
         { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
+    // Load the blacklist once — we never touch blacklisted domains.
+    let blacklistSet = new Set<string>();
+    try {
+      const { data: bl } = await supabase.from('blacklist').select('value');
+      blacklistSet = new Set((bl || []).map((r: any) => (r.value || '').toLowerCase()));
+    } catch (_) { /* blacklist optional */ }
+
     // Poison-lead protection: mark whole batch 'no_form' up front. A successful
     // detection overwrites it; a site that kills the isolate won't be re-picked forever.
     await supabase.from('leads')
@@ -344,6 +357,13 @@ Deno.serve(async (req: Request) => {
       const url = lead.url as string;
 
       if (!url || /^https?:\/\/(www\.)?t\.me\//i.test(url)) {
+        stats.no_form++;
+        continue;
+      }
+
+      // Skip blacklisted domains entirely (stays marked no_form).
+      const dom = domainOf(url);
+      if (dom && blacklistSet.has(dom)) {
         stats.no_form++;
         continue;
       }

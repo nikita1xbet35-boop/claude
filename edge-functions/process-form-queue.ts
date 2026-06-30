@@ -120,6 +120,13 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
+    // Human-like jitter: skip ~1 in 4 runs so submissions don't land on a perfectly
+    // regular 10-minute grid. (50/day cap still reachable across ~72 daily slots.)
+    if (SENDING_ENABLED && Math.random() < 0.25) {
+      stats.reason = 'jitter skip';
+      return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
     // Daily cap from api_usage('form_main')
     const dayStart = new Date(`${dateStr}T00:00:00+03:00`);
     const dayEnd   = new Date(`${dateStr}T23:59:59+03:00`);
@@ -160,8 +167,20 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // One-domain-once: never submit a domain we've already submitted to.
     const dom = domainOf(lead.url as string);
+
+    // Blacklist guard — never submit to a blacklisted domain.
+    if (dom) {
+      const { data: bl } = await supabase.from('blacklist').select('value').eq('value', dom).limit(1);
+      if (bl && bl.length > 0) {
+        await supabase.from('leads').update({ form_status: 'no_form' }).eq('id', lead.id);
+        stats.skipped++;
+        stats.reason = 'domain blacklisted';
+        return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // One-domain-once: never submit a domain we've already submitted to.
     if (dom) {
       const { data: prior } = await supabase.from('form_submissions')
         .select('id').eq('status', 'sent').ilike('url', `%${dom}%`).limit(1);
