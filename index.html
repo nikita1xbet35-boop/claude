@@ -4714,9 +4714,8 @@ function setStatsCustom(){
   statsPeriod = { mode: 'custom', from: f, to: t };
   renderStats();
 }
-function filterLeadsByPeriod(list){
+function getStatsPeriodRange(){
   const { mode, from, to } = statsPeriod;
-  if(mode === 'all') return list;
   const now = new Date();
   let start = null, end = null;
   if(mode === 'today'){ start = new Date(now); start.setHours(0,0,0,0); }
@@ -4726,6 +4725,11 @@ function filterLeadsByPeriod(list){
     if(from){ start = new Date(from); start.setHours(0,0,0,0); }
     if(to){ end = new Date(to); end.setHours(23,59,59,999); }
   }
+  return { start, end };
+}
+function filterLeadsByPeriod(list){
+  if(statsPeriod.mode === 'all') return list;
+  const { start, end } = getStatsPeriodRange();
   return list.filter(l => {
     if(!l.created_at) return false;
     const d = new Date(l.created_at);
@@ -4733,6 +4737,30 @@ function filterLeadsByPeriod(list){
     if(end && d > end) return false;
     return true;
   });
+}
+// Асинхронно подтягивает число отправленных писем из email_log за выбранный период
+async function fillStatsSent(){
+  const valEl = document.getElementById('stats-sent-val');
+  const subEl = document.getElementById('stats-sent-sub');
+  if(!valEl) return;
+  const { start, end } = getStatsPeriodRange();
+  try {
+    let q = sb.from('email_log').select('brand');
+    if(start) q = q.gte('sent_at', start.toISOString());
+    if(end)   q = q.lte('sent_at', end.toISOString());
+    const { data, error } = await q;
+    if(error) throw error;
+    const rows = data || [];
+    valEl.textContent = rows.length;
+    if(subEl){
+      const brands = {};
+      rows.forEach(e => { const b = e.brand || '1xbet'; brands[b] = (brands[b]||0)+1; });
+      subEl.textContent = Object.entries(brands).sort((a,b)=>b[1]-a[1]).map(([b,c])=>`${b}: ${c}`).join(' · ') || 'за период';
+    }
+  } catch(e){
+    valEl.textContent = '—';
+    if(subEl) subEl.textContent = 'ошибка загрузки';
+  }
 }
 function statsPeriodBar(){
   const m = statsPeriod.mode;
@@ -4761,7 +4789,16 @@ function renderStats(){
 
   const filtered = filterLeadsByPeriod(leads);
   if(!filtered.length){
-    el.innerHTML = statsPeriodBar() + '<div style="text-align:center;color:var(--text3);padding:60px;font-size:13px;">Нет лидов за выбранный период.</div>';
+    el.innerHTML = statsPeriodBar() + `
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px;">
+        <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;padding:20px 22px;">
+          <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">✉ Писем отправлено</div>
+          <div id="stats-sent-val" style="font-size:36px;font-weight:500;font-family:var(--font-mono);color:var(--green);">…</div>
+          <div id="stats-sent-sub" style="font-size:11px;color:var(--text3);margin-top:4px;">за период</div>
+        </div>
+      </div>
+      <div style="text-align:center;color:var(--text3);padding:40px;font-size:13px;">Нет новых лидов за выбранный период.</div>`;
+    fillStatsSent();
     return;
   }
 
@@ -4819,7 +4856,7 @@ function renderStats(){
 
   el.innerHTML = statsPeriodBar() + `
     <!-- KPI CARDS -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px;">
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px;">
       ${[
         {label:'Всего лидов',val:total,color:'var(--accent2)',icon:'◎'},
         {label:'Высокий приоритет',val:highPrio,color:'var(--green)',icon:'↑'},
@@ -4831,6 +4868,11 @@ function renderStats(){
           <div style="font-size:36px;font-weight:500;font-family:var(--font-mono);color:${c.color};">${c.val}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:4px;">${Math.round(c.val/total*100)}% от базы</div>
         </div>`).join('')}
+      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;padding:20px 22px;">
+        <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">✉ Писем отправлено</div>
+        <div id="stats-sent-val" style="font-size:36px;font-weight:500;font-family:var(--font-mono);color:var(--green);">…</div>
+        <div id="stats-sent-sub" style="font-size:11px;color:var(--text3);margin-top:4px;">за период</div>
+      </div>
     </div>
 
     <!-- CHARTS ROW 1 -->
@@ -4927,6 +4969,8 @@ function renderStats(){
       </div>
     </div>
   `;
+
+  fillStatsSent();
 }
 
 // ══════════════════════════════════════════
