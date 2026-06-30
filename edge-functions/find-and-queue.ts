@@ -937,12 +937,27 @@ Deno.serve(async (req: Request) => {
         if (contact.sourceUrl) leadData.contact_source_url = contact.sourceUrl;
 
         let { error: insErr } = await supabase.from('leads').insert([leadData]);
-        // If domain_normalized column doesn't exist (migration not yet run), retry without it
-        if (insErr?.message?.includes('domain_normalized')) {
-          const fallbackData = { ...leadData };
-          delete fallbackData.domain_normalized;
-          const { error: retryErr } = await supabase.from('leads').insert([fallbackData]);
-          insErr = retryErr ?? null;
+        let wasDuplicate = false;
+        if (insErr) {
+          const msg  = insErr.message || '';
+          const code = (insErr as any).code;
+          // UNIQUE violation = the domain already exists → real dedup hit. Skip it.
+          // (Critically: do NOT retry without domain_normalized — that's what was
+          //  smuggling NULL-domain duplicates past the constraint, ~500/day.)
+          if (code === '23505' || /duplicate key|unique constraint/i.test(msg)) {
+            wasDuplicate = true;
+            insErr = null;
+          } else if (/could not find|schema cache|does not exist/i.test(msg) && msg.includes('domain_normalized')) {
+            // Genuine missing-column (only happens pre-migration) → retry without it.
+            const fallbackData = { ...leadData };
+            delete fallbackData.domain_normalized;
+            const { error: retryErr } = await supabase.from('leads').insert([fallbackData]);
+            insErr = retryErr ?? null;
+          }
+        }
+        if (wasDuplicate) {
+          existingDomains.add(domNorm); // already in DB — never re-attempt this run
+          continue;
         }
         if (!insErr) {
           existingDomains.add(domNorm); // prevent same-run duplicates
