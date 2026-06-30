@@ -505,5 +505,16 @@ export default {
       await call('process-queue-lp', {});
       return;
     }
+
+    if (cron === '*/10 * * * *') {
+      // Form channel (second delivery channel for leads without email):
+      //   find-contact-form  — detect + classify contact forms (read-only)
+      //   process-form-queue — submit simple forms (DRY-RUN until FORM_SENDING_ENABLED=true)
+      await Promise.all([
+        call('find-contact-form', {}),
+        call('process-form-queue', {}),
+      ]);
+      return;
+    }
   },
 };

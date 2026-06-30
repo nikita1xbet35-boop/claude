@@ -1324,6 +1324,13 @@
         <option value="SEO Media">SEO Media</option>
         <option value="Directory">Directory</option>
       </select>
+      <select class="db-filter" id="db-form-filter" onchange="filterDB()">
+        <option value="">Все формы</option>
+        <option value="simple">Форма: простая</option>
+        <option value="manual_required">Форма: ручная ⚠</option>
+        <option value="submitted">Форма: отправлена</option>
+        <option value="no_form">Без формы</option>
+      </select>
       <div class="db-stats">
         <span>Всего: <span class="db-stat-val" id="db-total">8</span></span>
         <span>Высокий приоритет: <span class="db-stat-val" id="db-high">4</span></span>
@@ -3896,11 +3903,13 @@ function _applyDBFilter(){
   const stage = document.getElementById('db-stage-filter').value;
   const prio  = document.getElementById('db-priority-filter').value;
   const type  = document.getElementById('db-type-filter').value;
+  const form  = (document.getElementById('db-form-filter') || {}).value || '';
   let data = leads.filter(l => {
     if(q && !`${l.name} ${l.url} ${l.geo} ${l.lang}`.toLowerCase().includes(q)) return false;
     if(stage && l.stage !== stage) return false;
     if(prio  && l.priority !== prio) return false;
     if(type  && l.type !== type) return false;
+    if(form  && l.form_status !== form) return false;
     return true;
   });
   _dbSorted = [...data].sort((a,b) => {
@@ -3912,6 +3921,20 @@ function _applyDBFilter(){
   document.getElementById('db-contact').textContent = data.filter(l => l.email || l.tg).length;
   _renderDBPage();
   _renderDBPagination();
+}
+
+// Small badge for the form-channel state when a lead has no email/telegram.
+function formStatusBadge(fs){
+  const map = {
+    simple:          ['📝 форма', 'var(--green)'],
+    manual_required: ['⚠ ручная', 'var(--amber)'],
+    submitted:       ['✓ форма отпр.', 'var(--blue)'],
+    failed:          ['✕ форма', 'var(--red)'],
+    no_form:         ['нет формы', 'var(--text3)'],
+  };
+  const v = map[fs];
+  if(!v) return '<span style="color:var(--text3)">—</span>';
+  return `<span style="color:${v[1]};font-family:var(--font-mono);font-size:11px;">${v[0]}</span>`;
 }
 
 function _renderDBPage(){
@@ -3929,7 +3952,7 @@ function _renderDBPage(){
         ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✉ ${l.email}</span>`
         : l.tg
           ? `<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px;">✈ ${l.tg}</span>`
-          : '<span style="color:var(--text3)">—</span>'}</td>
+          : formStatusBadge(l.form_status)}</td>
       <td><span class="chip ${stageChip[l.stage] || 'chip-new'}">${stageRU[l.stage] || l.stage}</span></td>
       <td><span class="score-badge ${sc(l.score || 0)}">${l.score || '—'}</span></td>
       <td style="color:${prioColor[l.priority] || 'var(--text3)'};">${prioRU[l.priority] || l.priority || '—'}</td>
@@ -4776,6 +4799,25 @@ async function fillStatsSent(){
     if(subEl) subEl.textContent = 'ошибка загрузки';
   }
 }
+// Асинхронно подтягивает число отправок через контактные формы за выбранный период
+async function fillStatsForms(){
+  const valEl = document.getElementById('stats-forms-val');
+  const subEl = document.getElementById('stats-forms-sub');
+  if(!valEl) return;
+  const { start, end } = getStatsPeriodRange();
+  try {
+    let q = sb.from('form_submissions').select('id', { count: 'exact', head: true }).eq('status','sent');
+    if(start) q = q.gte('submitted_at', start.toISOString());
+    if(end)   q = q.lte('submitted_at', end.toISOString());
+    const { count, error } = await q;
+    if(error) throw error;
+    valEl.textContent = count ?? 0;
+  } catch(e){
+    // Таблица form_submissions может ещё не существовать (миграция 002 не применена)
+    valEl.textContent = '0';
+    if(subEl) subEl.textContent = 'канал форм не активен';
+  }
+}
 function statsPeriodBar(){
   const m = statsPeriod.mode;
   const btn = (mode,label) =>
@@ -4813,6 +4855,7 @@ function renderStats(){
       </div>
       <div style="text-align:center;color:var(--text3);padding:40px;font-size:13px;">Нет новых лидов за выбранный период.</div>`;
     fillStatsSent();
+    fillStatsForms();
     return;
   }
 
@@ -4870,7 +4913,7 @@ function renderStats(){
 
   el.innerHTML = statsPeriodBar() + `
     <!-- KPI CARDS -->
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px;">
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:24px;">
       ${[
         {label:'Всего лидов',val:total,color:'var(--accent2)',icon:'◎'},
         {label:'Высокий приоритет',val:highPrio,color:'var(--green)',icon:'↑'},
@@ -4886,6 +4929,11 @@ function renderStats(){
         <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">✉ Писем отправлено</div>
         <div id="stats-sent-val" style="font-size:36px;font-weight:500;font-family:var(--font-mono);color:var(--green);">…</div>
         <div id="stats-sent-sub" style="font-size:11px;color:var(--text3);margin-top:4px;">за период</div>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;padding:20px 22px;">
+        <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">📝 Форм отправлено</div>
+        <div id="stats-forms-val" style="font-size:36px;font-weight:500;font-family:var(--font-mono);color:var(--purple);">…</div>
+        <div id="stats-forms-sub" style="font-size:11px;color:var(--text3);margin-top:4px;">за период</div>
       </div>
     </div>
 
@@ -4985,6 +5033,7 @@ function renderStats(){
   `;
 
   fillStatsSent();
+  fillStatsForms();
 }
 
 // ══════════════════════════════════════════
