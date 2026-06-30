@@ -41,6 +41,18 @@ jobs:
             -d '{"query":"ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS found_keyword TEXT DEFAULT NULL;"}' \
             && echo "found_keyword column OK" || echo "found_keyword migration skipped (may already exist)"
 
+      - name: Apply migration 002 (form channel)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          PAYLOAD=$(python3 -c "import json; print(json.dumps({'query': open('supabase/migrations/002_form_channel.sql').read()}))")
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            && echo "Migration 002 OK" || echo "Migration 002 skipped (may already be applied)"
+
       - name: Prepare function directories
         run: |
           mkdir -p supabase/functions/extract-contacts
@@ -51,6 +63,8 @@ jobs:
           mkdir -p supabase/functions/send-email-outlook
           mkdir -p supabase/functions/process-queue-lp
           mkdir -p supabase/functions/admin-reset
+          mkdir -p supabase/functions/find-contact-form
+          mkdir -p supabase/functions/process-form-queue
           cp edge-functions/extract-contacts.ts    supabase/functions/extract-contacts/index.ts
           cp edge-functions/generate-queue.ts      supabase/functions/generate-queue/index.ts
           cp edge-functions/process-queue.ts       supabase/functions/process-queue/index.ts
@@ -59,6 +73,8 @@ jobs:
           cp edge-functions/send-email-outlook.ts  supabase/functions/send-email-outlook/index.ts
           cp edge-functions/process-queue-lp.ts    supabase/functions/process-queue-lp/index.ts
           cp edge-functions/admin-reset.ts         supabase/functions/admin-reset/index.ts
+          cp edge-functions/find-contact-form.ts   supabase/functions/find-contact-form/index.ts
+          cp edge-functions/process-form-queue.ts  supabase/functions/process-form-queue/index.ts
 
       - name: Deploy extract-contacts
         env:
@@ -99,6 +115,16 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase functions deploy admin-reset --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
+
+      - name: Deploy find-contact-form
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy find-contact-form --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
+
+      - name: Deploy process-form-queue
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy process-form-queue --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
       - name: Reset system state via Supabase Management API
         env:
