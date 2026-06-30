@@ -126,6 +126,13 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase functions deploy process-form-queue --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
+      # Arm the form channel. process-form-queue stays in DRY-RUN until this secret
+      # is 'true'. To disable sending again, set it to 'false' here and redeploy.
+      - name: Arm form sending (FORM_SENDING_ENABLED)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase secrets set FORM_SENDING_ENABLED=true --project-ref lxsyrserfuighwxuymgb
+
       - name: Reset system state via Supabase Management API
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
