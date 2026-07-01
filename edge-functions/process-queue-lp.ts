@@ -276,6 +276,7 @@ Deno.serve(async (req: Request) => {
           gmail_account: 'gmail_lp',
           sent_at:       sentAt,
           bounced:       false,
+          source:        'seo', // LP base is imported affiliate sites (SEO source)
         }]);
 
         // Keep the api_usage.gmail_lp counter in sync with reality so the

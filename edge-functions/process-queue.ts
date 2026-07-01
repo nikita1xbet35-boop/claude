@@ -451,6 +451,7 @@ Deno.serve(async (req: Request) => {
           gmail_account: account,
           sent_at:       sentAt,
           bounced:       false,
+          source:        (lead.source as string) || 'seo',
           ...(gmailMessageId ? { gmail_message_id: gmailMessageId } : {}),
         }]);
 

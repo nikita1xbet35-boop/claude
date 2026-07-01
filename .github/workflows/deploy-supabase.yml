@@ -65,6 +65,18 @@ jobs:
             -d "$PAYLOAD" \
             && echo "Migration 003 OK" || echo "Migration 003 skipped (may already be applied)"
 
+      - name: Apply migration 004 (source propagation)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          PAYLOAD=$(python3 -c "import json; print(json.dumps({'query': open('supabase/migrations/004_source_propagation.sql').read()}))")
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            && echo "Migration 004 OK" || echo "Migration 004 skipped (may already be applied)"
+
       - name: Prepare function directories
         run: |
           mkdir -p supabase/functions/extract-contacts

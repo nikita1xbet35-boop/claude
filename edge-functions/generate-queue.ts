@@ -200,7 +200,7 @@ Deno.serve(async (req: Request) => {
 
     // Fill remaining capacity with new eligible leads
     const newQuota = Math.max(0, capacity - futurePending.length - overduePending.length);
-    let newLeads: Array<{ id: string; brand: string }> = [];
+    let newLeads: Array<{ id: string; brand: string; source: string }> = [];
 
     if (newQuota > 0) {
       // Hard dedup: ALL-TIME — never re-contact anyone we've ever emailed
@@ -221,7 +221,7 @@ Deno.serve(async (req: Request) => {
       // guarantees we never re-contact anyone, so widening the net is safe.
       const { data: candidates, error: leadsErr } = await supabase
         .from('leads')
-        .select('id, brand, contact_email, url, geo')
+        .select('id, brand, contact_email, url, geo, source')
         .in('stage', ['new', 'ready', 'researched', 'followup'])
         .not('contact_email', 'is', null)
         .neq('contact_email', '')
@@ -239,7 +239,7 @@ Deno.serve(async (req: Request) => {
         if (!isSendableEmail(l.contact_email)) continue;
         if (emailedSet.has(l.contact_email.toLowerCase())) continue;  // dedup by email
         if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;     // geo blacklist
-        newLeads.push({ id: l.id, brand: l.brand });
+        newLeads.push({ id: l.id, brand: l.brand, source: l.source || 'seo' });
       }
     }
 
@@ -270,6 +270,7 @@ Deno.serve(async (req: Request) => {
         gmail_account: 'main', // LP account disabled — all sends via main
         scheduled_at:  new Date(cursor).toISOString(),
         status:        'pending',
+        source:        l.source,
       });
       cursor += randInterval();
     }
