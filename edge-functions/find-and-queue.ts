@@ -9,16 +9,29 @@
 // Leads with a contact email become eligible for the send queue immediately.
 //
 // Deploy: supabase functions deploy find-and-queue --no-verify-jwt
-// Env:    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SERP_API_KEY, GROQ_API_KEY,
+// Env:    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SERPAPI_KEY_1/2/3, GROQ_API_KEY,
 //         JINA_API_KEY (optional)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const SERP_API_KEY = Deno.env.get('SERP_API_KEY') ||
-  ['59416a59dfd4fc019bcb24053a24e984', '86375c61bfed0bb7ae25d031393d64e1'].join('');
 const JINA_API_KEY = Deno.env.get('JINA_API_KEY') || '';
+
+// ── SerpApi accounts (second search source, rotated on monthly limit) ────────
+// Keys live in Supabase function secrets, never in code. Each maps to an
+// api_usage row (serpapi_1/2/3, monthly cap). When all are exhausted the search
+// falls back to DuckDuckGo (free) and alerts Telegram.
+const SERPAPI_ACCOUNTS = [
+  { service: 'serpapi_1', key: Deno.env.get('SERPAPI_KEY_1') || '' },
+  { service: 'serpapi_2', key: Deno.env.get('SERPAPI_KEY_2') || '' },
+  { service: 'serpapi_3', key: Deno.env.get('SERPAPI_KEY_3') || '' },
+].filter(a => a.key);
+const SERPAPI_MONTHLY_LIMIT = 250;
+// Pace SerpApi so 3×250=750 searches/month aren't burned in a day. Only ~1 in
+// SERP_EVERY runs uses SerpApi, and only for SERP_KW_PER_RUN keyword(s).
+const SERP_EVERY = 20;
+const SERP_KW_PER_RUN = 1;
 // Groq key: env var first, fall back to the key already shipped in index.html
 const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
   ['gsk_9DKnaMxmKm8WEPDDjtZbWGdyb3FYX', 'R6kIEWkpNsjz6BlDlvj347v'].join('');
@@ -389,6 +402,59 @@ async function searchDuckDuckGo(
     // If POST returned garbage (<3 results), fall back to page 1
     return paged.length >= 3 ? paged : parseDdgHtml(html1, num);
   } catch (_) { return parseDdgHtml(html1, num); }
+}
+
+// ── SerpApi (second search source) ──────────────────────────────────────────
+/** Query SerpApi (Google engine). Returns the same shape as DuckDuckGo results. */
+async function searchSerpApi(
+  query: string, num: number, apiKey: string,
+): Promise<Array<{ link: string; title: string; snippet: string }>> {
+  try {
+    const url = `https://serpapi.com/search.json?engine=google&num=${num}`
+      + `&q=${encodeURIComponent(query)}&api_key=${apiKey}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const organic = Array.isArray(data?.organic_results) ? data.organic_results : [];
+    return organic.slice(0, num).map((r: any) => ({
+      link:    r.link || '',
+      title:   r.title || '',
+      snippet: r.snippet || '',
+    })).filter((r: any) => r.link.startsWith('http'));
+  } catch (_) { return []; }
+}
+
+/** Pick the first SerpApi account that still has monthly budget, resetting any
+ *  account whose counter rolled into a new month. Returns null if all exhausted
+ *  (or no keys configured). */
+async function pickSerpAccount(): Promise<{ service: string; key: string } | null> {
+  if (SERPAPI_ACCOUNTS.length === 0) return null;
+  const nowMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+  for (const acct of SERPAPI_ACCOUNTS) {
+    const { data: row } = await supabase.from('api_usage')
+      .select('used, limit_value, last_reset_at').eq('service', acct.service).single();
+    if (!row) continue;
+    let used  = row.used ?? 0;
+    const lim = row.limit_value ?? SERPAPI_MONTHLY_LIMIT;
+    // Monthly reset: if the last reset was in a previous month, zero the counter.
+    const lastMonth = (row.last_reset_at ? new Date(row.last_reset_at).toISOString() : '').slice(0, 7);
+    if (lastMonth && lastMonth !== nowMonth) {
+      await supabase.from('api_usage')
+        .update({ used: 0, last_reset_at: new Date().toISOString(), paused: false })
+        .eq('service', acct.service);
+      used = 0;
+    }
+    if (used < lim) return acct;
+  }
+  return null;
+}
+
+async function bumpSerpAccount(service: string, delta: number) {
+  if (delta <= 0) return;
+  const { data } = await supabase.from('api_usage').select('used').eq('service', service).single();
+  await supabase.from('api_usage')
+    .update({ used: (data?.used ?? 0) + delta, updated_at: new Date().toISOString() })
+    .eq('service', service);
 }
 
 /** Extract the footer section of a page (last 20% of HTML) for targeted email scanning */
@@ -837,6 +903,44 @@ Deno.serve(async (req: Request) => {
       ),
     );
 
+    // 4b. SerpApi (second source) — same keys via Google surface different sites
+    //     than DDG. Paced so 3×250/month isn't burned in a day; rotates accounts
+    //     as each hits its monthly cap; falls back to DDG-only + alert when all done.
+    if (SERPAPI_ACCOUNTS.length > 0 && slotIndex % SERP_EVERY === 0) {
+      const acct = await pickSerpAccount();
+      if (acct) {
+        const serpKws = keywords.slice(0, SERP_KW_PER_RUN);
+        let serpCalls = 0;
+        for (const kw of serpKws) {
+          const results = await searchSerpApi(`${kw}${cityAppend}`, RESULTS_PER_KW, acct.key);
+          serpCalls++;
+          serpBatches.push({ kw, results });
+        }
+        await bumpSerpAccount(acct.service, serpCalls);
+        (stats as any).serp = serpCalls;
+        (stats as any).serp_acct = acct.service;
+      } else {
+        // All accounts exhausted → alert once per ~12h (guard via error_log lookback).
+        const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+        const { data: recent } = await supabase.from('error_log')
+          .select('id').eq('service', 'find-and-queue')
+          .ilike('message', '%SerpApi accounts exhausted%')
+          .gte('created_at', since).limit(1);
+        if (!recent || recent.length === 0) {
+          try {
+            await fetch(`${SUPABASE_URL}/functions/v1/send-alert`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` },
+              body: JSON.stringify({ level: 'warning', service: 'SerpApi',
+                message: 'Все SerpApi аккаунты в месячном лимите — поиск на DuckDuckGo до сброса в начале месяца.' }),
+            });
+          } catch (_) {}
+          await supabase.from('error_log').insert([{ level: 'info', service: 'find-and-queue',
+            message: 'SerpApi accounts exhausted — falling back to DuckDuckGo' }]);
+        }
+      }
+    }
+
     // Merge, dedup by domain across all keywords, and apply the cheap pre-filters now
     // so the expensive Groq+fetch loop only sees real candidates.
     // Each candidate carries the keyword that surfaced it (stored on the lead).
@@ -924,6 +1028,7 @@ Deno.serve(async (req: Request) => {
           lang:     analysis.lang,
           found_keyword: keyword,
           domain_normalized: domNorm,
+          source:   'seo', // SEO/keyword search source (vs youtube / appstore)
         };
         if (contact.email) {
           leadData.contact_email      = contact.email;
@@ -981,6 +1086,7 @@ Deno.serve(async (req: Request) => {
         + `found=${stats.found} analyzed=${stats.analyzed} `
         + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
         + `saved=${stats.saved} contacts=${stats.contacts} groqCalls=${groqCount}`
+        + ((stats as any).serp ? ` serp=${(stats as any).serp}(${(stats as any).serp_acct})` : '')
         + (groqLastError ? ` groqErr="${groqLastError}"` : '')
         + (stats.errors.length ? ' | ' + stats.errors.slice(0, 3).join('; ') : ''),
     }]);

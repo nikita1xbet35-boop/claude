@@ -58,6 +58,27 @@ Deno.serve(async (req: Request) => {
       const pct  = svc.used / svc.limit_value;
       const name = SERVICE_NAMES[svc.service] || svc.service;
 
+      // ── Reset monthly counters on the 1st (GMT+3) — e.g. SerpApi accounts ───
+      if (svc.reset_period === 'monthly') {
+        const gmt3 = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+        const lastReset = new Date(svc.last_reset_at);
+        const lastMonth = lastReset.toISOString().slice(0, 7);
+        const thisMonth = gmt3.toISOString().slice(0, 7);
+        if (lastMonth !== thisMonth) {
+          await supabase.from('api_usage').update({
+            used: 0, last_reset_at: now.toISOString(),
+            alert_sent_warning: false, alert_sent_critical: false,
+            paused: false, updated_at: now.toISOString(),
+          }).eq('service', svc.service);
+          await supabase.from('error_log').insert([{
+            level: 'info', service: svc.service,
+            message: `Monthly counter reset. Was: ${svc.used}/${svc.limit_value}`,
+          }]);
+          results.push({ service: svc.service, action: 'monthly_reset' });
+          continue;
+        }
+      }
+
       // ── Reset daily counters at midnight GMT+3 ──────────────────────────────
       if (svc.reset_period === 'daily' && isGMT3Midnight(now)) {
         const lastReset      = new Date(svc.last_reset_at);
