@@ -484,7 +484,18 @@ export default {
     }
 
     if (cron === '*/3 * * * *') {
-      await call('find-and-queue', {});
+      // Search pipeline + form channel, all in parallel (independent Supabase fns).
+      // The form functions used to live on a dedicated */10 trigger, but Cloudflare's
+      // free plan caps cron triggers at 5 — the 6th silently never fired, so
+      // find-contact-form never ran and no forms were ever submitted. Folding them
+      // into this proven tick guarantees they run (and detection is now 3x faster).
+      //   find-contact-form  — detect + classify contact forms (read-only)
+      //   process-form-queue — submit simple forms (armed via FORM_SENDING_ENABLED)
+      await Promise.all([
+        call('find-and-queue', {}),
+        call('find-contact-form', {}),
+        call('process-form-queue', {}),
+      ]);
       return;
     }
 
@@ -503,17 +514,6 @@ export default {
       // LuckyPari outreach — separate brand, own quota. Fires ~9x/hour and sends
       // one email per tick, spreading 100/day evenly across working hours (no bursts).
       await call('process-queue-lp', {});
-      return;
-    }
-
-    if (cron === '*/10 * * * *') {
-      // Form channel (second delivery channel for leads without email):
-      //   find-contact-form  — detect + classify contact forms (read-only)
-      //   process-form-queue — submit simple forms (DRY-RUN until FORM_SENDING_ENABLED=true)
-      await Promise.all([
-        call('find-contact-form', {}),
-        call('process-form-queue', {}),
-      ]);
       return;
     }
   },
