@@ -96,9 +96,37 @@ async function sendTgRaw(chatId, text, env, extra = {}) {
   return data.result?.message_id;
 }
 
+// Call the watchdog-agent's apply endpoint to execute an operator decision on
+// an L2 proposal. Kept minimal — the safe-action whitelist lives in the function.
+async function watchdogApply(id, decision, env) {
+  const SUPABASE_URL = env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const KEY = env.SUPABASE_ANON_KEY || DEFAULT_ANON_KEY;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/watchdog-agent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': KEY, 'Authorization': 'Bearer ' + KEY },
+      body: JSON.stringify({ apply: { id, decision } }),
+    });
+    const d = await res.json().catch(() => ({}));
+    return d?.result || (res.ok ? 'ok' : 'error');
+  } catch (e) { return e && e.message; }
+}
+
 async function handleTgUpdate(update, env) {
   if (update.callback_query) {
-    await tgCall('answerCallbackQuery', { callback_query_id: update.callback_query.id }, env);
+    const cq = update.callback_query;
+    const data = cq.data || '';
+    // Watchdog L2 approval buttons: "wd:approve:<id>" / "wd:reject:<id>"
+    const m = data.match(/^wd:(approve|reject):(\d+)$/);
+    if (m && cq.from?.id === TG_MY_USER_ID(env)) {
+      const result = await watchdogApply(Number(m[2]), m[1], env);
+      await tgCall('answerCallbackQuery', {
+        callback_query_id: cq.id,
+        text: (m[1] === 'approve' ? '✅ ' : '✖ ') + String(result).slice(0, 190),
+      }, env);
+      return;
+    }
+    await tgCall('answerCallbackQuery', { callback_query_id: cq.id }, env);
     return;
   }
   const msg = update.message;
@@ -113,6 +141,17 @@ async function handleTgUpdate(update, env) {
   }
 
   const text = msg.text.trim();
+
+  // Watchdog L2 approval via command (fallback to inline buttons):
+  //   /approve <id>  /reject <id>
+  const wd = text.match(/^\/(approve|reject)\s+(\d+)$/i);
+  if (wd) {
+    const decision = wd[1].toLowerCase() === 'approve' ? 'approve' : 'reject';
+    const result = await watchdogApply(Number(wd[2]), decision, env);
+    await sendTg(chatId, `${decision === 'approve' ? '✅' : '✖'} Watchdog #${wd[2]}: ${result}`, env);
+    return;
+  }
+
   if (text === '/start' || text === '/help') {
     await sendTg(chatId, `*AffiliateOS Bot* — быстрый захват лидов\n\nПросто кинь строку:\n\`@channelname тг бет\`\n\`t.me/ch тг каз\`\n\`site.com сео бет нигерия\`\n\`t.me/team арбитраж бет индия\`\n\`@signals авиатор каз\`\n\nЛид сразу падает в Supabase со статусом \`waiting\`.`, env, { parse_mode: 'Markdown' });
     return;
@@ -500,7 +539,12 @@ export default {
     }
 
     if (cron === '*/15 * * * *') {
-      await call('check-limits', { cron });
+      // Quota checks + the Claude watchdog agent (L1 observe / L3 auto-fix /
+      // L2 propose). Both are independent — run in parallel.
+      await Promise.all([
+        call('check-limits', { cron }),
+        call('watchdog-agent', {}),
+      ]);
       return;
     }
 

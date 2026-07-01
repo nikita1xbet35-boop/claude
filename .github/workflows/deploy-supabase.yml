@@ -77,6 +77,18 @@ jobs:
             -d "$PAYLOAD" \
             && echo "Migration 004 OK" || echo "Migration 004 skipped (may already be applied)"
 
+      - name: Apply migration 005 (agent_log)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          PAYLOAD=$(python3 -c "import json; print(json.dumps({'query': open('supabase/migrations/005_agent_log.sql').read()}))")
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            && echo "Migration 005 OK" || echo "Migration 005 skipped (may already be applied)"
+
       - name: Prepare function directories
         run: |
           mkdir -p supabase/functions/extract-contacts
@@ -91,6 +103,7 @@ jobs:
           mkdir -p supabase/functions/process-form-queue
           mkdir -p supabase/functions/find-youtube
           mkdir -p supabase/functions/find-appstore
+          mkdir -p supabase/functions/watchdog-agent
           cp edge-functions/extract-contacts.ts    supabase/functions/extract-contacts/index.ts
           cp edge-functions/generate-queue.ts      supabase/functions/generate-queue/index.ts
           cp edge-functions/process-queue.ts       supabase/functions/process-queue/index.ts
@@ -103,6 +116,7 @@ jobs:
           cp edge-functions/process-form-queue.ts  supabase/functions/process-form-queue/index.ts
           cp edge-functions/find-youtube.ts        supabase/functions/find-youtube/index.ts
           cp edge-functions/find-appstore.ts       supabase/functions/find-appstore/index.ts
+          cp edge-functions/watchdog-agent.ts      supabase/functions/watchdog-agent/index.ts
 
       - name: Deploy extract-contacts
         env:
@@ -163,6 +177,11 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase functions deploy find-appstore --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
+
+      - name: Deploy watchdog-agent
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy watchdog-agent --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
       # Arm the form channel. process-form-queue stays in DRY-RUN until this secret
       # is 'true'. To disable sending again, set it to 'false' here and redeploy.
