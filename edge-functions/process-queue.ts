@@ -117,12 +117,32 @@ function geoName(geoCode: string): string {
 /** Build the outreach email body from a fixed template. No Groq needed.
  *  Soft intro — references the site name and (when known) its GEO. */
 function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
-  const siteName  = cleanSiteName(lead.name as string, lead.url as string || '');
+  const name      = cleanSiteName(lead.name as string, lead.url as string || '');
   const geoRaw    = geoName((lead.geo as string) || '');
   const hasGeo    = !!geoRaw && geoRaw !== 'the region' && geoRaw !== 'your market';
   const geoClause = hasGeo ? ` in ${geoRaw}` : '';
+  const source    = ((lead.source as string) || 'seo').toLowerCase();
 
-  return `Hi, I came across ${siteName} — you've built real trust with your audience${geoClause}, `
+  // ── YouTube channel owner (source=youtube) — prepared, source not yet launched
+  if (source === 'youtube') {
+    return `Hi, I came across your channel ${name}${geoClause} — you've built a real, engaged audience, `
+      + `and that's worth more than most programs pay creators for it. I'm Nick from 1xPartners. `
+      + `You're already sending this audience somewhere; I can make it pay you more: clean RevShare on 1xBet, `
+      + `no admin fee, no hidden cuts, terms built around your actual numbers, plus creator-friendly promo codes and assets. `
+      + `You deal with me directly, not a support desk. Want me to send a short proposal? Or ping me on Telegram: @aff_manager_xbet`;
+  }
+
+  // ── App developer (source=appstore) — prepared, source not yet launched
+  if (source === 'appstore') {
+    return `Hi, I came across your app ${name}${geoClause} — you've built a real user base, `
+      + `and that traffic is worth more than most programs pay for it. I'm Nick from 1xPartners. `
+      + `You're already monetising these users; I can make it pay you more: clean RevShare on 1xBet, `
+      + `no admin fee, no hidden cuts, deep links and API integration, terms built around your actual numbers. `
+      + `You deal with me directly, not a support desk. Want me to send a short proposal? Or ping me on Telegram: @aff_manager_xbet`;
+  }
+
+  // ── SEO site owner (default)
+  return `Hi, I came across ${name} — you've built real trust with your audience${geoClause}, `
     + `and that's worth more than most programs actually pay for it. I'm Nick from 1xPartners. `
     + `You're already monetising this traffic; I can make it pay you more — and here's why: `
     + `clean RevShare on 1xBet with no admin fee, so you're not losing 20-30% to hidden cuts like most programs take. `
