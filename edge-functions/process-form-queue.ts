@@ -146,7 +146,7 @@ Deno.serve(async (req: Request) => {
     // One simple-form lead, oldest detection first.
     const { data: leads, error } = await supabase
       .from('leads')
-      .select('id, url, geo, form_url, form_fields, form_attempts')
+      .select('id, url, geo, form_url, form_fields, form_attempts, source')
       .eq('form_status', 'simple')
       .lt('form_attempts', MAX_ATTEMPTS)
       .order('created_at', { ascending: true })
@@ -238,6 +238,7 @@ Deno.serve(async (req: Request) => {
       url: lead.url, form_url: lead.form_url, form_action: ff.action,
       status: ok ? 'sent' : 'failed',
       http_status: httpStatus, response_snippet: respText.slice(0, 500),
+      source: (lead as any).source || 'seo',
     }]);
 
     if (ok) {

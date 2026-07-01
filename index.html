@@ -6344,7 +6344,7 @@ async function loadAutomatToday() {
       sb.from('leads').select('id, contact_email', { count: 'exact' })
         .gte('created_at', todayMidnightUTC.toISOString())
         .lt('created_at',  tomorrowMidnightUTC.toISOString()),
-      sb.from('email_log').select('brand, bounced')
+      sb.from('email_log').select('brand, bounced, source')
         .gte('sent_at', todayMidnightUTC.toISOString())
         .lt('sent_at',  tomorrowMidnightUTC.toISOString()),
       sb.from('send_queue').select('id, scheduled_at')
@@ -6390,11 +6390,50 @@ async function loadAutomatToday() {
 
     const sentColor = emailsSent >= dailyTarget ? 'var(--green)' : emailsSent > 0 ? 'var(--accent)' : 'var(--text)';
 
+    // ── Per-source split of today's sends (Block 2.4) ──────────────────────
+    // Also count today's form submissions (channel = form) under the SEO source.
+    let formsToday = 0;
+    try {
+      const { count } = await sb.from('form_submissions')
+        .select('id', { count: 'exact', head: true }).eq('status', 'sent')
+        .gte('submitted_at', todayMidnightUTC.toISOString())
+        .lt('submitted_at',  tomorrowMidnightUTC.toISOString());
+      formsToday = count || 0;
+    } catch (_) { /* table may not exist yet */ }
+
+    const bySource = { seo: {}, youtube: {}, appstore: {} };
+    emails.forEach(e => {
+      const s = (e.source || 'seo').toLowerCase();
+      const bucket = bySource[s] || (bySource.seo);
+      const b = (e.brand || '1xbet').toLowerCase();
+      bucket[b] = (bucket[b] || 0) + 1;
+    });
+    const BRAND_LABEL = { '1xbet': '1xBet', 'luckypari': 'Lucky Pari', '1xcasino': '1xCasino' };
+    const sumBucket = o => Object.values(o).reduce((a, c) => a + c, 0);
+    const brandLines = o => {
+      const entries = Object.entries(o).sort((a, b) => b[1] - a[1]);
+      if (!entries.length) return '<span style="color:var(--text3);">—</span>';
+      return entries.map(([b, c]) => `${BRAND_LABEL[b] || b}: <b style="color:var(--text);">${c}</b>`).join('<br>');
+    };
+    const sourceBox = (title, enabled, inner) => `
+      <div style="flex:1;min-width:130px;background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:10px 12px;${enabled ? '' : 'opacity:.55;'}">
+        <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.4px;text-transform:uppercase;margin-bottom:6px;">${title}${enabled ? '' : ' · выкл'}</div>
+        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text2);line-height:1.6;">${inner}</div>
+      </div>`;
+    const seoTotal = sumBucket(bySource.seo) + formsToday;
+    const sourceSplit = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:2px;">
+        ${sourceBox(`Сайты по ключам (${seoTotal})`, true,
+          brandLines(bySource.seo) + (formsToday ? `<br><span style="color:var(--text3);">формы: <b style="color:var(--text);">${formsToday}</b></span>` : ''))}
+        ${sourceBox('YouTube', false, '<span style="color:var(--text3);">0 — источник не запущен</span>')}
+        ${sourceBox('App Store', false, '<span style="color:var(--text3);">0 — источник не запущен</span>')}
+      </div>`;
+
     cards.innerHTML = [
       statCard('Лидов найдено', leadsFound, `с контактом: ${leadsWithContact}`),
       statCard('Писем отправлено', sentLabel, brandBreakdown, sentColor),
       statCard('Баунсы', bounces, `${bounceRate}%`),
-    ].join('');
+    ].join('') + `<div style="grid-column:1/-1;">${sourceSplit}</div>`;
 
     if (queueEl) {
       queueEl.innerHTML = `
