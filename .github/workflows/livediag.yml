@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-24 #13: fix find-and-queue timeout + add live probe)
+# (probe bump 2026-06-30 #14: form-channel diagnostics — why no form submissions yet)
 on:
   workflow_dispatch:
   schedule:
@@ -183,6 +183,38 @@ jobs:
           echo ""
           echo "=== CRON CADENCE: process-queue timestamps last 1h ==="
           q "SELECT created_at FROM error_log WHERE service='process-queue' AND created_at > now() - interval '1 hour' ORDER BY created_at DESC;"; echo ""
+
+          echo ""
+          echo "=== FORM CHANNEL: leads by form_status ==="
+          q "SELECT form_status, count(*) FROM leads GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          echo "--- form_main quota ---"
+          q "SELECT service, used, limit_value FROM api_usage WHERE service='form_main';"; echo ""
+          echo "--- form_submissions by status ---"
+          q "SELECT status, count(*) FROM form_submissions GROUP BY 1;"; echo ""
+          echo "--- sample simple-form leads (ready to submit) ---"
+          q "SELECT left(url,60) AS url, left(form_url,60) AS form_url FROM leads WHERE form_status='simple' ORDER BY created_at DESC LIMIT 10;"; echo ""
+          echo "--- last 8 find-contact-form runs ---"
+          q "SELECT created_at, left(message,160) AS msg FROM error_log WHERE service='find-contact-form' ORDER BY created_at DESC LIMIT 8;"; echo ""
+          echo "--- last 10 process-form-queue runs ---"
+          q "SELECT created_at, level, left(message,180) AS msg FROM error_log WHERE service='process-form-queue' ORDER BY created_at DESC LIMIT 10;"; echo ""
+
+          echo ""
+          echo "=== PROBE: find-contact-form direct invoke (detection live) ==="
+          curl -s -m 120 -X POST \
+            "https://lxsyrserfuighwxuymgb.supabase.co/functions/v1/find-contact-form" \
+            -H "Content-Type: application/json" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
+            -d '{}' ; echo ""
+
+          echo ""
+          echo "=== PROBE: process-form-queue direct invoke (shows dry_run flag + reason) ==="
+          curl -s -m 60 -X POST \
+            "https://lxsyrserfuighwxuymgb.supabase.co/functions/v1/process-form-queue" \
+            -H "Content-Type: application/json" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
+            -d '{}' ; echo ""
 
           # ── Health verdict — send Telegram alert, never fail the job ────────
           ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM"
