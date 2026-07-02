@@ -539,12 +539,9 @@ export default {
     }
 
     if (cron === '*/15 * * * *') {
-      // Quota checks + the Claude watchdog agent (L1 observe / L3 auto-fix /
-      // L2 propose). Both are independent — run in parallel.
-      await Promise.all([
-        call('check-limits', { cron }),
-        call('watchdog-agent', {}),
-      ]);
+      // Quota checks. (Watchdog agent disabled — no Anthropic key; the function
+      // stays deployed but is not scheduled, so it never runs.)
+      await call('check-limits', { cron });
       return;
     }
 

@@ -190,6 +190,26 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase secrets set FORM_SENDING_ENABLED=true --project-ref lxsyrserfuighwxuymgb
 
+      # SerpApi keys: pushed from GitHub Actions secrets into Supabase function
+      # secrets (never committed to the repo). Skips cleanly if a secret is absent,
+      # so find-and-queue stays DDG-only until the keys are provided.
+      - name: Set SerpApi keys (from GitHub secrets, if present)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SERPAPI_KEY_1: ${{ secrets.SERPAPI_KEY_1 }}
+          SERPAPI_KEY_2: ${{ secrets.SERPAPI_KEY_2 }}
+          SERPAPI_KEY_3: ${{ secrets.SERPAPI_KEY_3 }}
+        run: |
+          ARGS=""
+          [ -n "$SERPAPI_KEY_1" ] && ARGS="$ARGS SERPAPI_KEY_1=$SERPAPI_KEY_1"
+          [ -n "$SERPAPI_KEY_2" ] && ARGS="$ARGS SERPAPI_KEY_2=$SERPAPI_KEY_2"
+          [ -n "$SERPAPI_KEY_3" ] && ARGS="$ARGS SERPAPI_KEY_3=$SERPAPI_KEY_3"
+          if [ -n "$ARGS" ]; then
+            supabase secrets set $ARGS --project-ref lxsyrserfuighwxuymgb && echo "SerpApi keys set"
+          else
+            echo "No SerpApi GitHub secrets present — skipping (DDG-only)"
+          fi
+
       - name: Reset system state via Supabase Management API
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
