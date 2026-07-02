@@ -132,7 +132,7 @@ Deno.serve(async (req: Request) => {
     const dayEnd   = new Date(`${dateStr}T23:59:59+03:00`);
     const { data: usage } = await supabase.from('api_usage')
       .select('limit_value').eq('service', 'form_main').single();
-    const dailyLimit = (usage?.limit_value as number) ?? 50;
+    const dailyLimit = (usage?.limit_value as number) ?? 100;
     const { count: sentToday } = await supabase.from('form_submissions')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'sent')

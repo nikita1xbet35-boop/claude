@@ -116,7 +116,7 @@ Deno.serve(async (req: Request) => {
         await sendAlert(
           'critical',
           name,
-          `Daily send quota reached (${svc.used}/${svc.limit_value}).`
+          `Достигнут дневной лимит отправки (${svc.used}/${svc.limit_value}). Отправка по этому аккаунту продолжится после сброса счётчика в полночь МСК.`
         );
         await supabase.from('api_usage').update({
           alert_sent_critical: true,
@@ -131,7 +131,7 @@ Deno.serve(async (req: Request) => {
         await sendAlert(
           'warning',
           name,
-          `80% of daily send quota used (${svc.used}/${svc.limit_value}). ~${remaining} remaining.`
+          `Использовано 80% дневного лимита отправки (${svc.used}/${svc.limit_value}). Осталось ~${remaining}.`
         );
         await supabase.from('api_usage').update({
           alert_sent_warning: true,

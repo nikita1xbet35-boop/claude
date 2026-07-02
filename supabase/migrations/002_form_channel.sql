@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS public.form_submissions (
 CREATE INDEX IF NOT EXISTS form_submissions_submitted ON public.form_submissions (submitted_at DESC);
 CREATE INDEX IF NOT EXISTS form_submissions_lead       ON public.form_submissions (lead_id);
 
--- ── api_usage: daily quota for the form channel (starts conservative) ────────
+-- ── api_usage: daily quota for the form channel ─────────────────────────────
 INSERT INTO public.api_usage (service, used, limit_value, reset_period)
-VALUES ('form_main', 0, 50, 'daily')
+VALUES ('form_main', 0, 100, 'daily')
 ON CONFLICT (service) DO NOTHING;
