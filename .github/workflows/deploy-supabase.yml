@@ -193,21 +193,25 @@ jobs:
       # SerpApi keys: pushed from GitHub Actions secrets into Supabase function
       # secrets (never committed to the repo). Skips cleanly if a secret is absent,
       # so find-and-queue stays DDG-only until the keys are provided.
-      - name: Set SerpApi keys (from GitHub secrets, if present)
+      - name: Set optional API keys (SerpApi + extra Groq, from GitHub secrets)
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SERPAPI_KEY_1: ${{ secrets.SERPAPI_KEY_1 }}
           SERPAPI_KEY_2: ${{ secrets.SERPAPI_KEY_2 }}
           SERPAPI_KEY_3: ${{ secrets.SERPAPI_KEY_3 }}
+          GROQ_KEY_2: ${{ secrets.GROQ_KEY_2 }}
+          GROQ_KEY_3: ${{ secrets.GROQ_KEY_3 }}
         run: |
           ARGS=""
           [ -n "$SERPAPI_KEY_1" ] && ARGS="$ARGS SERPAPI_KEY_1=$SERPAPI_KEY_1"
           [ -n "$SERPAPI_KEY_2" ] && ARGS="$ARGS SERPAPI_KEY_2=$SERPAPI_KEY_2"
           [ -n "$SERPAPI_KEY_3" ] && ARGS="$ARGS SERPAPI_KEY_3=$SERPAPI_KEY_3"
+          [ -n "$GROQ_KEY_2" ]    && ARGS="$ARGS GROQ_KEY_2=$GROQ_KEY_2"
+          [ -n "$GROQ_KEY_3" ]    && ARGS="$ARGS GROQ_KEY_3=$GROQ_KEY_3"
           if [ -n "$ARGS" ]; then
-            supabase secrets set $ARGS --project-ref lxsyrserfuighwxuymgb && echo "SerpApi keys set"
+            supabase secrets set $ARGS --project-ref lxsyrserfuighwxuymgb && echo "Optional API keys set"
           else
-            echo "No SerpApi GitHub secrets present — skipping (DDG-only)"
+            echo "No optional API-key secrets present — skipping"
           fi
 
       - name: Reset system state via Supabase Management API
