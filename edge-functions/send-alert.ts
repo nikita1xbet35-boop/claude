@@ -40,9 +40,9 @@ Deno.serve(async (req: Request) => {
 
     if (!text) {
       if (level === 'warning') {
-        text = `⚠️ <b>AffiliateOS Warning</b>\n\n<b>${service}</b>: ${message}\n\nAction: prepare backup key or upgrade tier.`;
+        text = `⚠️ <b>AffiliateOS — предупреждение</b>\n\n<b>${service}</b>: ${message}`;
       } else if (level === 'critical') {
-        text = `🔴 <b>AffiliateOS Critical</b>\n\n<b>${service}</b>: ${message}\n\nAction: Settings → API Keys → Update key, then press Resume.`;
+        text = `🔴 <b>AffiliateOS — критично</b>\n\n<b>${service}</b>: ${message}`;
       } else {
         text = `ℹ️ <b>AffiliateOS</b>\n\n${message}`;
       }
