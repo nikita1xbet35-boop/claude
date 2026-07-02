@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-06-30 #14: form-channel diagnostics — why no form submissions yet)
+# (probe bump 2026-07-02 #15: full sweep — SerpApi accounts, source split, form channel)
 on:
   workflow_dispatch:
   schedule:
@@ -185,8 +185,22 @@ jobs:
           q "SELECT created_at FROM error_log WHERE service='process-queue' AND created_at > now() - interval '1 hour' ORDER BY created_at DESC;"; echo ""
 
           echo ""
+          echo "=== SERPAPI ACCOUNTS (rotation + monthly budget) ==="
+          q "SELECT service, used, limit_value, paused, to_char(last_reset_at,'YYYY-MM-DD') AS reset FROM api_usage WHERE service LIKE 'serpapi%' ORDER BY service;"; echo ""
+          echo "--- find-and-queue runs that used SerpApi (last 24h) ---"
+          q "SELECT created_at, (regexp_match(message,'serp=([0-9]+\\(serpapi_[0-9]+\\))'))[1] AS serp FROM error_log WHERE service='find-and-queue' AND message LIKE '%serp=%' AND created_at > now() - interval '24 hours' ORDER BY created_at DESC LIMIT 10;"; echo ""
+
+          echo ""
+          echo "=== SOURCE SPLIT: sends today by source/brand (GMT+3) ==="
+          q "SELECT source, brand, count(*) FROM email_log WHERE sent_at >= (now() AT TIME ZONE 'UTC' + interval '3 hours')::date - interval '3 hours' GROUP BY 1,2 ORDER BY 3 DESC;"; echo ""
+          echo "--- leads by source (all-time) ---"
+          q "SELECT source, count(*) FROM leads GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+
+          echo ""
           echo "=== FORM CHANNEL: leads by form_status ==="
           q "SELECT form_status, count(*) FROM leads GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          echo "--- form submissions TODAY (GMT+3) ---"
+          q "SELECT status, count(*) FROM form_submissions WHERE submitted_at >= (now() AT TIME ZONE 'UTC' + interval '3 hours')::date - interval '3 hours' GROUP BY 1;"; echo ""
           echo "--- form_main quota ---"
           q "SELECT service, used, limit_value FROM api_usage WHERE service='form_main';"; echo ""
           echo "--- form_submissions by status ---"
