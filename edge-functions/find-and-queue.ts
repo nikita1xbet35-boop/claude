@@ -9,7 +9,7 @@
 // Leads with a contact email become eligible for the send queue immediately.
 //
 // Deploy: supabase functions deploy find-and-queue --no-verify-jwt
-// (deploy trigger: activate SerpApi keys)
+// (deploy trigger: activate SerpApi + Groq rotation keys)
 // Env:    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SERPAPI_KEY_1/2/3,
 //         GROQ_API_KEY + GROQ_KEY_2/GROQ_KEY_3 (rotated),
 //         JINA_API_KEY (optional)
