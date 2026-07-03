@@ -10,7 +10,8 @@
 //
 // Deploy: supabase functions deploy find-and-queue --no-verify-jwt
 // (deploy trigger: activate SerpApi keys)
-// Env:    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SERPAPI_KEY_1/2/3, GROQ_API_KEY,
+// Env:    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SERPAPI_KEY_1/2/3,
+//         GROQ_API_KEY + GROQ_KEY_2/GROQ_KEY_3 (rotated),
 //         JINA_API_KEY (optional)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -33,9 +34,16 @@ const SERPAPI_MONTHLY_LIMIT = 250;
 // SERP_EVERY runs uses SerpApi, and only for SERP_KW_PER_RUN keyword(s).
 const SERP_EVERY = 20;
 const SERP_KW_PER_RUN = 1;
-// Groq key: env var first, fall back to the key already shipped in index.html
-const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') ||
-  ['gsk_9DKnaMxmKm8WEPDDjtZbWGdyb3FYX', 'R6kIEWkpNsjz6BlDlvj347v'].join('');
+// Groq keys — rotated per call to multiply the free-tier TPM budget. Key #1 is
+// the env var (with the legacy hardcoded fallback); keys #2/#3 come from secrets
+// GROQ_KEY_2 / GROQ_KEY_3. On a 429 the call retries on the next key rather than
+// skipping analysis, which is what capped how many found sites got saved.
+const GROQ_KEYS = [
+  Deno.env.get('GROQ_API_KEY') ||
+    ['gsk_9DKnaMxmKm8WEPDDjtZbWGdyb3FYX', 'R6kIEWkpNsjz6BlDlvj347v'].join(''),
+  Deno.env.get('GROQ_KEY_2') || '',
+  Deno.env.get('GROQ_KEY_3') || '',
+].filter(Boolean);
 
 const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
@@ -547,39 +555,45 @@ interface Analysis {
 let groqCount = 0;
 let groqLastError = '';
 
-// Groq chat call with retry on 429 (rate limit) / 5xx. Returns parsed JSON content or null.
+// Round-robin cursor across GROQ_KEYS — spreads load so no single key hits its
+// per-minute cap. Advances every call and every 429.
+let groqKeyIdx = 0;
+
+// Groq chat call with per-key rotation. On 429/5xx/error it retries on the NEXT
+// key (no sleep — we can't wait inside a 150s edge function) instead of skipping
+// analysis. Returns parsed JSON content, or null only when every key failed.
 async function groqChat(body: Record<string, unknown>): Promise<string | null> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const n = GROQ_KEYS.length;
+  for (let i = 0; i < n; i++) {
+    const idx = (groqKeyIdx + i) % n;
     try {
       groqCount++;
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_API_KEY },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(20_000),
       });
-      if (res.status === 429) {
-        // Don't wait inside the edge function — this run is killed at 150s.
-        // The Cloudflare cron retriggers in 3 min; Groq quota refreshes in 60s.
-        groqLastError = 'HTTP 429 (rate limited — skipping)';
-        return null;
-      }
-      if (res.status >= 500) {
-        groqLastError = `HTTP ${res.status}`;
-        await new Promise(r => setTimeout(r, 3_000 * (attempt + 1)));
+      if (res.status === 429 || res.status >= 500) {
+        // Rate-limited or transient on this key — immediately try the next one.
+        groqLastError = `HTTP ${res.status} (key ${idx + 1})`;
+        res.body?.cancel().catch(() => {});
         continue;
       }
       if (!res.ok) {
         groqLastError = `HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`;
-        return null;
+        return null; // a real error (bad request/auth) — next key won't help
       }
       const d = await res.json();
+      groqKeyIdx = (idx + 1) % n; // next call starts on the following key
       return d?.choices?.[0]?.message?.content || '';
     } catch (e: any) {
       groqLastError = e?.message || 'fetch error';
-      await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+      // try the next key
     }
   }
+  // All keys were rate-limited/erroring — advance the cursor and skip this batch.
+  groqKeyIdx = (groqKeyIdx + 1) % n;
   return null;
 }
 
