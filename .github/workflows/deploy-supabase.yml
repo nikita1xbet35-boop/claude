@@ -117,6 +117,8 @@ jobs:
           mkdir -p supabase/functions/youtube-search
           mkdir -p supabase/functions/find-appstore
           mkdir -p supabase/functions/watchdog-agent
+          mkdir -p supabase/functions/check-limits
+          mkdir -p supabase/functions/send-alert
           cp edge-functions/extract-contacts.ts    supabase/functions/extract-contacts/index.ts
           cp edge-functions/generate-queue.ts      supabase/functions/generate-queue/index.ts
           cp edge-functions/process-queue.ts       supabase/functions/process-queue/index.ts
@@ -131,6 +133,8 @@ jobs:
           cp edge-functions/youtube-search.ts      supabase/functions/youtube-search/index.ts
           cp edge-functions/find-appstore.ts       supabase/functions/find-appstore/index.ts
           cp edge-functions/watchdog-agent.ts      supabase/functions/watchdog-agent/index.ts
+          cp edge-functions/check-limits.ts        supabase/functions/check-limits/index.ts
+          cp edge-functions/send-alert.ts          supabase/functions/send-alert/index.ts
 
       - name: Deploy extract-contacts
         env:
@@ -201,6 +205,20 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase functions deploy watchdog-agent --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
+
+      # check-limits + send-alert were never in the deploy pipeline, so the live
+      # copies were stale (English "serpapi_1: Service paused" spam every 15 min).
+      # The repo versions alert only on Gmail send-quota, in Russian, and never pause
+      # the best-effort services (SerpApi self-heals via account rotation + DDG fallback).
+      - name: Deploy check-limits
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy check-limits --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
+
+      - name: Deploy send-alert
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy send-alert --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
       # Arm the form channel. process-form-queue stays in DRY-RUN until this secret
       # is 'true'. To disable sending again, set it to 'false' here and redeploy.
