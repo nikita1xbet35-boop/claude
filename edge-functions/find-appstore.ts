@@ -9,6 +9,7 @@
 //
 // Deploy: supabase functions deploy find-appstore --no-verify-jwt
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), APPSTORE_ENABLED
+// (redeploy: prior deploy hit a transient esm.sh 522 while bundling this fn)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
