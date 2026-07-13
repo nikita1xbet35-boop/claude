@@ -560,6 +560,9 @@ export default {
       await Promise.all([
         call('process-queue-lp', {}),
         call('find-appstore', {}),
+        // YouTube base auto-fill — one rotating African GEO per tick, self-capped at
+        // 72 searches/day (7200 quota units) so it never burns the 10k/day budget.
+        call('youtube-search', { cron: true }),
       ]);
       return;
     }

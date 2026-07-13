@@ -113,9 +113,35 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const geos: string[] = Array.isArray(body.geos) && body.geos.length ? body.geos : Object.keys(GEO_QUERIES);
-    const minSubs   = Math.max(0, parseInt(String(body.min_subscribers ?? 0)) || 0);
-    const maxPerGeo = Math.min(20, Math.max(1, parseInt(String(body.max_per_geo ?? 5)) || 5));
+
+    // ── Cron mode: the worker fires this on a timer so the base fills on its own.
+    // Each tick searches ONE rotating GEO (100 quota units) and we cap the number
+    // of cron searches per day so we never burn the 10k/day YouTube quota. Manual
+    // dashboard searches (body.geos present) bypass this and are operator-paced.
+    const isCron = !!body.cron && !(Array.isArray(body.geos) && body.geos.length);
+    if (isCron) {
+      const DAILY_CRON_SEARCHES = 72;                 // 72 × 100 = 7200 units/day
+      const gmt3 = new Date(Date.now() + 3 * 3600 * 1000);
+      const startOfDay = new Date(Date.UTC(gmt3.getUTCFullYear(), gmt3.getUTCMonth(), gmt3.getUTCDate()) - 3 * 3600 * 1000);
+      const { count } = await supabase.from('error_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('service', 'youtube-search')
+        .like('message', 'cron-run%')
+        .gte('created_at', startOfDay.toISOString());
+      if ((count ?? 0) >= DAILY_CRON_SEARCHES) {
+        return new Response(JSON.stringify({ success: true, skipped: 'daily budget reached', done_today: count }),
+          { headers: { ...cors, 'Content-Type': 'application/json' } });
+      }
+    }
+
+    const allGeos = Object.keys(GEO_QUERIES);
+    const geos: string[] = Array.isArray(body.geos) && body.geos.length
+      ? body.geos
+      : isCron
+        ? [ allGeos[Math.floor(Date.now() / (7 * 60 * 1000)) % allGeos.length] ]   // one rotating GEO per tick
+        : allGeos;
+    const minSubs   = Math.max(0, parseInt(String(body.min_subscribers ?? (isCron ? 0 : 0))) || 0);
+    const maxPerGeo = Math.min(20, Math.max(1, parseInt(String(body.max_per_geo ?? (isCron ? 8 : 5))) || (isCron ? 8 : 5)));
 
     // Existing YouTube channel URLs — de-dupe so re-runs don't pile up rows.
     const { data: existing } = await supabase.from('telegram_channels')
@@ -220,7 +246,7 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'youtube-search',
-      message: `geos=${geos.join(',')} processed=${processed} saved=${saved} updated=${updated} skipped_subs=${skippedSubs}`,
+      message: `${isCron ? 'cron-run ' : ''}geos=${geos.join(',')} processed=${processed} saved=${saved} updated=${updated} skipped_subs=${skippedSubs}`,
     }]);
 
     return new Response(JSON.stringify({ success: true, saved, updated, processed, skipped_subs: skippedSubs, per_geo: perGeo }),
