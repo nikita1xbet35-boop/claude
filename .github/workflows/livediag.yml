@@ -3,7 +3,7 @@ name: Pipeline Health
 # Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
 # snapshot, and FAILS (red X + GitHub notification) when the system needs
 # attention — reserve of contactable leads too low, or the pipeline stalled.
-# (probe bump 2026-07-02 #15: full sweep — SerpApi accounts, source split, form channel)
+# (probe bump 2026-07-03 #16: DEEP SWEEP — freshness, Groq rotation health, save trend, form codes)
 on:
   workflow_dispatch:
   schedule:
@@ -229,6 +229,42 @@ jobs:
             -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
             -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM" \
             -d '{}' ; echo ""
+
+          echo ""
+          echo "████████ DEEP SWEEP ████████"
+
+          echo ""
+          echo "=== FUNCTION FRESHNESS (last log per service + minutes ago) ==="
+          q "SELECT service, max(created_at) AS last_log, round(extract(epoch FROM (now()-max(created_at)))/60)::int AS mins_ago FROM error_log WHERE service IN ('find-and-queue','extract-contacts','generate-queue','process-queue','process-queue-lp','find-contact-form','process-form-queue','check-limits','watchdog-agent') GROUP BY service ORDER BY mins_ago;"; echo ""
+
+          echo ""
+          echo "=== GROQ HEALTH (after 3-key rotation) ==="
+          echo "--- groq usage counter ---"
+          q "SELECT service, used, limit_value FROM api_usage WHERE service='groq';"; echo ""
+          echo "--- find-and-queue runs last 1h: analyzed/saved + 429 presence ---"
+          q "SELECT count(*) AS runs, sum((regexp_match(message,'analyzed=([0-9]+)'))[1]::int) AS analyzed, sum((regexp_match(message,'saved=([0-9]+)'))[1]::int) AS saved, sum(CASE WHEN message LIKE '%429%' THEN 1 ELSE 0 END) AS runs_with_429 FROM error_log WHERE service='find-and-queue' AND message LIKE 'brand=%' AND created_at > now() - interval '1 hour';"; echo ""
+          echo "--- last 12 find-and-queue completed runs (analyzed/saved/groqErr) ---"
+          q "SELECT to_char(created_at,'HH24:MI') AS t, (regexp_match(message,'found=([0-9]+)'))[1] AS found, (regexp_match(message,'analyzed=([0-9]+)'))[1] AS analyzed, (regexp_match(message,'saved=([0-9]+)'))[1] AS saved, (regexp_match(message,'groqErr=\"([^\"]{0,40})\"'))[1] AS groq_err FROM error_log WHERE service='find-and-queue' AND message LIKE 'brand=%' ORDER BY created_at DESC LIMIT 12;"; echo ""
+
+          echo ""
+          echo "=== LEAD-SAVE TREND (find-and-queue saved) ==="
+          q "SELECT '1h' AS window, sum((regexp_match(message,'saved=([0-9]+)'))[1]::int) AS saved, sum((regexp_match(message,'contacts=([0-9]+)'))[1]::int) AS contacts FROM error_log WHERE service='find-and-queue' AND message LIKE 'brand=%' AND created_at > now() - interval '1 hour' UNION ALL SELECT '6h', sum((regexp_match(message,'saved=([0-9]+)'))[1]::int), sum((regexp_match(message,'contacts=([0-9]+)'))[1]::int) FROM error_log WHERE service='find-and-queue' AND message LIKE 'brand=%' AND created_at > now() - interval '6 hours' UNION ALL SELECT '24h', sum((regexp_match(message,'saved=([0-9]+)'))[1]::int), sum((regexp_match(message,'contacts=([0-9]+)'))[1]::int) FROM error_log WHERE service='find-and-queue' AND message LIKE 'brand=%' AND created_at > now() - interval '24 hours';"; echo ""
+          echo "--- leads added by hour (last 6h, GMT+3) ---"
+          q "SELECT to_char(created_at + interval '3 hours','HH24') AS hour, count(*) AS total, count(contact_email) AS with_email FROM leads WHERE created_at > now() - interval '6 hours' GROUP BY 1 ORDER BY 1;"; echo ""
+
+          echo ""
+          echo "=== FORM CHANNEL health (today, GMT+3) ==="
+          q "SELECT status, count(*) FROM form_submissions WHERE submitted_at >= (now() AT TIME ZONE 'UTC' + interval '3 hours')::date - interval '3 hours' GROUP BY 1;"; echo ""
+          echo "--- form submit HTTP codes today (from logs) ---"
+          q "SELECT (regexp_match(message,'http=([0-9]+)'))[1] AS http, count(*) FROM error_log WHERE service='process-form-queue' AND message LIKE '%http=%' AND created_at >= (now() AT TIME ZONE 'UTC' + interval '3 hours')::date - interval '3 hours' GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          echo "--- find-contact-form yield last 24h (simple vs manual vs no_form) ---"
+          q "SELECT sum((regexp_match(message,'simple ([0-9]+)'))[1]::int) AS simple, sum((regexp_match(message,'manual ([0-9]+)'))[1]::int) AS manual, sum((regexp_match(message,'no_form ([0-9]+)'))[1]::int) AS no_form FROM error_log WHERE service='find-contact-form' AND message LIKE 'Checked%' AND created_at > now() - interval '24 hours';"; echo ""
+
+          echo ""
+          echo "=== ERROR VOLUME by service (non-info, 24h) ==="
+          q "SELECT service, level, count(*) FROM error_log WHERE level <> 'info' AND created_at > now() - interval '24 hours' GROUP BY 1,2 ORDER BY 3 DESC LIMIT 15;"; echo ""
+
+          echo "████████ END DEEP SWEEP ████████"
 
           # ── Health verdict — send Telegram alert, never fail the job ────────
           ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM"
