@@ -1,6 +1,8 @@
 // Supabase Edge Function: check-limits
 // Checks api_usage table, fires warning at 80% and critical at 100%.
-// Resets daily counters at midnight GMT+3.
+// Alerts ONLY on the Gmail send-quota — best-effort services (SerpApi/Groq/Jina)
+// self-heal (SerpApi rotates accounts then falls back to DuckDuckGo), so they must
+// never page. Resets daily counters at midnight GMT+3.
 // Deploy: supabase functions deploy check-limits
 // Env vars needed: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY
 
