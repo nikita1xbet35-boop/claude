@@ -44,6 +44,7 @@ const GEO_NAMES: Record<string, string> = {
   AR: 'Argentina', CL: 'Chile', PH: 'Philippines', BF: 'Burkina Faso', SN: 'Senegal',
   CM: 'Cameroun', MA: 'Morocco', VN: 'Vietnam', MM: 'Myanmar', ZA: 'South Africa',
   NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', TZ: 'Tanzania', KG: 'Kyrgyzstan',
+  UG: 'Uganda', ZM: 'Zambia', CD: 'DR Congo', ET: 'Ethiopia', MZ: 'Mozambique', ML: 'Mali',
 };
 function geoName(code: string): string {
   if (!code) return '';
@@ -57,16 +58,16 @@ function siteNameFromUrl(url: string): string {
 }
 
 function buildSubject(site: string): string {
-  return `Partnership for ${site}`;
+  return `Exclusive 1xBet deal for ${site}`;
 }
 function buildMessage(url: string, geo: string): string {
   const site = siteNameFromUrl(url);
   const place = geoName(geo);
-  const geoClause = place ? ` in ${place}` : '';
-  return `Hi, I came across ${site} — you've built real trust with your audience${geoClause}. `
-    + `I'm Nick from 1xPartners. You're already monetising this traffic; I can make it pay you more — `
-    + `clean RevShare on 1xBet, no admin fee, no hidden cuts, terms built around your actual numbers. `
-    + `You deal with me directly, not a support desk. Want me to send a short proposal? `
+  const geoWord = place || 'your market';
+  return `Hi, I came by ${site} — strong work in ${geoWord}. `
+    + `I'm Nick from 1xPartners. 1xBet is the #1 betting brand across Africa, fully licensed in your market, `
+    + `and right now I've got an exclusive RevShare deal (up to 40%) for partners here. `
+    + `Clean share, no admin fee, weekly payouts, and you deal with me directly. Want me to send the offer? `
     + `Reach me at ${REPLY_EMAIL} or Telegram @aff_manager_xbet.`;
 }
 

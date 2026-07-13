@@ -26,17 +26,20 @@ const cors = {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // GEO → iTunes store country code + search term
+// Africa-focus week — App Store queries narrowed to African GEOs.
 const STORE_QUERIES: Array<{ geo: string; country: string; term: string }> = [
   { geo: 'NG', country: 'ng', term: 'betting' },
   { geo: 'KE', country: 'ke', term: 'betting' },
   { geo: 'GH', country: 'gh', term: 'betting' },
-  { geo: 'IN', country: 'in', term: 'cricket betting' },
-  { geo: 'BD', country: 'bd', term: 'betting' },
-  { geo: 'PK', country: 'pk', term: 'cricket betting' },
-  { geo: 'PH', country: 'ph', term: 'casino' },
-  { geo: 'AR', country: 'ar', term: 'apuestas' },
-  { geo: 'CL', country: 'cl', term: 'apuestas' },
-  { geo: 'ZA', country: 'za', term: 'betting' },
+  { geo: 'TZ', country: 'tz', term: 'betting' },
+  { geo: 'UG', country: 'ug', term: 'betting' },
+  { geo: 'CM', country: 'cm', term: 'paris sportif' },
+  { geo: 'CI', country: 'ci', term: 'paris sportif' },
+  { geo: 'SN', country: 'sn', term: 'paris sportif' },
+  { geo: 'ZM', country: 'zm', term: 'betting' },
+  { geo: 'CD', country: 'cd', term: 'paris sportif' },
+  { geo: 'ET', country: 'et', term: 'betting' },
+  { geo: 'MZ', country: 'mz', term: 'apostas' },
 ];
 
 const EMAIL_REGEX  = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
