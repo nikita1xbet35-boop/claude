@@ -554,7 +554,13 @@ export default {
     if (cron === '*/7 * * * *') {
       // LuckyPari outreach — separate brand, own quota. Fires ~9x/hour and sends
       // one email per tick, spreading 100/day evenly across working hours (no bursts).
-      await call('process-queue-lp', {});
+      // find-appstore rides this tick too (Africa-focus week): armed via APPSTORE_ENABLED,
+      // it mines one African store slot per run for app-developer leads (new source, no
+      // extra cron trigger — free plan caps at 5).
+      await Promise.all([
+        call('process-queue-lp', {}),
+        call('find-appstore', {}),
+      ]);
       return;
     }
   },

@@ -105,6 +105,7 @@ const GEO_NAMES: Record<string, string> = {
   PH: 'Philippines', BF: 'Burkina Faso', SN: 'Senegal', CM: 'Cameroun',
   MA: 'Morocco', VN: 'Vietnam', MM: 'Myanmar', ZA: 'South Africa',
   NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', TZ: 'Tanzania', KG: 'Kyrgyzstan',
+  UG: 'Uganda', ZM: 'Zambia', CD: 'DR Congo', ET: 'Ethiopia', MZ: 'Mozambique', ML: 'Mali',
   // fallbacks for other stored geo values
   'Africa FR': 'West Africa', 'CIS': 'the region', 'Global': 'the region',
 };
@@ -132,22 +133,22 @@ function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
       + `You deal with me directly, not a support desk. Want me to send a short proposal? Or ping me on Telegram: @aff_manager_xbet`;
   }
 
-  // ── App developer (source=appstore) — prepared, source not yet launched
+  // ── App developer (source=appstore) — Africa-focus week template
   if (source === 'appstore') {
-    return `Hi, I came across your app ${name}${geoClause} — you've built a real user base, `
-      + `and that traffic is worth more than most programs pay for it. I'm Nick from 1xPartners. `
-      + `You're already monetising these users; I can make it pay you more: clean RevShare on 1xBet, `
-      + `no admin fee, no hidden cuts, deep links and API integration, terms built around your actual numbers. `
-      + `You deal with me directly, not a support desk. Want me to send a short proposal? Or ping me on Telegram: @aff_manager_xbet`;
+    const geoWordApp = hasGeo ? geoRaw : 'your market';
+    return `Hi, I came by your app ${name} — strong work in ${geoWordApp}. `
+      + `I'm Nick from 1xPartners. 1xBet is the #1 betting brand across Africa, fully licensed in your market, `
+      + `and right now I've got an exclusive RevShare deal (up to 40%) for partners here. `
+      + `Clean share, no admin fee, weekly payouts, deep links and API integration, and you deal with me directly. `
+      + `Want me to send the offer?`;
   }
 
-  // ── SEO site owner (default)
-  return `Hi, I came across ${name} — you've built real trust with your audience${geoClause}, `
-    + `and that's worth more than most programs actually pay for it. I'm Nick from 1xPartners. `
-    + `You're already monetising this traffic; I can make it pay you more — and here's why: `
-    + `clean RevShare on 1xBet with no admin fee, so you're not losing 20-30% to hidden cuts like most programs take. `
-    + `Individual terms, and you deal with me directly, not a support desk. `
-    + `I put together a short proposal — want me to send it over? Or ping me on Telegram: @aff_manager_xbet`;
+  // ── SEO site owner (default) — Africa-focus week template
+  const geoWord = hasGeo ? geoRaw : 'your market';
+  return `Hi, I came by ${name} — strong work in ${geoWord}. `
+    + `I'm Nick from 1xPartners. 1xBet is the #1 betting brand across Africa, fully licensed in your market, `
+    + `and right now I've got an exclusive RevShare deal (up to 40%) for partners here. `
+    + `Clean share, no admin fee, weekly payouts, and you deal with me directly. Want me to send the offer?`;
 }
 
 // Decode HTML entities so site names never show raw "&amp;" / "&#x27;" etc.
@@ -215,20 +216,13 @@ function cleanSiteName(leadName: string, leadUrl: string): string {
 }
 
 function buildSubject(leadName: string, leadUrl: string, _brand: string, leadGeo?: string): string {
-  const site = cleanSiteName(leadName, leadUrl);
   const geo  = geoName(leadGeo || '');
   const hasGeo = !!geo && geo !== 'the region' && geo !== 'your market';
+  const geoWord = hasGeo ? geo : 'your market';
   const SUBJECTS = [
-    hasGeo ? `${geo} traffic is worth more than you're getting` : `Your traffic is worth more than you're getting`,
-    `Your traffic deserves better`,
-    `Quick one about ${site}`,
-    `This is for ${site}`,
-    `Let's talk numbers`,
-    `Saw ${site} — let's talk`,
-    `Quick idea for ${site}`,
-    hasGeo ? `${geo} — and your traffic` : `Your traffic`,
-    `Worth a quick look, ${site}`,
-    `What's your traffic actually worth?`,
+    `Exclusive 1xBet deal for ${geoWord}`,
+    `Your ${geoWord} traffic — up to 40%`,
+    `#1 in Africa, licensed in ${geoWord}`,
   ];
   return SUBJECTS[Math.floor(Math.random() * SUBJECTS.length)];
 }
