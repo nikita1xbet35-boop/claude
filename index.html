@@ -2666,10 +2666,6 @@
         ▶ Найти каналы
       </button>
 
-      <!-- Add to pipeline -->
-      <button onclick="ytAddSelected()" id="yt-add-btn" style="display:none;width:100%;padding:8px;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:500;font-family:var(--font-body);cursor:pointer;">
-        + Добавить выбранные в Pipeline
-      </button>
 
       <!-- Progress -->
       <div id="yt-progress-wrap" style="display:none;">
@@ -2693,9 +2689,7 @@
       <div id="yt-results" style="display:none;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);" id="yt-results-label">0 каналов</span>
-          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);cursor:pointer;font-family:var(--font-mono);">
-            <input type="checkbox" id="yt-select-all" onchange="ytSelectAll(this.checked)" style="accent-color:var(--accent);"> выбрать все
-          </label>
+          <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">отдельная база · без авто-отправки</span>
         </div>
         <div id="yt-cards" style="display:flex;flex-direction:column;gap:8px;"></div>
       </div>
@@ -7519,16 +7513,27 @@ function initYT(){
 }
 
 async function loadSavedYTChannels(){
-  const {data} = await sb.from('telegram_channels')
-    .select('*')
-    .eq('partner_type','youtube')
-    .order('score',{ascending:false})
-    .limit(100);
-  if(data && data.length){
-    ytChannels = data.map(ch => ({...ch, selected: false}));
+  // Page through the whole base (Supabase caps a single select at 1000 rows).
+  let all = [], from = 0, PAGE = 1000;
+  while(true){
+    const {data, error} = await sb.from('telegram_channels')
+      .select('*')
+      .eq('partner_type','youtube')
+      .order('subscribers',{ascending:false})
+      .range(from, from + PAGE - 1);
+    if(error || !data || !data.length) break;
+    all = all.concat(data);
+    if(data.length < PAGE) break;
+    from += PAGE;
+  }
+  ytChannels = all.map(ch => ({...ch, selected: false}));
+  const badge = document.getElementById('yt-badge');
+  if(badge) badge.textContent = all.length + ' каналов';
+  if(all.length){
     renderYTResults(ytChannels);
-    const badge = document.getElementById('yt-badge');
-    if(badge) badge.textContent = ytChannels.length + ' каналов';
+  } else {
+    document.getElementById('yt-results').style.display = 'none';
+    document.getElementById('yt-empty').style.display = 'flex';
   }
 }
 
@@ -7600,15 +7605,26 @@ function ytWaLink(w){
   if(/^https?:/i.test(w)) return w;
   return 'https://wa.me/' + String(w).replace(/[^\d]/g,'');
 }
+function ytHost(u){ try { return new URL(u).hostname.replace(/^www\./,''); } catch(e){ return u; } }
+function ytPrettyTg(u){ return String(u).replace(/^https?:\/\/(t\.me\/)?/i,'').replace(/^@?/,'@'); }
+// Contact rows showing the ACTUAL value (email / tg handle / wa number / links),
+// each clickable or copyable — this is the base you work by hand.
 function renderYTContacts(ch){
   const links = Array.isArray(ch.links) ? ch.links : [];
-  const parts = [];
-  if(ch.email)    parts.push(`<span onclick="copyText('${(ch.email||'').replace(/'/g,"\\'")}')" title="Скопировать email" style="cursor:pointer;background:var(--green-bg,rgba(16,185,129,.12));color:var(--green,#10b981);border:1px solid var(--green,#10b981)33;padding:2px 8px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">📧 ${ch.email}</span>`);
-  if(ch.telegram) parts.push(`<a href="${ch.telegram}" target="_blank" style="text-decoration:none;background:var(--blue-bg,rgba(59,130,246,.12));color:var(--blue,#3b82f6);border:1px solid var(--blue,#3b82f6)33;padding:2px 8px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">✈ Telegram</a>`);
-  if(ch.whatsapp) parts.push(`<a href="${ytWaLink(ch.whatsapp)}" target="_blank" style="text-decoration:none;background:rgba(37,211,102,.14);color:#25D366;border:1px solid #25D36633;padding:2px 8px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">🟢 WhatsApp</a>`);
-  links.forEach((u,li) => parts.push(`<a href="${u}" target="_blank" title="${u}" style="text-decoration:none;background:var(--bg3);color:var(--text2);border:1px solid var(--border2);padding:2px 8px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">🔗 ${(()=>{try{return new URL(u).hostname.replace(/^www\./,'');}catch(e){return 'link';}})()}</a>`));
-  if(!parts.length) return `<div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px;">контактов в описании не найдено</div>`;
-  return `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">${parts.join('')}</div>`;
+  const row = (icon, label, valHtml) =>
+    `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px;">
+       <span style="width:74px;flex-shrink:0;color:var(--text3);font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.4px;">${icon} ${label}</span>
+       <span style="min-width:0;flex:1;font-family:var(--font-mono);word-break:break-all;">${valHtml}</span>
+     </div>`;
+  const rows = [];
+  if(ch.email)    rows.push(row('📧','email',    `<a href="mailto:${ch.email}" style="color:var(--green,#10b981);text-decoration:none;">${ch.email}</a> <span onclick="copyText('${(ch.email||'').replace(/'/g,"\\'")}')" title="Скопировать" style="cursor:pointer;color:var(--text3);">⧉</span>`));
+  if(ch.telegram) rows.push(row('✈','telegram', `<a href="${ch.telegram}" target="_blank" style="color:var(--blue,#3b82f6);text-decoration:none;">${ytPrettyTg(ch.telegram)}</a>`));
+  if(ch.whatsapp) rows.push(row('🟢','whatsapp', `<a href="${ytWaLink(ch.whatsapp)}" target="_blank" style="color:#25D366;text-decoration:none;">${ch.whatsapp}</a>`));
+  links.forEach(u => rows.push(row('🔗','ссылка',  `<a href="${u}" target="_blank" title="${u}" style="color:var(--text2);text-decoration:none;">${ytHost(u)}</a>`)));
+  const body = rows.length
+    ? rows.join('')
+    : `<div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);padding:3px 0;">контактов в описании не найдено</div>`;
+  return `<div style="margin:8px 0;padding:8px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;">${body}</div>`;
 }
 function renderYTResults(channels){
   document.getElementById('yt-empty').style.display = 'none';
@@ -7616,96 +7632,39 @@ function renderYTResults(channels){
   document.getElementById('yt-results-label').textContent = channels.length + ' каналов';
 
   const scCls = s => s >= 70 ? 'score-high' : s >= 50 ? 'score-mid' : 'score-low';
+  const fmt = n => (n||0) >= 1000 ? Math.round(n/1000) + 'K' : (n||0);
+  const contactCount = ch => (ch.email?1:0)+(ch.telegram?1:0)+(ch.whatsapp?1:0)+((Array.isArray(ch.links)?ch.links.length:0));
 
   document.getElementById('yt-cards').innerHTML = channels.map((ch, i) => `
-    <div class="lead-card" style="padding:12px 14px;animation:fadeUp .3s ${i*0.03}s cubic-bezier(.16,1,.3,1) both;opacity:0;">
-      <div style="display:flex;align-items:start;gap:10px;">
-        <input type="checkbox" id="yt-cb-${i}" onchange="ytToggleSelect(${i})"
-          style="margin-top:4px;flex-shrink:0;accent-color:var(--accent);width:14px;height:14px;cursor:pointer;">
+    <div class="lead-card" style="padding:14px 16px;animation:fadeUp .3s ${Math.min(i,20)*0.03}s cubic-bezier(.16,1,.3,1) both;opacity:0;">
+      <div style="display:flex;align-items:center;gap:11px;margin-bottom:8px;">
+        <div style="width:34px;height:34px;flex-shrink:0;border-radius:8px;background:rgba(255,0,0,.12);display:flex;align-items:center;justify-content:center;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="#FF0000"><path d="M23 7.5a3 3 0 0 0-2.1-2.1C19 5 12 5 12 5s-7 0-8.9.4A3 3 0 0 0 1 7.5 31 31 0 0 0 .5 12 31 31 0 0 0 1 16.5a3 3 0 0 0 2.1 2.1C5 19 12 19 12 19s7 0 8.9-.4a3 3 0 0 0 2.1-2.1 31 31 0 0 0 .5-4.5 31 31 0 0 0-.5-4.5zM9.8 15.3V8.7l5.7 3.3-5.7 3.3z"/></svg>
+        </div>
         <div style="flex:1;min-width:0;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-            <span style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ch.name}</span>
-            ${ch.username ? '<span style="font-size:10px;color:var(--blue);font-family:var(--font-mono);">'+ch.username+'</span>' : ''}
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ch.name||'—'}</span>
             <span class="score-badge ${scCls(ch.score||0)}" style="margin-left:auto;flex-shrink:0;">${ch.score||0}</span>
           </div>
-          <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:6px;">
-            ${ch.subscribers ? ch.subscribers.toLocaleString() + ' подписчиков' : ''}
-            ${ch.geo ? ' · ' + ch.geo : ''}
-          </div>
-          <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:8px;">${ch.why_relevant||ch.description||'—'}</div>
-          ${renderYTContacts(ch)}
-          <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
-            <span class="chip chip-type">YouTube</span>
-            <span class="chip ${(ch.priority||'Medium')==='High'?'chip-ready':(ch.priority||'Medium')==='Medium'?'chip-waiting':'chip-new'}">${ch.priority||'Medium'}</span>
-            ${ch.has_1xbet ? '<span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;padding:1px 8px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ 1xBet</span>' : ''}
-            <div style="margin-left:auto;display:flex;gap:4px;">
-              <button onclick="window.open('${ch.url}','_blank')" class="btn btn-ghost btn-sm">↗ Открыть</button>
-              <button onclick="ytAddOne(${i})" class="btn btn-ghost btn-sm" style="color:var(--accent2);">+ Pipeline</button>
-            </div>
+          <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">
+            ${ch.username ? ch.username + ' · ' : ''}${ch.subscribers ? fmt(ch.subscribers) + ' подписчиков' : 'подписчики скрыты'}${ch.geo ? ' · ' + ch.geo : ''}${ch.language ? ' · ' + ch.language : ''}
           </div>
         </div>
       </div>
+      ${(ch.why_relevant||ch.description) ? `<div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:6px;max-height:60px;overflow:hidden;">${(ch.description||ch.why_relevant)}</div>` : ''}
+      ${renderYTContacts(ch)}
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
+        <span class="chip chip-type">YouTube</span>
+        <span class="chip ${(ch.priority||'Medium')==='High'?'chip-ready':(ch.priority||'Medium')==='Medium'?'chip-waiting':'chip-new'}">${ch.priority||'Medium'}</span>
+        <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">${contactCount(ch)} контакт(ов)</span>
+        ${ch.has_1xbet ? '<span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;padding:1px 8px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ 1xBet</span>' : ''}
+        <button onclick="window.open('${ch.url}','_blank')" class="btn btn-ghost btn-sm" style="margin-left:auto;">↗ Открыть канал</button>
+      </div>
     </div>`).join('');
-
-  document.getElementById('yt-add-btn').style.display = 'block';
 }
 
-function ytToggleSelect(i){
-  ytChannels[i].selected = document.getElementById('yt-cb-' + i)?.checked || false;
-}
-
-function ytSelectAll(val){
-  ytChannels.forEach((ch, i) => {
-    ch.selected = val;
-    const cb = document.getElementById('yt-cb-' + i);
-    if(cb) cb.checked = val;
-  });
-}
-
-async function ytAddOne(i){
-  const ch = ytChannels[i];
-  if(!ch) return;
-  await ytSaveToLeads(ch);
-}
-
-async function ytAddSelected(){
-  const selected = ytChannels.filter(ch => ch.selected);
-  if(!selected.length){ showError('Выбери каналы'); return; }
-  for(const ch of selected) await ytSaveToLeads(ch);
-  showError('Добавлено ' + selected.length + ' каналов в Pipeline');
-}
-
-async function ytSaveToLeads(ch){
-  const lead = {
-    name: ch.name,
-    url: ch.url,
-    type: 'Tipster',
-    geo: ch.geo || '—',
-    lang: ch.language || '—',
-    tg: ch.telegram || null,
-    email: ch.email || null,
-    contact_email: ch.email || null,
-    stage: 'new',
-    score: ch.score || 50,
-    priority: ch.priority || 'Medium',
-    has_1xbet: ch.has_1xbet || false,
-    summary: ch.why_relevant || ch.description || '—',
-    signals: [],
-    why: ch.why_relevant || '—',
-    next_action: 'Написать на YouTube',
-    status: 'complete',
-    source: 'youtube',
-    brand: currentBrand
-  };
-  const {data: exists} = await sb.from('leads').select('id').eq('url', lead.url).maybeSingle();
-  if(exists){ showError('Уже в базе: ' + ch.name); return; }
-  const {data, error} = await sb.from('leads').insert([lead]).select().single();
-  if(error){ showError('Ошибка: ' + error.message); return; }
-  leads.unshift(data);
-  updateBadge();
-  toast();
-  if(data) setTimeout(() => runContactExtraction(data.id), 1200);
-}
+// YouTube is a standalone base — channels are stored in telegram_channels
+// (partner_type='youtube') and worked by hand. No push into the send pipeline.
 
 // ══════════════════════════════════════════
 //  BLACKLIST
