@@ -210,6 +210,7 @@ Deno.serve(async (req: Request) => {
           partner_type: 'youtube',
           geo,
           language,
+          found_query: q,
           subscribers: subs ?? 0,
           score, priority,
           has_1xbet: has1xbet,

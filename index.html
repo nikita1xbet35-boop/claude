@@ -7629,6 +7629,20 @@ function renderYTBoard(){
 }
 
 function ytFmtSubs(n){ n = n||0; return n >= 1000 ? Math.round(n/1000)+'K' : n; }
+function ytMetaRow(label, valHtml){
+  return `<div style="display:flex;gap:8px;padding:3px 0;font-size:12px;">
+    <span style="width:96px;flex-shrink:0;color:var(--text3);font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.4px;">${label}</span>
+    <span style="min-width:0;flex:1;color:var(--text2);word-break:break-word;">${valHtml}</span>
+  </div>`;
+}
+function ytFmtDate(iso){
+  if(!iso) return '';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'short',year:'numeric'}) + ' ' +
+           d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  } catch(e){ return String(iso).slice(0,10); }
+}
 
 function ytRowHTML(ch){
   const score = ch.score || 0;
@@ -7700,6 +7714,15 @@ function openYTChannel(id){
       ${renderYTContacts(ch)}
 
       ${ch.has_1xbet ? '<div style="margin-top:10px;"><span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;padding:2px 9px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ упоминается 1xBet</span></div>' : ''}
+
+      <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 6px;">Как найден</div>
+      <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:8px 10px;">
+        ${ytMetaRow('GEO', ch.geo || '—')}
+        ${ytMetaRow('Запрос', ch.found_query ? ch.found_query : '<span style="color:var(--text3);">не записан (старый канал)</span>')}
+        ${ytMetaRow('Добавлен', ch.created_at ? ytFmtDate(ch.created_at) : '—')}
+        ${ch.language ? ytMetaRow('Язык', ch.language) : ''}
+        ${ch.subscribers ? ytMetaRow('Подписчиков', (ch.subscribers).toLocaleString('ru-RU')) : ''}
+      </div>
 
       ${(ch.description||ch.why_relevant) ? `
         <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 6px;">Описание канала</div>

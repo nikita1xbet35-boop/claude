@@ -101,6 +101,18 @@ jobs:
             -d "$PAYLOAD" \
             && echo "Migration 006 OK" || echo "Migration 006 skipped (may already be applied)"
 
+      - name: Apply migration 007 (YouTube found_query)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          PAYLOAD=$(python3 -c "import json; print(json.dumps({'query': open('supabase/migrations/007_youtube_found_query.sql').read()}))")
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            && echo "Migration 007 OK" || echo "Migration 007 skipped (may already be applied)"
+
       - name: Prepare function directories
         run: |
           mkdir -p supabase/functions/extract-contacts
