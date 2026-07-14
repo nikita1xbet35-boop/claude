@@ -11433,7 +11433,7 @@ try {
   #page-pipeline .pipeline-layout.filters-open .pipe-backdrop{ opacity: 1; pointer-events: auto; }
 
   /* ─── REWORKED LEAD ROW — aligned, airy, low-noise ─── */
-  #leads-list .lead-row{
+  #leads-list .lead-row, #yt-list .lead-row{
     display: grid !important;
     grid-template-columns: 46px minmax(0,1fr) auto auto !important;
     gap: 16px !important;
@@ -11445,11 +11445,11 @@ try {
     border: 1px solid var(--hairline) !important;
     transition: background .15s, border-color .15s, transform .18s var(--ease) !important;
   }
-  #leads-list .lead-row:hover{
+  #leads-list .lead-row:hover, #yt-list .lead-row:hover{
     background: color-mix(in oklab, white 5%, transparent) !important;
     border-color: var(--border2) !important;
   }
-  #leads-list .lead-row.active{
+  #leads-list .lead-row.active, #yt-list .lead-row.active{
     background: var(--accent-soft) !important;
     border-color: color-mix(in oklab, var(--accent) 45%, transparent) !important;
     box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 25%, transparent), 0 10px 28px -12px var(--accent-glow) !important;
