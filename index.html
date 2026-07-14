@@ -153,6 +153,7 @@
   .chip-waiting{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)20;}
   .chip-followup{background:var(--green-bg);color:var(--green);border:1px solid var(--green)20;}
   .chip-rejected{background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;}
+  .chip-done{background:var(--green-bg);color:var(--green);border:1px solid var(--green)20;}
   .score-badge{font-family:var(--font-mono);font-size:12px;font-weight:500;padding:3px 8px;border-radius:6px;white-space:nowrap;}
   .score-high{background:var(--green-bg);color:var(--green);}
   .score-mid{background:var(--amber-bg);color:var(--amber);}
@@ -2615,15 +2616,12 @@
     </div>
   </header>
 
-  <div style="display:grid;grid-template-columns:260px 1fr;flex:1;overflow:hidden;">
-
-    <!-- LEFT SIDEBAR -->
-    <div style="background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;padding:14px;gap:10px;">
-
-      <!-- GEO -->
-      <div>
-        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px;">GEO</div>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;" id="yt-geo-list">
+  <div class="pipeline-layout">
+    <!-- SIDEBAR: search controls -->
+    <aside class="sidebar" style="overflow-y:auto;">
+      <div class="sidebar-section">
+        <div class="sidebar-label">Поиск каналов</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;" id="yt-geo-list">
           <button class="geo-btn" onclick="ytToggleGeo(this)" data-geo="NG">Nigeria</button>
           <button class="geo-btn" onclick="ytToggleGeo(this)" data-geo="KE">Kenya</button>
           <button class="geo-btn" onclick="ytToggleGeo(this)" data-geo="GH">Ghana</button>
@@ -2639,60 +2637,91 @@
           <button class="geo-btn" onclick="ytToggleGeo(this)" data-geo="MZ">Mozambique</button>
           <button class="geo-btn" onclick="ytToggleGeo(this)" data-geo="ML">Mali</button>
         </div>
-        <div style="display:flex;gap:8px;margin-top:5px;">
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
           <button onclick="ytSelectAllGeo(true)" style="font-size:10px;color:var(--text3);background:none;border:none;cursor:pointer;font-family:var(--font-mono);">Выбрать все</button>
           <button onclick="ytSelectAllGeo(false)" style="font-size:10px;color:var(--text3);background:none;border:none;cursor:pointer;font-family:var(--font-mono);">Снять все</button>
         </div>
-      </div>
-
-      <!-- Min subscribers -->
-      <div>
-        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px;">Мин. подписчиков</div>
-        <input id="yt-min-subs" type="number" value="500" min="0" step="500"
-          style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:7px 10px;border-radius:6px;outline:none;text-align:center;">
-      </div>
-
-      <!-- Max per GEO -->
-      <div>
-        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px;">Каналов на GEO</div>
-        <input id="yt-max-per-geo" type="number" value="5" min="1" max="20"
-          style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:7px 10px;border-radius:6px;outline:none;text-align:center;">
-      </div>
-
-      <!-- Run button -->
-      <button onclick="ytSearch()" id="yt-run-btn"
-        style="width:100%;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:500;font-family:var(--font-body);cursor:pointer;transition:background .15s;"
-        onmouseover="this.style.background='var(--accent2)'" onmouseout="this.style.background='var(--accent)'">
-        ▶ Найти каналы
-      </button>
-
-
-      <!-- Progress -->
-      <div id="yt-progress-wrap" style="display:none;">
-        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;" id="yt-progress-label">Поиск...</div>
-        <div style="height:3px;background:var(--bg3);border-radius:2px;overflow:hidden;">
-          <div id="yt-progress-fill" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .3s;"></div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;">
+          <div style="flex:1;">
+            <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-bottom:3px;">Мин. подписчиков</div>
+            <input id="yt-min-subs" type="number" value="500" min="0" step="500"
+              style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:6px 8px;border-radius:6px;outline:none;text-align:center;">
+          </div>
+          <div style="width:64px;">
+            <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-bottom:3px;">На GEO</div>
+            <input id="yt-max-per-geo" type="number" value="5" min="1" max="20"
+              style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:6px 8px;border-radius:6px;outline:none;text-align:center;">
+          </div>
+        </div>
+        <button onclick="ytSearch()" id="yt-run-btn" class="btn btn-primary" style="width:100%;margin-top:0;">
+          ▶ Найти каналы
+        </button>
+        <div id="yt-progress-wrap" style="display:none;margin-top:8px;">
+          <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-bottom:4px;" id="yt-progress-label">Поиск...</div>
+          <div style="height:3px;background:var(--bg3);border-radius:2px;overflow:hidden;">
+            <div id="yt-progress-fill" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .3s;"></div>
+          </div>
         </div>
       </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Фильтры</div>
+        <div style="display:grid;gap:6px;">
+          <select class="filter-select" id="yt-filter-contact" onchange="renderYTBoard()">
+            <option value="">Контакт: любой</option>
+            <option value="email">Есть email</option>
+            <option value="telegram">Есть Telegram</option>
+            <option value="whatsapp">Есть WhatsApp</option>
+            <option value="any">Есть хоть какой-то</option>
+            <option value="none">Нет контакта</option>
+          </select>
+          <select class="filter-select" id="yt-filter-geo" onchange="renderYTBoard()">
+            <option value="">Все GEO</option>
+          </select>
+        </div>
+        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-top:10px;line-height:1.5;">
+          Отдельная база YouTube.<br>Пополняется автоматически.<br>Ничего не отправляется само.
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN COLUMN: status board + list -->
+    <div class="main-col">
+      <div class="stats-bar" style="flex-wrap:nowrap;overflow-x:auto;gap:0;">
+        <div class="stat-item s-all active" data-ytstat="" onclick="ytStat('',this)">
+          <div class="stat-num" id="yt-sn-all">0</div><div class="stat-label">Все</div>
+        </div>
+        <div class="stat-item s-new" data-ytstat="new" onclick="ytStat('new',this)">
+          <div class="stat-num" id="yt-sn-new">0</div><div class="stat-label">Новые</div>
+        </div>
+        <div class="stat-item s-waiting" data-ytstat="waiting" onclick="ytStat('waiting',this)">
+          <div class="stat-num" id="yt-sn-wt">0</div><div class="stat-label">Ожидание</div>
+        </div>
+        <div class="stat-item s-ready" data-ytstat="ready" onclick="ytStat('ready',this)">
+          <div class="stat-num" id="yt-sn-rdy">0</div><div class="stat-label">Готово</div>
+        </div>
+        <div class="stat-item s-followup" data-ytstat="rejected" onclick="ytStat('rejected',this)">
+          <div class="stat-num" id="yt-sn-rej">0</div><div class="stat-label">Не подходит</div>
+        </div>
+      </div>
+
+      <div class="leads-header">
+        <input id="yt-search" placeholder="🔍 Поиск по названию, @хэндлу..." oninput="renderYTBoard()"
+          style="flex:1;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-body);font-size:12px;padding:6px 10px;border-radius:7px;outline:none;">
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap;" id="yt-count-label">0 каналов</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadSavedYTChannels()" title="Обновить">↻</button>
+      </div>
+
+      <div class="leads-list" id="yt-list"></div>
     </div>
 
-    <!-- RIGHT: results -->
-    <div style="flex:1;overflow-y:auto;padding:20px;background:var(--bg2);">
-      <div id="yt-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;color:var(--text3);">
-        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" style="opacity:.15;">
-          <rect x="4" y="10" width="40" height="28" rx="6" stroke="var(--text)" stroke-width="2"/>
-          <path d="M20 18l10 6-10 6V18z" fill="var(--text)"/>
-        </svg>
-        <div style="font-size:13px;font-weight:500;color:var(--text2);">Выбери GEO и запусти поиск</div>
-        <div style="font-size:12px;color:var(--text3);">Ищем YouTube каналы типстеров и беттинг медиа</div>
+    <!-- DETAIL PANEL -->
+    <div class="detail-col">
+      <div class="empty-detail" id="yt-empty-detail">
+        <div style="font-size:28px;opacity:.2;">▶</div>
+        <div style="font-size:12px;">Выберите канал для просмотра</div>
       </div>
-      <div id="yt-results" style="display:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);" id="yt-results-label">0 каналов</span>
-          <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">отдельная база · без авто-отправки</span>
-        </div>
-        <div id="yt-cards" style="display:flex;flex-direction:column;gap:8px;"></div>
-      </div>
+      <div id="yt-detail" style="display:none;flex-direction:column;height:100%;overflow-y:auto;"></div>
     </div>
   </div>
 </div>
@@ -7507,6 +7536,11 @@ async function recalcLowScores(btn) {
   }
 }
 let ytChannels = [];
+let ytFilterStatus = '';
+let ytActiveId = null;
+
+const YT_STATUS_RU   = { new:'Новый', waiting:'Ожидание', ready:'Готово', rejected:'Не подходит' };
+const YT_STATUS_CHIP = { new:'chip-new', waiting:'chip-waiting', ready:'chip-done', rejected:'chip-rejected' };
 
 function initYT(){
   loadSavedYTChannels();
@@ -7526,15 +7560,152 @@ async function loadSavedYTChannels(){
     if(data.length < PAGE) break;
     from += PAGE;
   }
-  ytChannels = all.map(ch => ({...ch, selected: false}));
+  ytChannels = all;
   const badge = document.getElementById('yt-badge');
   if(badge) badge.textContent = all.length + ' каналов';
-  if(all.length){
-    renderYTResults(ytChannels);
-  } else {
-    document.getElementById('yt-results').style.display = 'none';
-    document.getElementById('yt-empty').style.display = 'flex';
+
+  // Populate the GEO filter from what's actually in the base.
+  const geoSel = document.getElementById('yt-filter-geo');
+  if(geoSel){
+    const cur = geoSel.value;
+    const geos = [...new Set(all.map(c => c.geo).filter(Boolean))].sort();
+    geoSel.innerHTML = '<option value="">Все GEO</option>' + geos.map(g => `<option value="${g}">${g}</option>`).join('');
+    geoSel.value = cur;
   }
+  renderYTBoard();
+}
+
+// Which channels pass the current status + contact + geo + search filters.
+function ytFiltered(){
+  const contact = document.getElementById('yt-filter-contact')?.value || '';
+  const geo     = document.getElementById('yt-filter-geo')?.value || '';
+  const q       = (document.getElementById('yt-search')?.value || '').toLowerCase();
+  return ytChannels.filter(ch => {
+    const st = ch.yt_status || 'new';
+    if(ytFilterStatus && st !== ytFilterStatus) return false;
+    if(geo && ch.geo !== geo) return false;
+    const links = Array.isArray(ch.links) ? ch.links : [];
+    const hasAny = ch.email || ch.telegram || ch.whatsapp || links.length;
+    if(contact === 'email'    && !ch.email) return false;
+    if(contact === 'telegram' && !ch.telegram) return false;
+    if(contact === 'whatsapp' && !ch.whatsapp) return false;
+    if(contact === 'any'      && !hasAny) return false;
+    if(contact === 'none'     && hasAny) return false;
+    if(q && !`${ch.name||''} ${ch.username||''} ${ch.geo||''}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function ytStat(status, el){
+  ytFilterStatus = status;
+  document.querySelectorAll('#page-yt .stat-item').forEach(s => s.classList.remove('active'));
+  if(el) el.classList.add('active');
+  renderYTBoard();
+}
+
+function renderYTBoard(){
+  // Stage counters (over the whole base, independent of the active stage filter).
+  const cnt = { all: ytChannels.length, new:0, waiting:0, ready:0, rejected:0 };
+  ytChannels.forEach(ch => { const s = ch.yt_status || 'new'; if(cnt[s] !== undefined) cnt[s]++; });
+  const set = (id,v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
+  set('yt-sn-all', cnt.all); set('yt-sn-new', cnt.new); set('yt-sn-wt', cnt.waiting);
+  set('yt-sn-rdy', cnt.ready); set('yt-sn-rej', cnt.rejected);
+
+  const data = ytFiltered();
+  const label = document.getElementById('yt-count-label');
+  if(label) label.textContent = data.length + ' каналов';
+
+  const list = document.getElementById('yt-list');
+  if(!list) return;
+  if(!data.length){
+    list.innerHTML = `<div style="padding:40px 16px;text-align:center;color:var(--text3);">
+      <div style="font-size:32px;opacity:.15;margin-bottom:10px;">▶</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:4px;">${ytChannels.length ? 'Нет совпадений' : 'База пока пустая'}</div>
+      <div style="font-size:12px;">${ytChannels.length ? 'Измени фильтры' : 'Каналы натекают автоматически, либо запусти поиск слева'}</div>
+    </div>`;
+    return;
+  }
+  list.innerHTML = data.map(ch => ytRowHTML(ch)).join('');
+}
+
+function ytFmtSubs(n){ n = n||0; return n >= 1000 ? Math.round(n/1000)+'K' : n; }
+
+function ytRowHTML(ch){
+  const score = ch.score || 0;
+  const scCls = score >= 70 ? 'good' : score >= 50 ? 'mid' : 'low';
+  const st = ch.yt_status || 'new';
+  const links = Array.isArray(ch.links) ? ch.links : [];
+  const nContacts = (ch.email?1:0)+(ch.telegram?1:0)+(ch.whatsapp?1:0)+links.length;
+  const hasContact = nContacts > 0;
+  return `<div class="lead-row${ytActiveId === ch.id ? ' active' : ''}" onclick="openYTChannel('${ch.id}')" id="ytrow-${ch.id}">
+    <span class="lr-score ${scCls}">${score || '—'}</span>
+    <div class="lr-main">
+      <span class="lr-name">${ch.name||'—'}${hasContact ? '<span class="lr-contact-dot" title="есть контакт"></span>' : ''}</span>
+      <span class="lr-domain">${ch.username ? ch.username+' · ' : ''}${ytFmtSubs(ch.subscribers)} подп.${hasContact ? ' · '+nContacts+' конт.' : ''}</span>
+    </div>
+    <span class="lr-geo">${ch.geo || ''}</span>
+    <span class="lr-stage ${YT_STATUS_CHIP[st]||'chip-new'}">${YT_STATUS_RU[st]||st}</span>
+  </div>`;
+}
+
+async function ytSetStatus(id, status){
+  const ch = ytChannels.find(c => String(c.id) === String(id));
+  if(!ch) return;
+  ch.yt_status = status;
+  await sb.from('telegram_channels').update({ yt_status: status }).eq('id', id);
+  renderYTBoard();
+  openYTChannel(id);
+}
+
+function openYTChannel(id){
+  const ch = ytChannels.find(c => String(c.id) === String(id));
+  if(!ch) return;
+  ytActiveId = ch.id;
+  document.querySelectorAll('#yt-list .lead-row').forEach(r => r.classList.remove('active'));
+  document.getElementById('ytrow-' + ch.id)?.classList.add('active');
+  document.getElementById('yt-empty-detail').style.display = 'none';
+  const box = document.getElementById('yt-detail');
+  box.style.display = 'flex';
+
+  const st = ch.yt_status || 'new';
+  const score = ch.score || 0;
+  const scColor = score >= 70 ? 'var(--green)' : score >= 50 ? 'var(--amber)' : 'var(--text3)';
+  const statusBtns = ['new','waiting','ready','rejected'].map(s =>
+    `<button onclick="ytSetStatus('${ch.id}','${s}')" style="flex:1;padding:6px 4px;font-size:11px;font-family:var(--font-body);border-radius:6px;cursor:pointer;border:1px solid ${s===st?'var(--accent)':'var(--border2)'};background:${s===st?'var(--accent-glow)':'var(--bg3)'};color:${s===st?'var(--accent2)':'var(--text2)'};">${YT_STATUS_RU[s]}</button>`
+  ).join('');
+
+  box.innerHTML = `
+    <div style="padding:16px 18px;border-bottom:1px solid var(--border);">
+      <div style="display:flex;align-items:center;gap:11px;margin-bottom:10px;">
+        <div style="width:40px;height:40px;flex-shrink:0;border-radius:9px;background:rgba(255,0,0,.12);display:flex;align-items:center;justify-content:center;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="#FF0000"><path d="M23 7.5a3 3 0 0 0-2.1-2.1C19 5 12 5 12 5s-7 0-8.9.4A3 3 0 0 0 1 7.5 31 31 0 0 0 .5 12 31 31 0 0 0 1 16.5a3 3 0 0 0 2.1 2.1C5 19 12 19 12 19s7 0 8.9-.4a3 3 0 0 0 2.1-2.1 31 31 0 0 0 .5-4.5 31 31 0 0 0-.5-4.5zM9.8 15.3V8.7l5.7 3.3-5.7 3.3z"/></svg>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:15px;font-weight:600;color:var(--text);word-break:break-word;">${ch.name||'—'}</div>
+          <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">${ch.username ? ch.username+' · ' : ''}${ytFmtSubs(ch.subscribers)} подписчиков${ch.geo?' · '+ch.geo:''}${ch.language?' · '+ch.language:''}</div>
+        </div>
+        <div style="text-align:center;flex-shrink:0;">
+          <div style="font-size:20px;font-weight:700;color:${scColor};font-family:var(--font-mono);">${score}</div>
+          <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;">score</div>
+        </div>
+      </div>
+      <a href="${ch.url}" target="_blank" class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;">↗ Открыть канал на YouTube</a>
+    </div>
+
+    <div style="padding:14px 18px;">
+      <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Статус</div>
+      <div style="display:flex;gap:5px;margin-bottom:16px;">${statusBtns}</div>
+
+      <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Контакты</div>
+      ${renderYTContacts(ch)}
+
+      ${ch.has_1xbet ? '<div style="margin-top:10px;"><span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;padding:2px 9px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ упоминается 1xBet</span></div>' : ''}
+
+      ${(ch.description||ch.why_relevant) ? `
+        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 6px;">Описание канала</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.55;white-space:pre-wrap;word-break:break-word;">${(ch.description||ch.why_relevant)}</div>
+      ` : ''}
+    </div>`;
 }
 
 function ytToggleGeo(btn){
@@ -7626,43 +7797,6 @@ function renderYTContacts(ch){
     : `<div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);padding:3px 0;">контактов в описании не найдено</div>`;
   return `<div style="margin:8px 0;padding:8px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;">${body}</div>`;
 }
-function renderYTResults(channels){
-  document.getElementById('yt-empty').style.display = 'none';
-  document.getElementById('yt-results').style.display = 'block';
-  document.getElementById('yt-results-label').textContent = channels.length + ' каналов';
-
-  const scCls = s => s >= 70 ? 'score-high' : s >= 50 ? 'score-mid' : 'score-low';
-  const fmt = n => (n||0) >= 1000 ? Math.round(n/1000) + 'K' : (n||0);
-  const contactCount = ch => (ch.email?1:0)+(ch.telegram?1:0)+(ch.whatsapp?1:0)+((Array.isArray(ch.links)?ch.links.length:0));
-
-  document.getElementById('yt-cards').innerHTML = channels.map((ch, i) => `
-    <div class="lead-card" style="padding:14px 16px;animation:fadeUp .3s ${Math.min(i,20)*0.03}s cubic-bezier(.16,1,.3,1) both;opacity:0;">
-      <div style="display:flex;align-items:center;gap:11px;margin-bottom:8px;">
-        <div style="width:34px;height:34px;flex-shrink:0;border-radius:8px;background:rgba(255,0,0,.12);display:flex;align-items:center;justify-content:center;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="#FF0000"><path d="M23 7.5a3 3 0 0 0-2.1-2.1C19 5 12 5 12 5s-7 0-8.9.4A3 3 0 0 0 1 7.5 31 31 0 0 0 .5 12 31 31 0 0 0 1 16.5a3 3 0 0 0 2.1 2.1C5 19 12 19 12 19s7 0 8.9-.4a3 3 0 0 0 2.1-2.1 31 31 0 0 0 .5-4.5 31 31 0 0 0-.5-4.5zM9.8 15.3V8.7l5.7 3.3-5.7 3.3z"/></svg>
-        </div>
-        <div style="flex:1;min-width:0;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ch.name||'—'}</span>
-            <span class="score-badge ${scCls(ch.score||0)}" style="margin-left:auto;flex-shrink:0;">${ch.score||0}</span>
-          </div>
-          <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">
-            ${ch.username ? ch.username + ' · ' : ''}${ch.subscribers ? fmt(ch.subscribers) + ' подписчиков' : 'подписчики скрыты'}${ch.geo ? ' · ' + ch.geo : ''}${ch.language ? ' · ' + ch.language : ''}
-          </div>
-        </div>
-      </div>
-      ${(ch.why_relevant||ch.description) ? `<div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:6px;max-height:60px;overflow:hidden;">${(ch.description||ch.why_relevant)}</div>` : ''}
-      ${renderYTContacts(ch)}
-      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
-        <span class="chip chip-type">YouTube</span>
-        <span class="chip ${(ch.priority||'Medium')==='High'?'chip-ready':(ch.priority||'Medium')==='Medium'?'chip-waiting':'chip-new'}">${ch.priority||'Medium'}</span>
-        <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">${contactCount(ch)} контакт(ов)</span>
-        ${ch.has_1xbet ? '<span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red)20;padding:1px 8px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">⚠ 1xBet</span>' : ''}
-        <button onclick="window.open('${ch.url}','_blank')" class="btn btn-ghost btn-sm" style="margin-left:auto;">↗ Открыть канал</button>
-      </div>
-    </div>`).join('');
-}
-
 // YouTube is a standalone base — channels are stored in telegram_channels
 // (partner_type='youtube') and worked by hand. No push into the send pipeline.
 
