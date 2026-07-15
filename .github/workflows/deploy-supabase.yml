@@ -137,6 +137,18 @@ jobs:
             -d "$PAYLOAD" \
             && echo "Migration 009 OK" || echo "Migration 009 skipped (may already be applied)"
 
+      - name: Apply migration 010 (888starz template)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          PAYLOAD=$(python3 -c "import json; print(json.dumps({'query': open('supabase/migrations/010_888starz_template.sql').read()}))")
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            && echo "Migration 010 OK" || echo "Migration 010 skipped (may already be applied)"
+
       - name: Prepare function directories
         run: |
           mkdir -p supabase/functions/extract-contacts
@@ -149,6 +161,7 @@ jobs:
           mkdir -p supabase/functions/admin-reset
           mkdir -p supabase/functions/find-contact-form
           mkdir -p supabase/functions/process-form-queue
+          mkdir -p supabase/functions/process-partner-queue
           mkdir -p supabase/functions/find-youtube
           mkdir -p supabase/functions/youtube-search
           mkdir -p supabase/functions/find-appstore
@@ -165,6 +178,7 @@ jobs:
           cp edge-functions/admin-reset.ts         supabase/functions/admin-reset/index.ts
           cp edge-functions/find-contact-form.ts   supabase/functions/find-contact-form/index.ts
           cp edge-functions/process-form-queue.ts  supabase/functions/process-form-queue/index.ts
+          cp edge-functions/process-partner-queue.ts supabase/functions/process-partner-queue/index.ts
           cp edge-functions/find-youtube.ts        supabase/functions/find-youtube/index.ts
           cp edge-functions/youtube-search.ts      supabase/functions/youtube-search/index.ts
           cp edge-functions/find-appstore.ts       supabase/functions/find-appstore/index.ts
@@ -221,6 +235,11 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase functions deploy process-form-queue --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
+
+      - name: Deploy process-partner-queue
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy process-partner-queue --project-ref lxsyrserfuighwxuymgb --no-verify-jwt
 
       - name: Deploy find-youtube
         env:
