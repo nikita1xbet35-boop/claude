@@ -24,22 +24,33 @@ const cors = {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // GEO → localized channel-search query (Africa-focus week: betting tipsters / cappers).
-const GEO_QUERIES: Record<string, string> = {
-  NG: 'betting tips nigeria',
-  KE: 'betting tips kenya sportpesa',
-  GH: 'betting tips ghana',
-  TZ: 'betting tips tanzania',
-  UG: 'betting tips uganda',
-  CM: 'pronostic paris sportif cameroun',
-  CI: "pronostic paris sportif cote d'ivoire",
-  SN: 'pronostic paris sportif senegal',
-  BF: 'pronostic paris sportif burkina faso',
-  ZM: 'betting tips zambia',
-  CD: 'pronostic paris sportif rdc congo',
-  ET: 'betting tips ethiopia',
-  MZ: 'dicas apostas mocambique',
-  ML: 'pronostic paris sportif mali',
+// Several query variants per GEO so we surface DIFFERENT channels over time — a
+// single fixed query returns the same top ~8 channels every run (saved=0). The
+// cron rotates the variant by time slot; manual search picks one at random.
+const GEO_QUERY_SETS: Record<string, string[]> = {
+  NG: ['betting tips nigeria', 'aviator predictor nigeria', 'sure odds naija', 'sportybet prediction', 'naija football prediction', 'mega jackpot prediction nigeria'],
+  KE: ['betting tips kenya', 'sportpesa mega jackpot prediction', 'aviator kenya', 'sure odds kenya', 'betika jackpot prediction', 'odibets tips'],
+  GH: ['betting tips ghana', 'aviator ghana', 'sure odds ghana', 'football prediction ghana', 'sportybet ghana', 'jackpot prediction ghana'],
+  TZ: ['betting tips tanzania', 'utabiri mpira', 'aviator tanzania', 'sportpesa tanzania', 'mabingwa tips', 'jackpot prediction tanzania'],
+  UG: ['betting tips uganda', 'aviator uganda', 'sure odds uganda', 'football prediction uganda', 'betpawa uganda', 'jackpot prediction uganda'],
+  CM: ['pronostic paris sportif cameroun', 'aviator cameroun', 'pronostic foot cameroun', '1xbet cameroun', 'parier football cameroun', 'coupon pronostic cameroun'],
+  CI: ['pronostic paris sportif cote d ivoire', 'aviator cote d ivoire', 'pronostic foot ivoirien', '1xbet ci', 'coupon sur foot abidjan', 'parier cote d ivoire'],
+  SN: ['pronostic paris sportif senegal', 'aviator senegal', 'pronostic foot senegal', '1xbet senegal', 'parier dakar', 'coupon pronostic senegal'],
+  BF: ['pronostic paris sportif burkina', 'aviator burkina', 'pronostic foot burkina', '1xbet burkina', 'parier ouaga', 'coupon pronostic burkina'],
+  ZM: ['betting tips zambia', 'aviator zambia', 'sure odds zambia', 'football prediction zambia', 'betway zambia', 'jackpot prediction zambia'],
+  CD: ['pronostic paris sportif rdc', 'aviator congo', 'pronostic foot rdc', '1xbet rdc', 'parier kinshasa', 'coupon pronostic congo'],
+  ET: ['betting tips ethiopia', 'aviator ethiopia', 'sure odds ethiopia', 'football prediction ethiopia', 'hulusport betting', 'jackpot prediction ethiopia'],
+  MZ: ['dicas apostas mocambique', 'aviator mocambique', 'prognosticos futebol mocambique', 'apostas desportivas mocambique', 'palpites futebol', 'betway mocambique'],
+  ML: ['pronostic paris sportif mali', 'aviator mali', 'pronostic foot mali', '1xbet mali', 'parier bamako', 'coupon pronostic mali'],
 };
+
+// Rotate the query variant: cron advances by time slot (so the same GEO asks a
+// different question on later ticks); manual search picks a random variant.
+function pickQuery(geo: string, isCron: boolean): string {
+  const set = GEO_QUERY_SETS[geo] || [`betting tips ${geo}`];
+  if (isCron) return set[Math.floor(Date.now() / (7 * 60 * 1000)) % set.length];
+  return set[Math.floor(Math.random() * set.length)];
+}
 
 // ── Contact extraction ──────────────────────────────────────────────────────
 const EMAIL_REGEX  = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
@@ -150,7 +161,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const allGeos = Object.keys(GEO_QUERIES);
+    const allGeos = Object.keys(GEO_QUERY_SETS);
     const geos: string[] = Array.isArray(body.geos) && body.geos.length
       ? body.geos
       : isCron
@@ -169,7 +180,7 @@ Deno.serve(async (req: Request) => {
     const perGeo: Record<string, number> = {};
 
     for (const geo of geos) {
-      const q = GEO_QUERIES[geo] || `betting tips ${geo}`;
+      const q = pickQuery(geo, isCron);
       perGeo[geo] = 0;
 
      try {
