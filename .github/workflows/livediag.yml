@@ -27,6 +27,7 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           set +e
+          ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM"
           q() {
             curl -sf -X POST \
               "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
@@ -263,6 +264,35 @@ jobs:
           echo ""
           echo "=== ERROR VOLUME by service (non-info, 24h) ==="
           q "SELECT service, level, count(*) FROM error_log WHERE level <> 'info' AND created_at > now() - interval '24 hours' GROUP BY 1,2 ORDER BY 3 DESC LIMIT 15;"; echo ""
+
+          echo ""
+          echo "████████ PARTNER BASES + YOUTUBE ████████"
+          echo ""
+          echo "=== PARTNER BASES state ==="
+          q "SELECT name, sending_enabled, sent_today, daily_limit, (template_body IS NOT NULL) AS has_tmpl FROM partner_bases ORDER BY name;"; echo ""
+          echo "--- 888starz leads by status ---"
+          q "SELECT status, count(*) FROM partner_leads WHERE base_name='888starz' GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          echo "--- partner sends today (GMT+3) ---"
+          q "SELECT count(*) AS n FROM email_log WHERE source LIKE 'partner:%' AND sent_at >= (now() AT TIME ZONE 'UTC' + interval '3 hours')::date - interval '3 hours';"; echo ""
+          echo "--- last 10 partner sends ---"
+          q "SELECT to_char(sent_at,'MM-DD HH24:MI') AS t, email, left(subject,40) AS subj FROM email_log WHERE source LIKE 'partner:%' ORDER BY sent_at DESC LIMIT 10;"; echo ""
+          echo "--- last 10 process-partner-queue runs ---"
+          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, level, left(message,160) AS msg FROM error_log WHERE service='process-partner-queue' ORDER BY created_at DESC LIMIT 10;"; echo ""
+          echo "=== PROBE: process-partner-queue direct invoke ==="
+          curl -s -m 60 -X POST "https://lxsyrserfuighwxuymgb.supabase.co/functions/v1/process-partner-queue" \
+            -H "Content-Type: application/json" -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" -d '{}' ; echo ""
+
+          echo ""
+          echo "=== YOUTUBE base ==="
+          q "SELECT count(*) AS total_youtube FROM telegram_channels WHERE partner_type='youtube';"; echo ""
+          q "SELECT count(*) AS added_24h FROM telegram_channels WHERE partner_type='youtube' AND created_at > now() - interval '24 hours';"; echo ""
+          echo "--- youtube subs distribution ---"
+          q "SELECT CASE WHEN subscribers>=1000 THEN '1k+' WHEN subscribers>0 THEN '<1k' ELSE '0/hidden' END AS bucket, count(*) FROM telegram_channels WHERE partner_type='youtube' GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          echo "--- last 12 youtube-search runs ---"
+          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, level, left(message,180) AS msg FROM error_log WHERE service='youtube-search' ORDER BY created_at DESC LIMIT 12;"; echo ""
+          echo "=== PROBE: youtube-search cron invoke (live) ==="
+          curl -s -m 120 -X POST "https://lxsyrserfuighwxuymgb.supabase.co/functions/v1/youtube-search" \
+            -H "Content-Type: application/json" -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" -d '{"cron":true}' ; echo ""
 
           echo "████████ END DEEP SWEEP ████████"
 
