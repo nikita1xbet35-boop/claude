@@ -95,6 +95,21 @@ async function ytApi(path: string, params: Record<string, string>): Promise<any>
   return res.json();
 }
 
+const MAX_AGE_DAYS = 30;      // only channels active within the last 30 days
+const MIN_SUBS_FLOOR = 1000;  // default subscriber floor (dashboard + cron)
+
+// Latest upload date via the channel's uploads playlist (cheap — 1 quota unit).
+async function latestVideoDate(uploadsPlaylistId: string | undefined): Promise<Date | null> {
+  if (!uploadsPlaylistId) return null;
+  try {
+    const pl = await ytApi('playlistItems', {
+      part: 'contentDetails', playlistId: uploadsPlaylistId, maxResults: '1',
+    });
+    const d = pl?.items?.[0]?.contentDetails?.videoPublishedAt;
+    return d ? new Date(d) : null;
+  } catch (_) { return null; }
+}
+
 function scoreOf(c: Contacts): number {
   let s = 40;
   if (c.email)    s += 20;
@@ -141,7 +156,7 @@ Deno.serve(async (req: Request) => {
       : isCron
         ? [ allGeos[Math.floor(Date.now() / (7 * 60 * 1000)) % allGeos.length] ]   // one rotating GEO per tick
         : allGeos;
-    const minSubs   = Math.max(0, parseInt(String(body.min_subscribers ?? (isCron ? 0 : 0))) || 0);
+    const minSubs   = Math.max(0, parseInt(String(body.min_subscribers ?? MIN_SUBS_FLOOR)) || MIN_SUBS_FLOOR);
     const maxPerGeo = Math.min(20, Math.max(1, parseInt(String(body.max_per_geo ?? (isCron ? 8 : 5))) || (isCron ? 8 : 5)));
 
     // Existing YouTube channel URLs — de-dupe so re-runs don't pile up rows.
@@ -150,7 +165,7 @@ Deno.serve(async (req: Request) => {
     const byUrl = new Map<string, any>();
     for (const r of (existing || [])) if (r.url) byUrl.set(r.url.toLowerCase(), r);
 
-    let saved = 0, updated = 0, processed = 0, skippedSubs = 0;
+    let saved = 0, updated = 0, processed = 0, skippedSubs = 0, skippedStale = 0;
     const perGeo: Record<string, number> = {};
 
     for (const geo of geos) {
@@ -176,9 +191,10 @@ Deno.serve(async (req: Request) => {
         .map((it: any) => it?.snippet?.channelId || it?.id?.channelId).filter(Boolean);
       if (!channelIds.length) continue;
 
-      // 2. Channel details (description holds contacts; statistics holds subs).
+      // 2. Channel details (description holds contacts; statistics holds subs;
+      //    contentDetails holds the uploads playlist for the recency check).
       const details = await ytApi('channels', {
-        part: 'snippet,brandingSettings,statistics', id: channelIds.join(','),
+        part: 'snippet,brandingSettings,statistics,contentDetails', id: channelIds.join(','),
       });
 
       for (const ch of (details.items || [])) {
@@ -192,10 +208,19 @@ Deno.serve(async (req: Request) => {
           || ch?.snippet?.country || null;
         const custom   = ch?.snippet?.customUrl || null;
 
+        // Subscriber floor — hidden-count channels can't be verified, so drop them
+        // whenever a floor is set (we want real, sizeable channels only).
         const hidden = !!ch?.statistics?.hiddenSubscriberCount;
         const subs   = hidden ? null : parseInt(ch?.statistics?.subscriberCount || '0') || 0;
-        // Skip only when subs are known AND below the floor (hidden channels pass through).
-        if (subs !== null && subs < minSubs) { skippedSubs++; continue; }
+        if (minSubs > 0 && (subs === null || subs < minSubs)) { skippedSubs++; continue; }
+
+        // Recency filter — only channels that posted a video within MAX_AGE_DAYS.
+        // Uses the channel's uploads playlist (1 quota unit), not a search call.
+        const uploads = ch?.contentDetails?.relatedPlaylists?.uploads;
+        const lastVideo = await latestVideoDate(uploads);
+        if (!lastVideo || (Date.now() - lastVideo.getTime()) > MAX_AGE_DAYS * 86400_000) {
+          skippedStale++; continue;
+        }
 
         const contacts = extractContacts(desc);
         const has1xbet = /1xbet|1x bet/i.test(desc);
@@ -248,10 +273,10 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'youtube-search',
-      message: `${isCron ? 'cron-run ' : ''}geos=${geos.join(',')} processed=${processed} saved=${saved} updated=${updated} skipped_subs=${skippedSubs}`,
+      message: `${isCron ? 'cron-run ' : ''}geos=${geos.join(',')} processed=${processed} saved=${saved} updated=${updated} skipped_subs=${skippedSubs} skipped_stale=${skippedStale} minsubs=${minSubs}`,
     }]);
 
-    return new Response(JSON.stringify({ success: true, saved, updated, processed, skipped_subs: skippedSubs, per_geo: perGeo }),
+    return new Response(JSON.stringify({ success: true, saved, updated, processed, skipped_subs: skippedSubs, skipped_stale: skippedStale, min_subs: minSubs, per_geo: perGeo }),
       { headers: { ...cors, 'Content-Type': 'application/json' } });
   } catch (e: any) {
     await supabase.from('error_log').insert([{
