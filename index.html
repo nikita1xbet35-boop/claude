@@ -7995,6 +7995,7 @@ const PB_STATUS_ORDER = ['new','queued','sent','in_progress','success','rejected
 const PB_FIELDS = [
   { key:'contact',    label:'Контакт партнёра', imp:true },
   { key:'email',      label:'Email',            imp:true },
+  { key:'source',     label:'Источник (канал)', imp:true, long:true },
   { key:'geo',        label:'ГЕО',              imp:true },
   { key:'vertical',   label:'Sport / Casino',   imp:true },
   { key:'language',   label:'Язык',             imp:true },
@@ -8128,6 +8129,16 @@ function renderPbBoard(){
 
 function pbInitial(l){ return ((l.contact||l.email||'?').trim()[0]||'?').toUpperCase(); }
 
+// Clickable link chips for whatever URLs live in the "Источник" field (often several).
+function pbSourceLinks(src){
+  const urls = (src||'').match(/https?:\/\/[^\s]+/g) || [];
+  if(!urls.length) return '';
+  const host = u => { try { return new URL(u).hostname.replace(/^www\./,''); } catch(e){ return 'link'; } };
+  return `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:10px;">` +
+    urls.map(u=>`<a href="${u.replace(/"/g,'%22')}" target="_blank" style="text-decoration:none;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);padding:2px 9px;border-radius:20px;font-size:11px;font-family:var(--font-mono);">🔗 ${host(u)}</a>`).join('') +
+    `</div>`;
+}
+
 function pbRowHTML(l){
   const st = l.status || 'new';
   const hasEmail = !!l.email;
@@ -8177,7 +8188,7 @@ function openPbLead(id){
     `<button onclick="pbSetStatus('${l.id}','${s}')" style="padding:5px 8px;font-size:11px;font-family:var(--font-body);border-radius:6px;cursor:pointer;border:1px solid ${s===st?'var(--accent)':'var(--border2)'};background:${s===st?'var(--accent-glow)':'var(--bg3)'};color:${s===st?'var(--accent2)':'var(--text2)'};">${PB_STATUS_RU[s]}</button>`
   ).join('');
   const field = (f) => {
-    const long = (f.key==='deal_terms'||f.key==='approach');
+    const long = f.long || (f.key==='deal_terms'||f.key==='approach');
     const val = esc(l[f.key]);
     return `<div style="margin-bottom:9px;">
       <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px;">${f.label}</div>
@@ -8193,9 +8204,10 @@ function openPbLead(id){
         <div style="width:40px;height:40px;flex-shrink:0;border-radius:10px;background:var(--accent-glow);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:var(--accent2);">${pbInitial(l)}</div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:15px;font-weight:600;color:var(--text);word-break:break-word;">${l.contact||l.email||'—'}</div>
-          <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">${pbCurrentBase?.name||''}${l.geo?' · '+l.geo:''}</div>
+          <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">${pbCurrentBase?.name||''}${l.geo?' · '+l.geo:''}${l.ext_id?' · 888 ID '+esc(l.ext_id):''}</div>
         </div>
       </div>
+      ${pbSourceLinks(l.source)}
     </div>
     <div style="padding:14px 18px;">
       <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Статус</div>
@@ -8259,6 +8271,7 @@ function pbParseCsv(){
         const s = x.toLowerCase();
         if(field==='contact') return /name|contact|партн|ник|nick|user/.test(s);
         if(field==='email')   return /mail|e-mail|почта/.test(s);
+        if(field==='source')  return /источник|source|канал|link|ссыл/.test(s);
         if(field==='geo')     return /geo|country|страна|гео/.test(s);
         if(field==='vertical')return /vertical|sport|casino|верт|направл/.test(s);
         if(field==='language')return /lang|язык|локаль/.test(s);

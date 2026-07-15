@@ -9,7 +9,7 @@
 // Called from the dashboard: POST { geos: string[], min_subscribers, max_per_geo }.
 // Uses the YouTube Data API (env YOUTUBE_API_KEY). Deploy: --no-verify-jwt.
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), YOUTUBE_API_KEY
-// (deploy trigger: partner-bases migration 008 ships with this run)
+// (deploy trigger: partner-bases migrations 008/009 ship with this run)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 

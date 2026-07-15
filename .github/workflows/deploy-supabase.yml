@@ -125,6 +125,18 @@ jobs:
             -d "$PAYLOAD" \
             && echo "Migration 008 OK" || echo "Migration 008 skipped (may already be applied)"
 
+      - name: Apply migration 009 (seed 888starz base)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          PAYLOAD=$(python3 -c "import json; print(json.dumps({'query': open('supabase/migrations/009_seed_888starz.sql').read()}))")
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            && echo "Migration 009 OK" || echo "Migration 009 skipped (may already be applied)"
+
       - name: Prepare function directories
         run: |
           mkdir -p supabase/functions/extract-contacts
