@@ -518,6 +518,9 @@ export default {
         call('process-queue', {}),
         call('generate-queue', {}),
         call('extract-contacts', {}),
+        // Partner bases: per-base auto-send (own template + own daily limit + own
+        // toggle). Sends nothing unless a base has sending_enabled = true.
+        call('process-partner-queue', {}),
       ]);
       return;
     }

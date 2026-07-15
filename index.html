@@ -2802,9 +2802,10 @@
         </div>
 
         <div style="margin-bottom:6px;">
-          <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-bottom:3px;">Тема письма</div>
-          <input id="pb-tmpl-subject" onchange="pbSaveSettings()" placeholder="Exclusive deal for {contact}"
-            style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-size:12px;padding:6px 8px;border-radius:6px;outline:none;">
+          <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-bottom:3px;">Темы письма (по одной на строку)</div>
+          <textarea id="pb-tmpl-subject" onchange="pbSaveSettings()" rows="2" placeholder="Partnership with 1xBet&#10;Let's work together"
+            style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-size:12px;padding:6px 8px;border-radius:6px;outline:none;resize:vertical;font-family:var(--font-body);"></textarea>
+          <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);margin-top:3px;">выбирается случайно при отправке</div>
         </div>
         <div>
           <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-bottom:3px;">Шаблон письма</div>
