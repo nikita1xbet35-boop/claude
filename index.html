@@ -2722,6 +2722,7 @@
         <input id="yt-search" placeholder="🔍 Поиск по названию, @хэндлу..." oninput="renderYTBoard()"
           style="flex:1;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-body);font-size:12px;padding:6px 10px;border-radius:7px;outline:none;">
         <span style="font-size:11px;color:var(--text3);white-space:nowrap;" id="yt-count-label">0 каналов</span>
+        <button class="btn btn-ghost btn-sm" onclick="ytExportCsv()" title="Выгрузить базу в CSV" style="color:var(--accent2);">⬇ CSV</button>
         <button class="btn btn-ghost btn-sm" onclick="loadSavedYTChannels()" title="Обновить">↻</button>
       </div>
 
@@ -7802,6 +7803,43 @@ function ytFmtDate(iso){
     return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'short',year:'numeric'}) + ' ' +
            d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
   } catch(e){ return String(iso).slice(0,10); }
+}
+
+// CSV export — the full YouTube base (not just the current filtered view), with
+// every contact + "how found" field, Excel-friendly (UTF-8 BOM, CRLF, quoted).
+function ytCsvCell(v){
+  const s = (v==null?'':String(v)).replace(/"/g,'""');
+  return `"${s}"`;
+}
+function ytExportCsv(){
+  if(!ytChannels.length){ showError('База пустая — нечего выгружать'); return; }
+  const cols = ['name','username','url','geo','language','subscribers','score','priority',
+    'yt_status','email','telegram','whatsapp','links','found_query','created_at','has_1xbet','description'];
+  const header = ['Название','Хэндл','URL','GEO','Язык','Подписчики','Score','Приоритет',
+    'Статус','Email','Telegram','WhatsApp','Ссылки','Запрос','Добавлен','1xBet','Описание'];
+  const rows = [header.map(ytCsvCell).join(',')];
+  for(const ch of ytChannels){
+    const links = Array.isArray(ch.links) ? ch.links.join(' | ') : '';
+    const vals = cols.map(c => {
+      if(c === 'links') return links;
+      if(c === 'yt_status') return YT_STATUS_RU[ch.yt_status||'new'] || ch.yt_status || '';
+      if(c === 'has_1xbet') return ch.has_1xbet ? 'да' : '';
+      if(c === 'created_at') return ytFmtDate(ch.created_at);
+      return ch[c];
+    });
+    rows.push(vals.map(ytCsvCell).join(','));
+  }
+  const csv = '﻿' + rows.join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `youtube_base_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast();
 }
 
 function ytRowHTML(ch){
