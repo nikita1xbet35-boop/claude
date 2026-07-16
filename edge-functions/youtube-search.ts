@@ -109,6 +109,45 @@ async function ytApi(path: string, params: Record<string, string>): Promise<any>
 const MAX_AGE_DAYS = 30;      // only channels active within the last 30 days
 const MIN_SUBS_FLOOR = 1000;  // default subscriber floor (dashboard + cron)
 
+// Operator-brand names — channels named after a bookmaker are official/spam, not
+// independent tipsters. Skip them; we want quality creator channels.
+const BRAND_BLOCK = [
+  'melbet', 'megapari', '1xbet', '1x bet', '1win', '1 win', 'betwinner', 'parimatch', 'pari match',
+  'linebet', '22bet', 'mostbet', 'paripesa', 'betway', 'sportybet', 'bet9ja', 'helabet',
+  '888starz', '888 starz', 'pin-up', 'pinup', 'betpawa', 'premierbet', 'premier bet',
+  'fonbet', 'olimp', 'marathonbet', 'marathon bet', 'bangbet', 'gal sport', 'galsport',
+];
+function isBrandChannel(title: string): boolean {
+  const t = (title || '').toLowerCase();
+  return BRAND_BLOCK.some(b => t.includes(b));
+}
+
+// Search channels for a query, walking up to `pages` result pages (deeper than the
+// top ~8). regionCode biases to the country; falls back without it if unsupported.
+async function searchChannelIds(q: string, geo: string, maxResults: number, pages: number): Promise<string[]> {
+  const ids: string[] = [];
+  let pageToken = '';
+  for (let p = 0; p < pages; p++) {
+    const params: Record<string, string> = { part: 'snippet', type: 'channel', q, maxResults: String(maxResults) };
+    if (geo) params.regionCode = geo;
+    if (pageToken) params.pageToken = pageToken;
+    let res: any;
+    try {
+      res = await ytApi('search', params);
+    } catch (_) {
+      if (geo) { delete params.regionCode; try { res = await ytApi('search', params); } catch (__) { break; } }
+      else break;
+    }
+    for (const it of (res?.items || [])) {
+      const id = it?.snippet?.channelId || it?.id?.channelId;
+      if (id) ids.push(id);
+    }
+    pageToken = res?.nextPageToken || '';
+    if (!pageToken) break;
+  }
+  return [...new Set(ids)];
+}
+
 // Latest upload date via the channel's uploads playlist (cheap — 1 quota unit).
 async function latestVideoDate(uploadsPlaylistId: string | undefined): Promise<Date | null> {
   if (!uploadsPlaylistId) return null;
@@ -168,7 +207,9 @@ Deno.serve(async (req: Request) => {
         ? [ allGeos[Math.floor(Date.now() / (7 * 60 * 1000)) % allGeos.length] ]   // one rotating GEO per tick
         : allGeos;
     const minSubs   = Math.max(0, parseInt(String(body.min_subscribers ?? MIN_SUBS_FLOOR)) || MIN_SUBS_FLOOR);
-    const maxPerGeo = Math.min(20, Math.max(1, parseInt(String(body.max_per_geo ?? (isCron ? 8 : 5))) || (isCron ? 8 : 5)));
+    // Deeper pull: 50 results/page (one search call), and manual runs can page further.
+    const searchMax = isCron ? 50 : Math.min(50, Math.max(1, parseInt(String(body.max_per_geo ?? 25)) || 25));
+    const pages     = isCron ? 1  : Math.min(5, Math.max(1, parseInt(String(body.pages ?? 3)) || 3));
 
     // Existing YouTube channel URLs — de-dupe so re-runs don't pile up rows.
     const { data: existing } = await supabase.from('telegram_channels')
@@ -176,7 +217,7 @@ Deno.serve(async (req: Request) => {
     const byUrl = new Map<string, any>();
     for (const r of (existing || [])) if (r.url) byUrl.set(r.url.toLowerCase(), r);
 
-    let saved = 0, updated = 0, processed = 0, skippedSubs = 0, skippedStale = 0;
+    let saved = 0, updated = 0, processed = 0, skippedSubs = 0, skippedStale = 0, skippedBrand = 0;
     const perGeo: Record<string, number> = {};
 
     for (const geo of geos) {
@@ -184,35 +225,29 @@ Deno.serve(async (req: Request) => {
       perGeo[geo] = 0;
 
      try {
-      // 1. Search channels for this GEO.
-      // regionCode biases results to the country; no language bias — several of our
-      // GEOs are francophone/Portuguese, so forcing English would hide local channels.
-      let search;
-      try {
-        search = await ytApi('search', {
-          part: 'snippet', type: 'channel', q, maxResults: String(maxPerGeo), regionCode: geo,
-        });
-      } catch (_) {
-        // Bad/unsupported regionCode → retry without it rather than losing the GEO.
-        search = await ytApi('search', {
-          part: 'snippet', type: 'channel', q, maxResults: String(maxPerGeo),
-        });
-      }
-      const channelIds = (search.items || [])
-        .map((it: any) => it?.snippet?.channelId || it?.id?.channelId).filter(Boolean);
+      // 1. Search channels for this GEO (paged for depth).
+      const channelIds = await searchChannelIds(q, geo, searchMax, pages);
       if (!channelIds.length) continue;
 
-      // 2. Channel details (description holds contacts; statistics holds subs;
-      //    contentDetails holds the uploads playlist for the recency check).
-      const details = await ytApi('channels', {
-        part: 'snippet,brandingSettings,statistics,contentDetails', id: channelIds.join(','),
-      });
+      // 2. Channel details in batches of 50 (statistics=subs, contentDetails=uploads).
+      const detailItems: any[] = [];
+      for (let i = 0; i < channelIds.length; i += 50) {
+        const d = await ytApi('channels', {
+          part: 'snippet,brandingSettings,statistics,contentDetails',
+          id: channelIds.slice(i, i + 50).join(','),
+        });
+        detailItems.push(...(d.items || []));
+      }
 
-      for (const ch of (details.items || [])) {
+      for (const ch of detailItems) {
         processed++;
         const chId  = ch.id;
         const url   = `https://www.youtube.com/channel/${chId}`;
         const title = ch?.snippet?.title || 'YouTube channel';
+
+        // Brand filter — skip channels named after a bookmaker (official/spam).
+        if (isBrandChannel(title)) { skippedBrand++; continue; }
+
         const desc  = (ch?.snippet?.description || '') + '\n'
           + (ch?.brandingSettings?.channel?.description || '');
         const language = ch?.snippet?.defaultLanguage || ch?.brandingSettings?.channel?.defaultLanguage
@@ -284,10 +319,10 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'youtube-search',
-      message: `${isCron ? 'cron-run ' : ''}geos=${geos.join(',')} processed=${processed} saved=${saved} updated=${updated} skipped_subs=${skippedSubs} skipped_stale=${skippedStale} minsubs=${minSubs}`,
+      message: `${isCron ? 'cron-run ' : ''}geos=${geos.join(',')} processed=${processed} saved=${saved} updated=${updated} skipped_subs=${skippedSubs} skipped_stale=${skippedStale} skipped_brand=${skippedBrand} minsubs=${minSubs}`,
     }]);
 
-    return new Response(JSON.stringify({ success: true, saved, updated, processed, skipped_subs: skippedSubs, skipped_stale: skippedStale, min_subs: minSubs, per_geo: perGeo }),
+    return new Response(JSON.stringify({ success: true, saved, updated, processed, skipped_subs: skippedSubs, skipped_stale: skippedStale, skipped_brand: skippedBrand, min_subs: minSubs, per_geo: perGeo }),
       { headers: { ...cors, 'Content-Type': 'application/json' } });
   } catch (e: any) {
     await supabase.from('error_log').insert([{
