@@ -10,6 +10,7 @@
 // don't land on a fixed grid.
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), SUPABASE_ANON_KEY
+// (deploy trigger: migration 013 payload fix ships with this run)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 

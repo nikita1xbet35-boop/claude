@@ -177,12 +177,15 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          PAYLOAD=$(python3 -c "import json; print(json.dumps({'query': open('supabase/migrations/013_luckypari_base.sql').read()}))")
+          # This migration is ~2300 INSERT rows (~540KB) — too large to pass as a
+          # curl -d command-line argument ("Argument list too long"). Write the
+          # JSON payload to a file and stream it with --data-binary @file instead.
+          python3 -c "import json; print(json.dumps({'query': open('supabase/migrations/013_luckypari_base.sql').read()}))" > /tmp/migration_013_payload.json
           curl -sf -X POST \
             "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
             -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD" \
+            --data-binary @/tmp/migration_013_payload.json \
             && echo "Migration 013 OK" || echo "Migration 013 skipped (may already be applied)"
 
       - name: Prepare function directories
