@@ -113,10 +113,12 @@ Deno.serve(async (req: Request) => {
         .split('\n').map(s => s.trim()).filter(Boolean);
       if (!subjects.length) { stats.skipped++; continue; }
 
-      // Next un-sent lead in this base with a usable email.
+      // Next un-sent lead in this base with a usable email. Ordered by id (a random
+      // UUID, unrelated to import order) instead of created_at, so sends go out in a
+      // shuffled order rather than following the imported list top-to-bottom.
       const { data: leads } = await supabase.from('partner_leads')
         .select('*').eq('base_id', base.id).eq('status', 'new')
-        .not('email', 'is', null).order('created_at', { ascending: true }).limit(1);
+        .not('email', 'is', null).order('id', { ascending: true }).limit(1);
       const lead = leads?.[0];
       if (!lead) { continue; }
 

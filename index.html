@@ -8027,17 +8027,19 @@ function renderYTContacts(ch){
 let pbBases = [], pbCurrentBase = null, pbLeads = [], pbFilter = '', pbActiveId = null;
 let pbCsvRows = [], pbCsvHeaders = [];
 
-const PB_STATUS_RU = { new:'Новый', queued:'Ждёт отправки', sent:'Отправлено', in_progress:'В работе', success:'Успешно', rejected:'Отказ' };
-const PB_STATUS_CHIP = { new:'chip-new', queued:'chip-waiting', sent:'chip-waiting', in_progress:'chip-waiting', success:'chip-done', rejected:'chip-rejected' };
-const PB_STATUS_ORDER = ['new','queued','sent','in_progress','success','rejected'];
+const PB_STATUS_RU = { new:'Новый', manual:'Вручную', queued:'Ждёт отправки', sent:'Отправлено', in_progress:'В работе', success:'Успешно', rejected:'Отказ' };
+const PB_STATUS_CHIP = { new:'chip-new', manual:'chip-researched', queued:'chip-waiting', sent:'chip-waiting', in_progress:'chip-waiting', success:'chip-done', rejected:'chip-rejected' };
+const PB_STATUS_ORDER = ['new','manual','queued','sent','in_progress','success','rejected'];
 // Editable card fields → label + whether it maps during CSV import.
 const PB_FIELDS = [
   { key:'contact',    label:'Контакт партнёра', imp:true },
   { key:'email',      label:'Email',            imp:true },
+  { key:'phone',      label:'Телефон',          imp:true },
   { key:'source',     label:'Источник (канал)', imp:true, long:true },
   { key:'geo',        label:'ГЕО',              imp:true },
   { key:'vertical',   label:'Sport / Casino',   imp:true },
   { key:'language',   label:'Язык',             imp:true },
+  { key:'players',    label:'Игроков',          imp:true },
   { key:'promocode',  label:'Promocode',        imp:true },
   { key:'deal_type',  label:'Тип сделки',       imp:true },
   { key:'deal_terms', label:'Условия сделки',   imp:true },
@@ -8206,8 +8208,9 @@ async function pbSetStatus(id, status){
 async function pbSaveField(id, field, value){
   const l = pbLeads.find(x => String(x.id) === String(id));
   if(!l) return;
-  l[field] = value;
-  await sb.from('partner_leads').update({ [field]: value, updated_at: new Date().toISOString() }).eq('id', id);
+  const v = field === 'players' ? (parseInt(value) || 0) : value;
+  l[field] = v;
+  await sb.from('partner_leads').update({ [field]: v, updated_at: new Date().toISOString() }).eq('id', id);
   if(field === 'contact') renderPbBoard();
 }
 
@@ -8318,6 +8321,8 @@ function pbParseCsv(){
         if(field==='deal_type')return /deal.?type|тип.?сдел/.test(s);
         if(field==='deal_terms')return /terms|условия|revshare|rev|%/.test(s);
         if(field==='approach') return /approach|подход|angle/.test(s);
+        if(field==='phone')   return /phone|телефон|tel\b/.test(s);
+        if(field==='players') return /players|игрок/.test(s);
         return false;
       });
       return h;
@@ -8364,7 +8369,10 @@ async function pbDoImport(){
     if(!email || seen.has(email)) continue;
     seen.add(email);
     const lead = { base_id: base.id, base_name: base.name, status: 'new' };
-    for(const k in map) lead[k] = (r[map[k]]||'').trim() || null;
+    for(const k in map){
+      const raw = (r[map[k]]||'').trim();
+      lead[k] = k === 'players' ? (parseInt(raw) || 0) : (raw || null);
+    }
     lead.email = email;
     rowsOut.push(lead);
   }
