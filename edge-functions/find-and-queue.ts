@@ -790,8 +790,20 @@ async function bumpUsage(service: string, delta: number) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// This function is fired on the */3 cron tick. Running the search+Groq work that
+// often keeps Groq's per-minute free-tier quota permanently saturated — ~100% of
+// runs were hitting HTTP 429, so almost nothing got analyzed/saved (55 leads/24h).
+// Do the heavy work only every RUN_EVERY_TICKS-th tick (~every 9 min) so the rate
+// limit recovers between runs and each run actually qualifies & saves leads.
+const RUN_EVERY_TICKS = 3;
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+
+  if (Math.floor(Date.now() / (3 * 60 * 1000)) % RUN_EVERY_TICKS !== 0) {
+    return new Response(JSON.stringify({ skipped: true, reason: 'throttled — heavy run ~every 9 min to avoid Groq 429' }),
+      { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
 
   jinaCount = 0;
   groqCount = 0;
