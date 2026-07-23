@@ -241,6 +241,37 @@ Deno.serve(async (req: Request) => {
         if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;     // geo blacklist
         newLeads.push({ id: l.id, brand: l.brand, source: l.source || 'seo' });
       }
+
+      // ── Gentle backlog drain ────────────────────────────────────────────────
+      // Fresh intake is low, so the newest-600 window rarely fills the quota. A
+      // reserve of older, never-contacted leads sits beyond that window and never
+      // gets sent. Top up with the OLDEST uncontacted leads, capped per run so the
+      // backlog drains gradually instead of all at once.
+      const BACKLOG_PER_RUN = 5;
+      if (newLeads.length < newQuota) {
+        const pickedIds = new Set(newLeads.map(n => n.id));
+        const { data: backlog } = await supabase
+          .from('leads')
+          .select('id, brand, contact_email, url, geo, source')
+          .in('stage', ['new', 'ready', 'researched', 'followup'])
+          .not('contact_email', 'is', null)
+          .neq('contact_email', '')
+          .order('created_at', { ascending: true })   // oldest uncontacted first
+          .limit(500);
+        let backlogAdded = 0;
+        for (const l of (backlog || [])) {
+          if (newLeads.length >= newQuota || backlogAdded >= BACKLOG_PER_RUN) break;
+          if (pickedIds.has(l.id)) continue;
+          if (queuedLeadIds.has(l.id)) continue;
+          if (sentLeadIds.has(l.id)) continue;
+          if (!isSendableEmail(l.contact_email)) continue;
+          if (emailedSet.has(l.contact_email.toLowerCase())) continue;
+          if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;
+          newLeads.push({ id: l.id, brand: l.brand, source: l.source || 'seo' });
+          pickedIds.add(l.id);
+          backlogAdded++;
+        }
+      }
     }
 
     // ── Scheduling ──────────────────────────────────────────────────────────
