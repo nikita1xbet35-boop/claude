@@ -123,7 +123,7 @@ Deno.serve(async (req: Request) => {
 
     const dayOfWeek    = nowGMT3.getUTCDay();
     const isWeekend    = dayOfWeek === 0 || dayOfWeek === 6;
-    const dailyTarget  = isWeekend ? WEEKEND_TARGET : WEEKDAY_TARGET;
+    const dailyTarget  = WEEKDAY_TARGET;  // send 7/7 at the full target — no weekend reduction
 
     // After the work day — nothing to schedule today
     if (nowMs >= workEndMs) {
