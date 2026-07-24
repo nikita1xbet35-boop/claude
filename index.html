@@ -2829,6 +2829,9 @@
         <div class="stat-item s-followup" data-pbstat="success" onclick="pbStat('success',this)">
           <div class="stat-num" id="pb-sn-suc">0</div><div class="stat-label">Успешные</div>
         </div>
+        <div class="stat-item s-researched" data-pbstat="manual" onclick="pbStat('manual',this)">
+          <div class="stat-num" id="pb-sn-man">0</div><div class="stat-label">Вручную (200+ FTD)</div>
+        </div>
       </div>
 
       <div class="leads-header">
@@ -8061,7 +8064,7 @@ async function loadPbBases(){
       <div style="font-size:32px;opacity:.15;margin-bottom:10px;">🗂</div>
       <div style="font-size:13px;color:var(--text2);margin-bottom:4px;">Пока нет ни одной базы</div>
       <div style="font-size:12px;">Нажми «＋ Импорт базы (CSV)» слева</div></div>`;
-    ['pb-sn-all','pb-sn-sent','pb-sn-suc'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='0';});
+    ['pb-sn-all','pb-sn-sent','pb-sn-suc','pb-sn-man'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='0';});
     return;
   }
   const keep = pbCurrentBase?.id;
@@ -8136,6 +8139,7 @@ function pbFiltered(){
     const st = l.status || 'new';
     if(pbFilter === 'sent'    && !['sent','in_progress'].includes(st)) return false;
     if(pbFilter === 'success' && st !== 'success') return false;
+    if(pbFilter === 'manual'  && st !== 'manual') return false;
     if(q && !`${l.contact||''} ${l.email||''} ${l.geo||''}`.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -8149,10 +8153,10 @@ function pbStat(f, el){
 }
 
 function renderPbBoard(){
-  const c = { all: pbLeads.length, sent:0, success:0 };
-  pbLeads.forEach(l => { const s=l.status||'new'; if(['sent','in_progress'].includes(s)) c.sent++; if(s==='success') c.success++; });
+  const c = { all: pbLeads.length, sent:0, success:0, manual:0 };
+  pbLeads.forEach(l => { const s=l.status||'new'; if(['sent','in_progress'].includes(s)) c.sent++; if(s==='success') c.success++; if(s==='manual') c.manual++; });
   const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-  set('pb-sn-all',c.all); set('pb-sn-sent',c.sent); set('pb-sn-suc',c.success);
+  set('pb-sn-all',c.all); set('pb-sn-sent',c.sent); set('pb-sn-suc',c.success); set('pb-sn-man',c.manual);
 
   const data = pbFiltered();
   const lbl = document.getElementById('pb-count-label');
