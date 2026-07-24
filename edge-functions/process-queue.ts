@@ -252,29 +252,16 @@ Deno.serve(async (req: Request) => {
     // Individual failures mark items as failed/skipped; system keeps running.
 
     // 2. Working hours: 08:00–20:00 GMT+3
-    const { hour, dayOfWeek, dateStr } = toGMT3(now);
+    const { hour, dateStr } = toGMT3(now);
     if (hour < 8 || hour >= 20) {
       stats.reason = hour < 8 ? 'before working hours' : 'after working hours';
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // 3. Weekend throttle
-    const isWeekend    = dayOfWeek === 0 || dayOfWeek === 6;
+    // 3. Sends run 7/7 — no weekend throttle. The per-account daily quota
+    //    (ACCOUNT_DAILY_LIMIT) still applies every day.
     const gmt3DayStart = new Date(`${dateStr}T00:00:00+03:00`);
     const gmt3DayEnd   = new Date(`${dateStr}T23:59:59+03:00`);
-
-    if (isWeekend) {
-      const { count: sentToday } = await supabase
-        .from('email_log')
-        .select('id', { count: 'exact', head: true })
-        .gte('sent_at', gmt3DayStart.toISOString())
-        .lte('sent_at', gmt3DayEnd.toISOString());
-
-      if ((sentToday ?? 0) >= WEEKEND_DAILY_CAP) {
-        stats.reason = `weekend cap reached (${sentToday}/${WEEKEND_DAILY_CAP})`;
-        return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
-      }
-    }
 
     // 4. Fetch pending + retryable-failed queue items due now.
     //    'failed' items (retry_count < MAX_RETRIES) are included so they get
