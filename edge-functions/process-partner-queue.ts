@@ -10,7 +10,7 @@
 // don't land on a fixed grid.
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), SUPABASE_ANON_KEY
-// (retrigger: prior deploy hit a transient esm.sh 522 while bundling extract-contacts)
+// (deploy trigger: migration 014 — "Первая таблица" base — ships with this run)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
