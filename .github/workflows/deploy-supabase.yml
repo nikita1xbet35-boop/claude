@@ -188,6 +188,18 @@ jobs:
             --data-binary @/tmp/migration_013_payload.json \
             && echo "Migration 013 OK" || echo "Migration 013 skipped (may already be applied)"
 
+      - name: Apply migration 014 (seed Первая таблица base)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          python3 -c "import json; print(json.dumps({'query': open('supabase/migrations/014_pervaya_tablica.sql').read()}))" > /tmp/migration_014_payload.json
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/migration_014_payload.json \
+            && echo "Migration 014 OK" || echo "Migration 014 skipped (may already be applied)"
+
       - name: Prepare function directories
         run: |
           mkdir -p supabase/functions/extract-contacts
