@@ -21,8 +21,9 @@ const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
 const MAILBOX_DAILY_LIMIT = 300;  // shared Gmail(main) cap — matches process-queue
 const WORK_START = 8, WORK_END = 20;  // GMT+3 working hours
-const PER_RUN    = 1;             // leads sent per invocation (paced by the */2 tick)
-const JITTER_SKIP = 0.35;         // fraction of ticks skipped so sends aren't on a grid
+const PER_RUN    = 3;             // leads sent per invocation (across all bases) — with the
+                                  // */2 tick this allows ~3×/2min ≈ up to ~80/hour of headroom
+const JITTER_SKIP = 0.15;         // fraction of ticks skipped so sends aren't on a grid
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -71,17 +72,6 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // Shared Gmail(main) mailbox cap — protects the mailbox across cold + partner sends.
-    const dayStart = new Date(`${dateStr}T00:00:00+03:00`).toISOString();
-    const dayEnd   = new Date(`${dateStr}T23:59:59+03:00`).toISOString();
-    const { count: mailboxToday } = await supabase.from('email_log')
-      .select('id', { count: 'exact', head: true })
-      .eq('gmail_account', 'main').gte('sent_at', dayStart).lte('sent_at', dayEnd);
-    if ((mailboxToday ?? 0) >= MAILBOX_DAILY_LIMIT) {
-      stats.reason = 'mailbox daily cap reached';
-      return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
-
     if (Math.random() < JITTER_SKIP) {
       stats.reason = 'jitter skip';
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -92,6 +82,26 @@ Deno.serve(async (req: Request) => {
       .select('*').eq('sending_enabled', true).order('created_at');
     if (!bases || !bases.length) {
       stats.reason = 'no active bases';
+      return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
+    // Shared Gmail(main) mailbox cap — must count BOTH cold-flow sends and partner
+    // sends. Cold sends come from email_log (main, non-partner source); partner
+    // sends are counted from the base counters (their email_log insert can fail),
+    // so we don't rely on it and never double-count.
+    const dayStart = new Date(`${dateStr}T00:00:00+03:00`).toISOString();
+    const dayEnd   = new Date(`${dateStr}T23:59:59+03:00`).toISOString();
+    const { count: coldMainToday } = await supabase.from('email_log')
+      .select('id', { count: 'exact', head: true })
+      .eq('gmail_account', 'main').not('source', 'like', 'partner:%')
+      .gte('sent_at', dayStart).lte('sent_at', dayEnd);
+    const partnerSentStart = bases.reduce((s, b) => {
+      const reset = b.last_send_reset ? toGMT3(new Date(b.last_send_reset)).dateStr : '';
+      return s + (reset === dateStr ? (b.sent_today ?? 0) : 0); // ignore stale (pre-today) counters
+    }, 0);
+    const mailboxUsedStart = (coldMainToday ?? 0) + partnerSentStart;
+    if (mailboxUsedStart >= MAILBOX_DAILY_LIMIT) {
+      stats.reason = 'mailbox daily cap reached';
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
@@ -114,41 +124,58 @@ Deno.serve(async (req: Request) => {
         .split('\n').map(s => s.trim()).filter(Boolean);
       if (!subjects.length) { stats.skipped++; continue; }
 
-      // Next un-sent lead in this base with a usable email. Ordered by id (a random
-      // UUID, unrelated to import order) instead of created_at, so sends go out in a
-      // shuffled order rather than following the imported list top-to-bottom.
+      // Send a BATCH this run — bounded by PER_RUN (across bases), the base's own
+      // daily limit, and the shared mailbox cap. (Previously 1 lead/base/run, which
+      // capped a single active base at ~1 email per tick regardless of its limit.)
+      const room = Math.max(0, Math.min(
+        PER_RUN - sentThisRun,
+        (base.daily_limit ?? 20) - sentToday,
+        MAILBOX_DAILY_LIMIT - mailboxUsedStart - stats.sent,
+      ));
+      if (room <= 0) { continue; }
+
+      // Un-sent leads, ordered by id (a random UUID) so sends go out shuffled.
       const { data: leads } = await supabase.from('partner_leads')
         .select('*').eq('base_id', base.id).eq('status', 'new')
-        .not('email', 'is', null).order('id', { ascending: true }).limit(1);
-      const lead = leads?.[0];
-      if (!lead) { continue; }
+        .not('email', 'is', null).order('id', { ascending: true }).limit(room);
+      if (!leads?.length) { continue; }
 
-      const subject = fill(pick(subjects), lead);
-      const body    = fill(base.template_body, lead);
-      const ok = await sendEmail(lead.email, subject, body);
-
-      if (ok) {
+      let baseSent = 0;
+      for (const lead of leads) {
+        if (sentThisRun >= PER_RUN) break;
+        const subject = fill(pick(subjects), lead);
+        const body    = fill(base.template_body, lead);
+        const ok = await sendEmail(lead.email, subject, body);
         const sentAt = new Date().toISOString();
-        await supabase.from('partner_leads')
-          .update({ status: 'sent', sent_at: sentAt, updated_at: sentAt }).eq('id', lead.id);
+        if (ok) {
+          baseSent++;
+          await supabase.from('partner_leads')
+            .update({ status: 'sent', sent_at: sentAt, updated_at: sentAt }).eq('id', lead.id);
+          // Log against gmail(main) so the shared mailbox cap counts partner sends too.
+          await supabase.from('email_log').insert([{
+            email: lead.email, brand: base.name, subject,
+            gmail_account: 'main', sent_at: sentAt, bounced: false,
+            source: 'partner:' + base.name,
+          }]).catch(() => {});
+          stats.sent++; sentThisRun++;
+        } else {
+          await supabase.from('error_log').insert([{
+            level: 'warning', service: 'process-partner-queue',
+            message: `send failed base=${base.name} lead=${lead.id} ${lead.email}`,
+          }]).catch(() => {});
+          stats.skipped++;
+        }
+      }
+
+      // Update the base counter + gmail usage once, by the actual number sent.
+      if (baseSent > 0) {
+        const at = new Date().toISOString();
         await supabase.from('partner_bases')
-          .update({ sent_today: sentToday + 1, last_send_reset: base.last_send_reset || now.toISOString() }).eq('id', base.id);
-        // Log against gmail(main) so the shared mailbox cap counts partner sends too.
-        await supabase.from('email_log').insert([{
-          email: lead.email, brand: base.name, subject,
-          gmail_account: 'main', sent_at: sentAt, bounced: false,
-          source: 'partner:' + base.name,
-        }]).catch(() => {});
+          .update({ sent_today: sentToday + baseSent, last_send_reset: base.last_send_reset || now.toISOString() })
+          .eq('id', base.id);
         const { data: cur } = await supabase.from('api_usage').select('used').eq('service', 'gmail_main').single();
-        await supabase.from('api_usage').update({ used: ((cur?.used ?? 0) as number) + 1, updated_at: sentAt }).eq('service', 'gmail_main');
-        stats.sent++; sentThisRun++;
-      } else {
-        // Soft-fail: leave as 'new' to retry next tick; note it.
-        await supabase.from('error_log').insert([{
-          level: 'warning', service: 'process-partner-queue',
-          message: `send failed base=${base.name} lead=${lead.id} ${lead.email}`,
-        }]).catch(() => {});
-        stats.skipped++;
+        await supabase.from('api_usage')
+          .update({ used: ((cur?.used ?? 0) as number) + baseSent, updated_at: at }).eq('service', 'gmail_main');
       }
     }
 
