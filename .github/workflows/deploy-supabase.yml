@@ -88,9 +88,10 @@ jobs:
           echo "Migrations up to date."
 
       # ── Edge functions ────────────────────────────────────────────────────
-      # Explicit allowlist rather than a glob over edge-functions/*.ts: the repo
-      # also holds helpers that must NOT be exposed publicly (run-migration.ts
-      # executes arbitrary SQL, and everything here deploys with --no-verify-jwt).
+      # Explicit allowlist rather than a glob over edge-functions/*.ts. Everything
+      # here deploys with --no-verify-jwt, i.e. publicly callable, so adding a
+      # function to the pipeline stays a deliberate act rather than a side effect
+      # of dropping a file in the folder.
       - name: Deploy edge functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
