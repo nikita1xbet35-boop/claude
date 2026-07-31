@@ -134,6 +134,7 @@ jobs:
             validate-emails
             run-sequences
             score-leads
+            archive-keywords
           "
           for fn in $FUNCTIONS; do
             mkdir -p "supabase/functions/$fn"

@@ -104,9 +104,24 @@ function scoreLead(l: Record<string, any>): Score {
     score -= 5; reasons.push(`вертикаль: ${vertical}`);
   }
 
-  // already sending traffic to a competitor book = a ready betting audience
-  const book = TARGET_BOOKS.find(b => t.includes(b)) || null;
-  if (book) { score += 16; reasons.push(`льёт на конкурента: ${book}`); }
+  // ── v6 qualification signals (set by find-and-queue from the Groq pass) ──
+  // These outrank raw content quality: an existing affiliate of a competitor
+  // already has traffic, understands revshare, and has someone to talk to.
+  const promotes = String(l.competitor_book || '').trim();
+  const book = promotes || TARGET_BOOKS.find(b => t.includes(b)) || null;
+  if (promotes) {
+    score += 25; reasons.push(`действующий аффилиат конкурента: ${promotes}`);
+  } else if (book) {
+    score += 16; reasons.push(`льёт на конкурента: ${book}`);
+  }
+  if (l.monetization_signal) {
+    score += 15;
+    reasons.push('умеет монетизировать трафик' + (l.monetization_evidence ? `: ${String(l.monetization_evidence).slice(0, 60)}` : ''));
+  }
+  if (l.has_partnership_path) { score += 15; reasons.push('есть путь к B2B-разговору'); }
+  if (l.type === 'tipster' || l.type === 'review') { score += 10; reasons.push(`профиль под RevShare: ${l.type}`); }
+  if (l.search_layer === 'C') { score += 10; reasons.push('найден по футпринту конкурента (слой C)'); }
+  else if (l.search_layer === 'B') { score += 5; reasons.push('медиахолдинг/паблишер (слой B)'); }
 
   // signals of a real affiliate operation
   if (/affiliate|partner|revshare|rev share|cpa/.test(t)) { score += 8; reasons.push('упоминает партнёрку'); }
@@ -132,7 +147,8 @@ Deno.serve(async (req: Request) => {
 
   try {
     const { data: leads } = await supabase.from('leads')
-      .select('id, name, url, summary, type, geo, brand, found_keyword, contact_email_type, email_status')
+      .select('id, name, url, summary, type, geo, brand, found_keyword, contact_email_type, email_status, '
+        + 'search_layer, competitor_book, monetization_signal, monetization_evidence, has_partnership_path')
       .is('fit_score', null)
       .limit(BATCH);
 

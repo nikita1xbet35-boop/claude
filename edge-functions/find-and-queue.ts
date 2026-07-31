@@ -49,8 +49,10 @@ const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
 const RESULTS_PER_KW   = 12;
 const KW_PER_RUN       = 5;
-// Minimum Groq relevance score to keep a lead
-const MIN_SCORE        = 40;
+// Baseline content-quality floor. Lowered from 40 in v6 because monetisation
+// signals (promotes a competitor / has a partnership path) now override it — the
+// score alone was rejecting thin-but-warm affiliates.
+const MIN_SCORE        = 35;
 // Sites analyzed per Groq call. The free-tier bottleneck is TOKENS/min (6000 TPM
 // for llama-3.1-8b-instant), not requests/min — single-site calls at any pacing
 // blow the token budget. One batched call (~1800 tokens) covers 8 sites.
@@ -59,8 +61,17 @@ const GROQ_BATCH_SIZE  = 8;
 // 12s spacing leaves headroom and fits 3 batches inside the 150s edge-fn timeout.
 const GROQ_PACE_MS     = 12_000;
 
-// Minus-words appended to every DDG query to cut noise
-const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk';
+// Minus-words appended to every search query to cut noise.
+// Deliberately NOT excluded: prediction, tips, bonus, promo code, review,
+// "betting sites" — those phrases mark our targets, not junk.
+const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixtures -login -apk'
+  + ' -stream -streaming -highlights -watch -download'
+  + ' -jobs -vacancy -recruitment -salary'
+  + ' -quora -facebook -twitter -tiktok -youtube'
+  + ' -"terms and conditions" -"privacy policy"'
+  + ' -lyrics -movie -song';
+// Layer B hunts for ad inventory, so agencies SELLING marketing services are noise.
+const LAYER_B_MINUS = ' -"marketing agency" -"seo services" -"web design"';
 
 // Pre-filter: drop results whose title/snippet/URL contain these strings (catches what DDG misses)
 const RESULT_NOISE_TERMS = ['forum','reddit','wikipedia','livescore','flashscore','sofascore','results','fixtures','how to play','rules of ','login','sign up','download','apk','app store','google play'];
@@ -533,6 +544,14 @@ interface Analysis {
   score: number; type: string; summary: string; why: string;
   priority: string; lang: string; is_competitor: boolean;
   is_operator: boolean; relevant: boolean; geo_excluded: boolean;
+  // v6 qualification: does this site OWN an audience, does it already monetise
+  // traffic, is there a B2B route in, and whose book is it already sending to.
+  audience_owner: boolean;
+  monetization_signal: boolean;
+  monetization_evidence: string;
+  has_partnership_path: boolean;
+  promotes_competitor: string;
+  geo_detected: string;
 }
 
 let groqCount = 0;
@@ -590,18 +609,68 @@ async function analyzeBatchWithGroq(
   const partnerBrand = brand === '1xcasino' ? '1xCasino'
                      : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
 
-  const sys = `You qualify websites as affiliate PARTNERS for ${partnerBrand} (sports betting brand).\n`
-    + `We want PUBLISHER sites: tipsters, prediction sites, betting-tips blogs, sports media, `
-    + `review/comparison sites, "best betting site" lists. We pitch them a partnership.\n`
-    + `Sites that REVIEW or PROMOTE betting brands (1xBet, betway, bet9ja, melbet, 1win etc.) are PERFECT partners.\n`
-    + `OPERATORS (is_operator=true): the site IS itself a casino/sportsbook with deposits/login-to-bet. NOT partners.\n`
-    + `geo_excluded=true ONLY for: USA, UK, Western Europe, Ukraine, Brazil, Australia.\n`
-    + `Score: 80-100 established affiliate/media in target GEO; 60-79 solid; 30-59 thin; 0-29 not iGaming/dead.\n`
-    + `relevant=false ONLY if is_operator OR geo_excluded OR score<${MIN_SCORE}.\n`
-    + `You get ${cands.length} numbered sites. Return ONLY JSON — one entry per site, same numbering:\n`
-    + `{"results":[{"i":1,"score":0-100,"type":"review|tipster|media|aggregator|blog|other",`
-    + `"summary":"1 short sentence","priority":"High|Medium|Low","lang":"xx",`
-    + `"is_operator":false,"geo_excluded":false,"relevant":true}]}`;
+  // v6: the model no longer just classifies a site type — it judges PARTNER FITNESS.
+  // Owning an audience and already monetising it matter more than polish, because a
+  // thin blog handing out a competitor's promo code is a warmer lead than a fat blog
+  // with no monetisation at all.
+  // NB: the brief asks for a bare JSON array, but Groq's json_object mode rejects a
+  // top-level array, so results stay wrapped in {"results":[...]} and are matched by
+  // the numeric index rather than by url (the model sometimes rewrites urls).
+  const sys = `You are a partner-acquisition analyst for a betting affiliate program (${partnerBrand}).
+You evaluate websites as POTENTIAL PARTNERS who could send us betting traffic.
+
+We want: sites that OWN an audience and can promote a bookmaker.
+That includes: tipsters, prediction sites, betting review/comparison sites, sports blogs,
+sports media, news portals with a sports vertical, content sites that write betting guides,
+bonus/promo-code sites, and anyone already promoting a bookmaker.
+
+Writing guides, tutorials or promoting bookmakers is a POSITIVE signal — it proves they own
+betting audience and know how to monetise it.
+
+We do NOT want: the bookmakers themselves (operators), livescore/stats-only services,
+streaming sites, forums, app-download pages, marketplaces, job boards, and pages with no
+owned audience.
+
+You get ${cands.length} numbered sites. Return ONLY JSON, one entry per site, same numbering:
+{"results":[{
+ "i":1,
+ "score":0-100,
+ "type":"tipster|review|media|blog|aggregator|operator|other",
+ "audience_owner":true,
+ "monetization_signal":false,
+ "monetization_evidence":"",
+ "promotes_competitor":"",
+ "has_partnership_path":false,
+ "is_operator":false,
+ "geo_excluded":false,
+ "lang":"xx",
+ "geo":"",
+ "priority":"high|medium|low",
+ "summary":"max 15 words",
+ "relevant":true
+}]}
+
+FIELD RULES:
+- audience_owner: owns and publishes to its own audience (NOT a tool/aggregator/operator).
+  A site publishing betting tips, predictions, guides or bookmaker reviews for players IS
+  audience_owner=true. This is our core target.
+  Livescore/stats/odds-feed tools with no editorial content: audience_owner=false.
+  News/media portal WITHOUT any sports or betting section: audience_owner=false.
+- monetization_signal: affiliate links, promo codes, sponsored posts, "advertise with us",
+  media kit, ad banners. monetization_evidence = short phrase, "" if none.
+- promotes_competitor: competitor bookmaker name if the site promotes one, "" if none.
+- has_partnership_path: partner/advertise/media/press page or B2B contact visible.
+- is_operator: the site IS the bookmaker/casino itself or its official mirror.
+- geo_excluded: primary audience is US/UK/Western Europe/Ukraine/Brazil/Australia.
+- score: content quality + audience depth.
+
+RULES for "relevant":
+- relevant=true ONLY IF audience_owner=true AND is_operator=false AND geo_excluded=false.
+
+RULES for "priority":
+- high: promotes_competitor is not empty, OR (monetization_signal AND has_partnership_path)
+- medium: monetization_signal OR has_partnership_path
+- low: neither`;
 
   const user = cands.map((c, i) =>
     `${i + 1}. URL: ${c.url}\nTitle: ${(c.title || '').slice(0, 100)}\nSnippet: ${(c.snippet || '').slice(0, 160)}`,
@@ -625,18 +694,35 @@ async function analyzeBatchWithGroq(
       const score        = Math.max(0, Math.min(100, Number(ai.score) || 0));
       const is_operator  = !!ai.is_operator;
       const geo_excluded = !!ai.geo_excluded;
+      const audience_owner = ai.audience_owner === undefined ? true : !!ai.audience_owner;
+      const monetization_signal  = !!ai.monetization_signal;
+      const has_partnership_path = !!ai.has_partnership_path;
+      const promotes_competitor  = String(ai.promotes_competitor || '').slice(0, 60).trim();
+
+      // v6 gate. score measures content quality, but a thin site already handing out
+      // a competitor's promo code beats a polished blog with no monetisation, so a
+      // monetisation signal overrides the quality floor instead of being ranked below it.
+      const qualifies =
+        score >= MIN_SCORE || promotes_competitor !== '' || has_partnership_path;
+
+      const prioRaw = String(ai.priority || '').toLowerCase();
       out.set(idx, {
         score,
         type:         String(ai.type || 'other').slice(0, 30),
         summary:      String(ai.summary || '').slice(0, 400),
         why:          '',
-        priority:     ['High', 'Medium', 'Low'].includes(ai.priority) ? ai.priority : 'Medium',
+        priority:     prioRaw === 'high' ? 'High' : prioRaw === 'low' ? 'Low' : 'Medium',
         lang:         String(ai.lang || '').slice(0, 40),
         is_competitor: false,
         is_operator,
         geo_excluded,
-        // Only real operators (own deposit/withdrawal) and excluded geos are blocked.
-        relevant:     !!ai.relevant && score >= MIN_SCORE && !is_operator && !geo_excluded,
+        audience_owner,
+        monetization_signal,
+        monetization_evidence: String(ai.monetization_evidence || '').slice(0, 200),
+        has_partnership_path,
+        promotes_competitor,
+        geo_detected: String(ai.geo || '').slice(0, 40),
+        relevant: !!ai.relevant && audience_owner && !is_operator && !geo_excluded && qualifies,
       });
     }
   } catch (_) { /* partial/no results — unanalyzed sites are skipped, re-found next runs */ }
@@ -810,8 +896,9 @@ Deno.serve(async (req: Request) => {
   jinaCount = 0;
   groqCount = 0;
   const stats = {
-    brand: '', preset: '', keywords_run: 0,
+    brand: '', preset: '', layer: '', keywords_run: 0,
     found: 0, analyzed: 0, irrelevant: 0, competitors: 0, geo_excluded: 0,
+    not_audience_owner: 0,
     saved: 0, contacts: 0, errors: [] as string[],
   };
   const startedAt = Date.now();
@@ -854,10 +941,52 @@ Deno.serve(async (req: Request) => {
     const preset      = allPresets[presetIndex];
     stats.preset      = preset.name;
 
-    const kwStart  = (Math.floor(slotIndex / (BRANDS.length * allPresets.length)) * KW_PER_RUN) % preset.keywords.length;
-    const rawKw    = preset.keywords.slice(kwStart, kwStart + KW_PER_RUN);
-    if (rawKw.length < KW_PER_RUN) rawKw.push(...preset.keywords.slice(0, KW_PER_RUN - rawKw.length));
-    const keywords = [...new Set(rawKw)];
+    // ── v6: pick the search LAYER for this run ────────────────────────────
+    // A single intent vector only ever surfaced audience owners. Layers B and C
+    // reach segments layer A structurally cannot see: publishers with ad
+    // inventory, and sites already running a competitor's affiliate deal.
+    //   0-6 → A (70%) player intent — the core of the base
+    //   7-8 → B (20%) publisher / monetisation intent
+    //   9   → C (10%) competitor footprints — the warmest, they already get it
+    const layerSlot = slotIndex % 10;
+    const layer: 'A' | 'B' | 'C' = layerSlot <= 6 ? 'A' : layerSlot <= 8 ? 'B' : 'C';
+    stats.layer = layer;
+
+    // Keywords now live in the DB so their yield can be measured and burnt-out
+    // ones retired automatically. The hardcoded preset list stays as a fallback
+    // for the window before migration 016 lands.
+    let poolRows: Array<{ id: number; keyword: string }> = [];
+    try {
+      const { data } = await supabase.from('keywords')
+        .select('id, keyword')
+        .eq('preset', preset.id).eq('layer', layer).eq('active', true)
+        .order('id');
+      poolRows = data || [];
+    } catch (_) { poolRows = []; }
+
+    // Layer A can fall back to the in-code pool; B and C exist only in the DB, so
+    // an empty pool there means "nothing to do this tick", not "use layer A keys".
+    let keywords: string[];
+    let keywordIds = new Map<string, number>();
+    if (poolRows.length) {
+      const cycle   = Math.floor(slotIndex / (BRANDS.length * allPresets.length));
+      const kwStart = (cycle * KW_PER_RUN) % poolRows.length;
+      const picked: Array<{ id: number; keyword: string }> = [];
+      for (let i = 0; i < Math.min(KW_PER_RUN, poolRows.length); i++) {
+        picked.push(poolRows[(kwStart + i) % poolRows.length]);
+      }
+      keywords = [...new Set(picked.map(p => p.keyword))];
+      picked.forEach(p => keywordIds.set(p.keyword, p.id));
+    } else if (layer === 'A' && preset.keywords.length) {
+      const kwStart = (Math.floor(slotIndex / (BRANDS.length * allPresets.length)) * KW_PER_RUN) % preset.keywords.length;
+      const rawKw   = preset.keywords.slice(kwStart, kwStart + KW_PER_RUN);
+      if (rawKw.length < KW_PER_RUN) rawKw.push(...preset.keywords.slice(0, KW_PER_RUN - rawKw.length));
+      keywords = [...new Set(rawKw)];
+    } else {
+      return new Response(JSON.stringify({ ...stats, skipped: true,
+        reason: `no active layer-${layer} keywords for ${preset.id}` }),
+        { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
 
     // 3. Load dedup sets upfront (domain_normalized may not exist before migration — fallback to url)
     let existingLeadRows: any[] | null = null;
@@ -907,9 +1036,14 @@ Deno.serve(async (req: Request) => {
     const cityIdx    = Math.floor(visitNum / 3) % (cityList.length + 1); // +1 for base (no city)
     const cityAppend = cityIdx < cityList.length ? ' ' + cityList[cityIdx] : '';
 
+    // City padding only makes sense for player intent. Layer B/C keywords are
+    // corporate pages and exact-phrase footprints — a city token just breaks them.
+    const cityPart = layer === 'A' ? cityAppend : '';
+    const minusWords = DDG_MINUS + (layer === 'B' ? LAYER_B_MINUS : '');
+
     const serpBatches = await Promise.all(
       keywords.map(kw =>
-        searchDuckDuckGo(`${kw}${cityAppend} ${DDG_MINUS}`, RESULTS_PER_KW, DDG_PAGE)
+        searchDuckDuckGo(`${kw}${cityPart} ${minusWords}`, RESULTS_PER_KW, DDG_PAGE)
           .then(r => { stats.keywords_run++; return { kw, results: r }; })
           .catch(e => { stats.errors.push(`DDG "${kw}": ${e.message}`); return { kw, results: [] }; }),
       ),
@@ -918,13 +1052,18 @@ Deno.serve(async (req: Request) => {
     // 4b. SerpApi (second source) — same keys via Google surface different sites
     //     than DDG. Paced so 3×250/month isn't burned in a day; rotates accounts
     //     as each hits its monthly cap; falls back to DDG-only + alert when all done.
-    if (SERPAPI_ACCOUNTS.length > 0 && slotIndex % SERP_EVERY === 0) {
+    // v6: spend the scarce SerpApi quota on layers B and C only. Google indexes
+    // corporate pages (/advertise, media kits) and exact quoted footprints far
+    // better than DDG, while layer A is served fine by DDG — paying Google for it
+    // was the wasteful part.
+    const serpEligible = layer === 'B' || layer === 'C';
+    if (SERPAPI_ACCOUNTS.length > 0 && serpEligible && slotIndex % SERP_EVERY === 0) {
       const acct = await pickSerpAccount();
       if (acct) {
         const serpKws = keywords.slice(0, SERP_KW_PER_RUN);
         let serpCalls = 0;
         for (const kw of serpKws) {
-          const results = await searchSerpApi(`${kw}${cityAppend}`, RESULTS_PER_KW, acct.key);
+          const results = await searchSerpApi(`${kw}${cityPart}`, RESULTS_PER_KW, acct.key);
           serpCalls++;
           serpBatches.push({ kw, results });
         }
@@ -958,8 +1097,13 @@ Deno.serve(async (req: Request) => {
     // Each candidate carries the keyword that surfaced it (stored on the lead).
     const candidates: Array<{ url: string; title: string; snippet: string; origin: string; keyword: string }> = [];
     const seenThisRun = new Set<string>();
+    // Per-keyword yield for this run, flushed to the keywords table at the end.
+    const kwStats = new Map<string, { urls: number; leads: number; hot: number }>();
+    keywords.forEach(k => kwStats.set(k, { urls: 0, leads: 0, hot: 0 }));
     for (const { kw, results } of serpBatches) {
       stats.found += results.length;
+      const ks = kwStats.get(kw);
+      if (ks) ks.urls += results.length;
       for (const result of results) {
         const url    = result.link || '';
         const domain = getDomain(url);
@@ -1002,9 +1146,10 @@ Deno.serve(async (req: Request) => {
         // operators/competitors that Groq would have caught.
         if (!analysis) { stats.irrelevant++; return; }
         stats.analyzed++;
-        if (analysis.is_operator)  { stats.competitors++;  return; }
-        if (analysis.geo_excluded) { stats.geo_excluded++; return; }
-        if (!analysis.relevant)    { stats.irrelevant++;   return; }
+        if (analysis.is_operator)     { stats.competitors++;        return; }
+        if (analysis.geo_excluded)    { stats.geo_excluded++;       return; }
+        if (!analysis.audience_owner) { stats.not_audience_owner++; return; }
+        if (!analysis.relevant)       { stats.irrelevant++;         return; }
         toExtract.push({ cand, analysis });
       });
 
@@ -1041,6 +1186,17 @@ Deno.serve(async (req: Request) => {
           found_keyword: keyword,
           domain_normalized: domNorm,
           source:   'seo', // SEO/keyword search source (vs youtube / appstore)
+          // v6 provenance — which layer/keyword/page produced this lead, so yield
+          // can be attributed instead of guessed at.
+          search_layer:   layer,
+          source_keyword: keyword,
+          source_page:    DDG_PAGE,
+          // v6 qualification, carried into scoring
+          audience_owner:        analysis.audience_owner,
+          monetization_signal:   analysis.monetization_signal,
+          monetization_evidence: analysis.monetization_evidence || null,
+          has_partnership_path:  analysis.has_partnership_path,
+          ...(analysis.promotes_competitor ? { competitor_book: analysis.promotes_competitor } : {}),
         };
         if (contact.email) {
           leadData.contact_email      = contact.email;
@@ -1080,10 +1236,35 @@ Deno.serve(async (req: Request) => {
           existingDomains.add(domNorm); // prevent same-run duplicates
           if (contact.email) emailedSet.add(contact.email.toLowerCase());
           stats.saved++;
+          const ks = kwStats.get(keyword);
+          if (ks) {
+            ks.leads++;
+            // "hot" mirrors the fit_score >= 70 band: already monetising, or a
+            // strong site with a way in. score-leads recomputes the real number.
+            if (analysis.promotes_competitor || (analysis.monetization_signal && analysis.has_partnership_path)) ks.hot++;
+          }
         } else {
           stats.errors.push(`insert ${getDomain(url)}: ${insErr.message}`);
         }
       }
+    }
+
+    // ── v6: write back per-keyword yield ──────────────────────────────────
+    // Without this the pool burns out silently and you only notice from falling
+    // output weeks later, which is exactly what happened to the v5 keywords.
+    for (const [kw, s] of kwStats) {
+      const id = keywordIds.get(kw);
+      if (!id) continue;
+      const { data: cur } = await supabase.from('keywords')
+        .select('runs, urls_found, leads_created, hot_leads').eq('id', id).maybeSingle();
+      if (!cur) continue;
+      await supabase.from('keywords').update({
+        runs:          (cur.runs ?? 0) + 1,
+        urls_found:    (cur.urls_found ?? 0) + s.urls,
+        leads_created: (cur.leads_created ?? 0) + s.leads,
+        hot_leads:     (cur.hot_leads ?? 0) + s.hot,
+        last_run_at:   new Date().toISOString(),
+      }).eq('id', id);
     }
 
     // 5. Track API usage (DuckDuckGo is free/keyless — no counter needed)
@@ -1094,9 +1275,9 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('error_log').insert([{
       level: 'info', service: 'find-and-queue',
-      message: `brand=${brand} preset="${preset.name}" kw=${stats.keywords_run} page=${DDG_PAGE}${cityAppend ? ` city="${cityAppend.trim()}"` : ''} `
+      message: `brand=${brand} layer=${layer} preset="${preset.name}" kw=${stats.keywords_run} page=${DDG_PAGE}${cityPart ? ` city="${cityPart.trim()}"` : ''} `
         + `found=${stats.found} analyzed=${stats.analyzed} `
-        + `irrelevant=${stats.irrelevant} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
+        + `irrelevant=${stats.irrelevant} not_owner=${stats.not_audience_owner} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
         + `saved=${stats.saved} contacts=${stats.contacts} groqCalls=${groqCount}`
         + ((stats as any).serp ? ` serp=${(stats as any).serp}(${(stats as any).serp_acct})` : '')
         + (groqLastError ? ` groqErr="${groqLastError}"` : '')
