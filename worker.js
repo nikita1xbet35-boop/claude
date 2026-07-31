@@ -562,8 +562,14 @@ export default {
     }
 
     if (cron === '0 7 * * *') {
-      // 10:00 MSK — one morning report per day
-      await call('daily-report', {});
+      // 10:00 MSK — one morning report per day.
+      // archive-keywords rides this tick and self-gates to Mondays: it retires
+      // keywords whose yield died and alerts when a preset's pool runs thin, so
+      // the search pool can't silently burn out the way the v5 one did.
+      await Promise.all([
+        call('daily-report', {}),
+        call('archive-keywords', {}),
+      ]);
       return;
     }
 
