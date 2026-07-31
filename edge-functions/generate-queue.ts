@@ -219,12 +219,18 @@ Deno.serve(async (req: Request) => {
       // 'waiting' = already contacted (set by process-queue after send). All other
       // stages with a contact email are fair game — the all-time email_log dedup below
       // guarantees we never re-contact anyone, so widening the net is safe.
+      // v5 gates: never queue an address that opted out (suppression_list), and
+      // never queue a lead the scorer excluded (occupied / competitor / partner).
+      const { data: suppressed } = await supabase.from('suppression_list').select('email');
+      const suppressedSet = new Set((suppressed || []).map(s => String(s.email).toLowerCase()));
+
       const { data: candidates, error: leadsErr } = await supabase
         .from('leads')
-        .select('id, brand, contact_email, url, geo, source')
+        .select('id, brand, contact_email, url, geo, source, fit_score, email_status, exclude_reason')
         .in('stage', ['new', 'ready', 'researched', 'followup'])
         .not('contact_email', 'is', null)
         .neq('contact_email', '')
+        .is('exclude_reason', null)
         // Newest first: fresh contactable leads must send same-day. Ascending order
         // jammed the 600-row window with old already-emailed/placeholder leads,
         // so generate-queue added 0 new while fresh leads sat beyond the window.
@@ -232,12 +238,21 @@ Deno.serve(async (req: Request) => {
         .limit(600);
       if (leadsErr) throw new Error(`leads query failed: ${leadsErr.message}`);
 
-      for (const l of (candidates || [])) {
+      // Best-first within the window (P1.1). Unscored leads keep their place via a
+      // neutral default rather than being pushed behind everything.
+      const ranked = [...(candidates || [])].sort(
+        (a, b) => ((b.fit_score ?? 35) as number) - ((a.fit_score ?? 35) as number),
+      );
+
+      for (const l of ranked) {
         if (newLeads.length >= newQuota) break;
         if (queuedLeadIds.has(l.id)) continue;
         if (sentLeadIds.has(l.id)) continue;                          // dedup by lead_id
         if (!isSendableEmail(l.contact_email)) continue;
         if (emailedSet.has(l.contact_email.toLowerCase())) continue;  // dedup by email
+        if (suppressedSet.has(l.contact_email.toLowerCase())) continue;   // opted out
+        // P0.1 gate: anything proven undeliverable or throwaway never goes out.
+        if (l.email_status === 'invalid' || l.email_status === 'disposable') continue;
         if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;     // geo blacklist
         newLeads.push({ id: l.id, brand: l.brand, source: l.source || 'seo' });
       }

@@ -542,9 +542,22 @@ export default {
     }
 
     if (cron === '*/15 * * * *') {
-      // Quota checks. (Watchdog agent disabled — no Anthropic key; the function
-      // stays deployed but is not scheduled, so it never runs.)
-      await call('check-limits', { cron });
+      // Quota checks + the v5 background brains. (Watchdog agent disabled — no
+      // Anthropic key; the function stays deployed but is not scheduled.)
+      //   run-sequences   — P0.3 follow-up engine. Enqueues the next touch for
+      //                     leads whose next_action_at is due. Safe to run more
+      //                     often than hourly: it only acts on due rows and drops
+      //                     anyone who replied/bounced/unsubscribed.
+      //   validate-emails — P0.1 gate. Verifies addresses in bulk BEFORE they can
+      //                     reach send_queue, so dead ones never burn domain rep.
+      //   score-leads     — P1.1. Scores + hard-filters new leads so the queue
+      //                     goes out best-first instead of in import order.
+      await Promise.all([
+        call('check-limits', { cron }),
+        call('run-sequences', {}),
+        call('validate-emails', {}),
+        call('score-leads', {}),
+      ]);
       return;
     }
 
@@ -566,6 +579,11 @@ export default {
         // YouTube base auto-fill — one rotating African GEO per tick, self-capped at
         // 72 searches/day (7200 quota units) so it never burns the 10k/day budget.
         call('youtube-search', { cron: true }),
+        // Reply listening (P0.2). Every 7 min matches the 5–10 min target and
+        // reuses this tick because the free plan caps cron triggers at 5.
+        // Reads INBOX over IMAP, classifies, and drops a Telegram alert on a
+        // hot lead. Idempotent — it advances a UID cursor in app_state.
+        call('poll-replies', {}),
       ]);
       return;
     }
