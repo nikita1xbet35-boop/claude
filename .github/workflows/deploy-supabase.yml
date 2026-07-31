@@ -38,25 +38,39 @@ jobs:
           set -uo pipefail
           API="https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query"
 
-          run_sql_file() {  # $1 = path to .sql, writes response to /tmp/mig_out.txt
-            python3 -c "import json,sys; print(json.dumps({'query': open(sys.argv[1]).read()}))" "$1" > /tmp/mig_payload.json
-            curl -sf -X POST "$API" \
+          # NB: no curl -f here. -f makes curl exit non-zero but DISCARD the response
+          # body, which is exactly the error message we need; a failing migration
+          # then reports as a blank line. Capture the status code instead.
+          post_payload() {
+            code=$(curl -s -o /tmp/mig_out.txt -w '%{http_code}' -X POST "$API" \
               -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
-              --data-binary @/tmp/mig_payload.json > /tmp/mig_out.txt 2>&1
+              --data-binary @/tmp/mig_payload.json)
+            [ "$code" -ge 200 ] && [ "$code" -lt 300 ]
+          }
+
+          run_sql_file() {  # $1 = path to .sql
+            python3 -c "import json,sys; print(json.dumps({'query': open(sys.argv[1]).read()}))" "$1" > /tmp/mig_payload.json
+            post_payload
           }
 
           run_sql() {      # $1 = inline SQL
             python3 -c "import json,sys; print(json.dumps({'query': sys.argv[1]}))" "$1" > /tmp/mig_payload.json
-            curl -sf -X POST "$API" \
-              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
-              -H "Content-Type: application/json" \
-              --data-binary @/tmp/mig_payload.json > /tmp/mig_out.txt 2>&1
+            post_payload
           }
 
           # ledger table
           run_sql "CREATE TABLE IF NOT EXISTS public.schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now());" \
             || { echo "::error::could not create schema_migrations"; cat /tmp/mig_out.txt; exit 1; }
+
+          # Historical one-shot migrations that must NEVER be replayed. 001 deletes
+          # duplicate leads by domain and rebuilds a UNIQUE constraint; it was applied
+          # once through a separate workflow (which is why the old pipeline started at
+          # 002), so replaying it would delete rows rather than be a no-op. Record it
+          # as applied instead of running it.
+          for name in 001_dedup_perf_blacklist.sql; do
+            run_sql "INSERT INTO public.schema_migrations (name) VALUES ('$name') ON CONFLICT DO NOTHING;" || true
+          done
 
           run_sql "SELECT name FROM public.schema_migrations;" || { echo "::error::could not read ledger"; exit 1; }
           APPLIED=$(python3 -c "import json;print(' '.join(r['name'] for r in json.load(open('/tmp/mig_out.txt'))))" 2>/dev/null || echo "")
