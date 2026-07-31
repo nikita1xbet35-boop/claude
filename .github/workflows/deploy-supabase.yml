@@ -115,6 +115,10 @@ jobs:
             check-limits
             send-alert
             daily-report
+            poll-replies
+            validate-emails
+            run-sequences
+            score-leads
           "
           for fn in $FUNCTIONS; do
             mkdir -p "supabase/functions/$fn"
@@ -151,6 +155,8 @@ jobs:
           GROQ_KEY_2: ${{ secrets.GROQ_KEY_2 }}
           GROQ_KEY_3: ${{ secrets.GROQ_KEY_3 }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          MILLIONVERIFIER_KEY: ${{ secrets.MILLIONVERIFIER_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           ARGS=""
           [ -n "$SERPAPI_KEY_1" ] && ARGS="$ARGS SERPAPI_KEY_1=$SERPAPI_KEY_1"
@@ -159,6 +165,11 @@ jobs:
           [ -n "$GROQ_KEY_2" ]    && ARGS="$ARGS GROQ_KEY_2=$GROQ_KEY_2"
           [ -n "$GROQ_KEY_3" ]    && ARGS="$ARGS GROQ_KEY_3=$GROQ_KEY_3"
           [ -n "$YOUTUBE_API_KEY" ] && ARGS="$ARGS YOUTUBE_API_KEY=$YOUTUBE_API_KEY"
+          # v5: email validation provider + preferred LLM. Both optional —
+          # validate-emails falls back to its built-in checker, and the reply
+          # classifier falls back to Groq, so absence degrades rather than breaks.
+          [ -n "$MILLIONVERIFIER_KEY" ] && ARGS="$ARGS MILLIONVERIFIER_KEY=$MILLIONVERIFIER_KEY"
+          [ -n "$ANTHROPIC_API_KEY" ] && ARGS="$ARGS ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
           if [ -n "$ARGS" ]; then
             supabase secrets set $ARGS --project-ref lxsyrserfuighwxuymgb && echo "Optional API keys set"
           else

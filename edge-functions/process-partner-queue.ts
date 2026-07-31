@@ -47,7 +47,9 @@ function fill(tpl: string, l: Record<string, unknown>): string {
     .replace(/\{vertical\}/g,   (l.vertical as string)   || '');
 }
 
-async function sendEmail(to: string, subject: string, body: string): Promise<boolean> {
+// Returns the sent message's RFC Message-ID, or null on failure. The id is stored
+// on email_log so an incoming reply can be matched back to this exact send.
+async function sendEmail(to: string, subject: string, body: string): Promise<string | null> {
   try {
     const res = await fetch(FUNCTIONS_URL + '/send-email', {
       method: 'POST',
@@ -55,8 +57,9 @@ async function sendEmail(to: string, subject: string, body: string): Promise<boo
       body: JSON.stringify({ to, subject, body, account: 'main' }),
     });
     const data = await res.json().catch(() => ({}));
-    return res.ok && !!data.success;
-  } catch (_) { return false; }
+    if (!res.ok || !data.success) return null;
+    return (data.gmail_message_id as string) || '';
+  } catch (_) { return null; }
 }
 
 Deno.serve(async (req: Request) => {
@@ -145,9 +148,9 @@ Deno.serve(async (req: Request) => {
         if (sentThisRun >= PER_RUN) break;
         const subject = fill(pick(subjects), lead);
         const body    = fill(base.template_body, lead);
-        const ok = await sendEmail(lead.email, subject, body);
+        const msgId = await sendEmail(lead.email, subject, body);
         const sentAt = new Date().toISOString();
-        if (ok) {
+        if (msgId !== null) {
           baseSent++;
           await supabase.from('partner_leads')
             .update({ status: 'sent', sent_at: sentAt, updated_at: sentAt }).eq('id', lead.id);
@@ -156,6 +159,7 @@ Deno.serve(async (req: Request) => {
             email: lead.email, brand: base.name, subject,
             gmail_account: 'main', sent_at: sentAt, bounced: false,
             source: 'partner:' + base.name,
+            ...(msgId ? { gmail_message_id: msgId } : {}),
           }]).catch(() => {});
           stats.sent++; sentThisRun++;
         } else {

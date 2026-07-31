@@ -994,6 +994,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab active" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span id="inbox-badge" class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -1032,6 +1033,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab active" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -1252,6 +1254,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -1355,6 +1358,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -1472,6 +1476,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -1590,6 +1595,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -1703,6 +1709,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -1739,6 +1746,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -2042,6 +2050,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -2198,6 +2207,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -2379,6 +2389,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -2475,6 +2486,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -2621,6 +2633,7 @@
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
       <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
@@ -3867,6 +3880,9 @@ function goTo(page, el){
   document.querySelectorAll('.nav-tab').forEach(t => {
     t.classList.remove('active');
     const txt = t.textContent.trim();
+    // data-page is authoritative; label matching is the legacy fallback for tabs
+    // whose caption is their only identifier.
+    if(t.dataset.page){ if(t.dataset.page === page) t.classList.add('active'); return; }
     if((page==='dashboard' && txt==='Дашборд') ||
        (page==='pipeline' && txt==='Pipeline') ||
        (page==='database'  && txt==='База лидов') ||
@@ -11563,6 +11579,58 @@ try {
 
 })();
 </script>
+
+<div class="page" id="page-inbox">
+<header class="topbar">
+    <div class="logo" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="goTo('dashboard',this)">
+      <svg class="logo-icon" width="22" height="22" viewBox="0 0 36 36" fill="none">
+        <rect x="2" y="2" width="14" height="14" rx="3" fill="var(--accent)" opacity="1"/>
+        <rect x="20" y="2" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".7"/>
+        <rect x="2" y="20" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".5"/>
+        <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
+      </svg>
+      Affiliate<span>OS</span>
+    </div>
+    <nav class="nav-tabs">
+      <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
+      <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
+      
+      
+      <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
+      <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
+      
+      
+      <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
+      <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
+      <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
+      <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
+      <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
+      
+    </nav>
+    <div class="topbar-right">
+      <span class="badge-count" id="yt-badge">0 каналов</span>
+      <div class="status-dot"></div>
+    </div>
+  </header>
+  <div class="db-page" style="padding:22px 26px;overflow-y:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap;">
+      <div>
+        <div style="font-family:var(--font-head);font-size:22px;font-weight:600;color:var(--text);">Входящие ответы</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px;">Кто ждёт ответа прямо сейчас</div>
+      </div>
+      <button class="btn" onclick="loadInbox()" style="flex:none;">Обновить</button>
+    </div>
+
+    <div class="stat-grid" id="inbox-stats" style="margin-bottom:18px;"></div>
+
+    <div style="display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap;" id="inbox-filters"></div>
+
+    <div id="inbox-list"></div>
+  </div>
+</div>
+
 <div class="page" id="page-gmail">
   <header class="topbar">
     <div class="logo" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="goTo('dashboard',this)">
@@ -11576,6 +11644,7 @@ try {
     </div>
     <nav class="nav-tabs">
       <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
       <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
       
       
@@ -12085,6 +12154,300 @@ try {
   // safety retries in case of late hydration
   let tries = 0;
   const iv = setInterval(() => { buildPipelineFilters(); if(++tries > 12 || document.querySelector('.pipeline-layout[data-filters-wired]')) clearInterval(iv); }, 250);
+})();
+</script>
+
+<style>
+  /* ─── HOT INBOX (P1.3) ─── */
+  .nav-badge{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:16px; height:16px; padding:0 4px; margin-left:6px;
+    border-radius:8px; background:var(--red); color:#fff;
+    font-family:var(--font-mono); font-size:9px; font-weight:700; line-height:1;
+  }
+  .ib-card{
+    background:var(--bg); border:1px solid var(--border2); border-radius:12px;
+    padding:16px 18px; margin-bottom:12px; transition:border-color .15s;
+  }
+  .ib-card:hover{ border-color:var(--border3, var(--border2)); }
+  .ib-head{ display:flex; align-items:center; gap:10px; margin-bottom:9px; }
+  .ib-from{
+    font-size:13px; font-weight:600; color:var(--text);
+    flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .ib-cat{
+    flex:none; font-family:var(--font-mono); font-size:9px; letter-spacing:.4px;
+    text-transform:uppercase; padding:3px 7px; border-radius:5px;
+  }
+  .ib-when{ flex:none; font-family:var(--font-mono); font-size:10px; color:var(--text3); }
+  .ib-subj{ font-size:12px; color:var(--text2); margin-bottom:8px; }
+  .ib-body{
+    font-size:12px; color:var(--text3); line-height:1.55; white-space:pre-wrap;
+    background:var(--bg3); border-radius:8px; padding:10px 12px; margin-bottom:10px;
+    max-height:150px; overflow:auto;
+  }
+  .ib-draft{
+    border:1px solid rgba(52,211,153,.25); background:rgba(52,211,153,.05);
+    border-radius:8px; padding:10px 12px; margin-bottom:10px;
+  }
+  .ib-draft textarea{
+    width:100%; min-height:104px; resize:vertical; background:transparent; border:none;
+    color:var(--text2); font-family:var(--font-body); font-size:12px; line-height:1.55; outline:none;
+  }
+  .ib-terms{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .ib-term{
+    font-family:var(--font-mono); font-size:10px; color:var(--amber);
+    background:var(--amber-bg); border-radius:4px; padding:2px 6px;
+  }
+  .ib-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .ib-btn{
+    font-family:var(--font-body); font-size:12px; padding:7px 13px; border-radius:7px;
+    border:1px solid var(--border2); background:var(--bg3); color:var(--text2);
+    cursor:pointer; transition:background .15s, border-color .15s;
+  }
+  .ib-btn:hover{ background:var(--bg4); }
+  .ib-btn.primary{ background:var(--green); border-color:var(--green); color:#04140d; font-weight:600; }
+  .ib-btn.primary:hover{ filter:brightness(1.1); }
+  .ib-btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .ib-filter{
+    font-family:var(--font-mono); font-size:11px; padding:5px 11px; border-radius:7px;
+    border:1px solid var(--border2); background:var(--bg3); color:var(--text3); cursor:pointer;
+  }
+  .ib-filter.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .ib-empty{ text-align:center; color:var(--text3); padding:60px 20px; font-size:13px; }
+</style>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   HOT INBOX — P1.3
+   The dashboard headline metric used to be "sent", which is vanity. What
+   actually needs a human is a reply waiting for an answer, so this page leads
+   with that and keeps handling to two clicks: read the draft, approve.
+   Nothing is ever sent without an explicit approval.
+   ══════════════════════════════════════════════════════════════════════════ */
+(function(){
+  const CAT_RU = {
+    interested:'заинтересован', asks_fixed_fee:'просит фикс', question:'вопрос',
+    soft_no:'мягкий отказ', hard_no:'отказ', unsubscribe:'отписка',
+    auto_reply:'автоответ', ooo:'вне офиса'
+  };
+  const CAT_CLR = {
+    interested:'#34d399', asks_fixed_fee:'#fbbf24', question:'#60a5fa',
+    soft_no:'#94a3b8', hard_no:'#f87171', unsubscribe:'#f87171',
+    auto_reply:'#666680', ooo:'#666680'
+  };
+  // Hottest first — this is the order the operator should work the list in.
+  const ORDER = ['interested','asks_fixed_fee','question','soft_no','hard_no','unsubscribe'];
+
+  let inboxData = [];
+  let inboxFilter = 'all';
+
+  const esc = t => String(t==null?'':t).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function ago(ts){
+    const d = (Date.now() - new Date(ts).getTime())/1000;
+    if(!isFinite(d)) return '';
+    if(d < 3600)  return Math.max(1,Math.round(d/60)) + ' мин назад';
+    if(d < 86400) return Math.round(d/3600) + ' ч назад';
+    return Math.round(d/86400) + ' дн назад';
+  }
+
+  window.loadInbox = async function(){
+    const list = document.getElementById('inbox-list');
+    if(list) list.innerHTML = '<div class="ib-empty">Загрузка…</div>';
+    try{
+      const { data: replies, error } = await sb.from('replies')
+        .select('*').eq('handled', false)
+        .order('received_at', { ascending:false }).limit(200);
+      if(error) throw error;
+
+      const ids = (replies||[]).map(r => r.id);
+      let drafts = [];
+      if(ids.length){
+        const { data } = await sb.from('draft_replies')
+          .select('*').in('reply_id', ids).eq('status','pending');
+        drafts = data || [];
+      }
+      const draftBy = {};
+      drafts.forEach(d => { draftBy[d.reply_id] = d; });
+
+      inboxData = (replies||[]).map(r => ({ ...r, draft: draftBy[r.id] || null }));
+      inboxData.sort((a,b) => {
+        const ai = ORDER.indexOf(a.category), bi = ORDER.indexOf(b.category);
+        if(ai !== bi) return (ai<0?99:ai) - (bi<0?99:bi);
+        return new Date(b.received_at) - new Date(a.received_at);
+      });
+      renderInbox();
+    }catch(e){
+      if(list) list.innerHTML = '<div class="ib-empty">Не удалось загрузить: ' + esc(e.message||e) + '</div>';
+    }
+    refreshInboxBadge();
+  };
+
+  function renderInbox(){
+    const statsEl = document.getElementById('inbox-stats');
+    const filtEl  = document.getElementById('inbox-filters');
+    const list    = document.getElementById('inbox-list');
+    if(!list) return;
+
+    const counts = {};
+    inboxData.forEach(r => { counts[r.category] = (counts[r.category]||0)+1; });
+    const hot = (counts.interested||0) + (counts.asks_fixed_fee||0);
+
+    if(statsEl){
+      const tiles = [
+        { label:'Ждут ответа', val: inboxData.length, clr:'var(--accent2)' },
+        { label:'Горячие',     val: hot,              clr:'#34d399' },
+        { label:'Вопросы',     val: counts.question||0, clr:'#60a5fa' },
+        { label:'Отказы',      val: (counts.hard_no||0)+(counts.soft_no||0), clr:'#f87171' },
+      ];
+      statsEl.innerHTML = tiles.map(t => `
+        <div style="background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:16px 18px;">
+          <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.6px;text-transform:uppercase;margin-bottom:8px;">${t.label}</div>
+          <div style="font-size:28px;font-weight:500;font-family:var(--font-mono);color:${t.clr};">${t.val}</div>
+        </div>`).join('');
+    }
+
+    if(filtEl){
+      const opts = [['all','Все']].concat(ORDER.filter(c => counts[c]).map(c => [c, CAT_RU[c]]));
+      filtEl.innerHTML = opts.map(([v,l]) => {
+        const n = v==='all' ? inboxData.length : (counts[v]||0);
+        return `<button class="ib-filter${inboxFilter===v?' active':''}" onclick="setInboxFilter('${v}')">${l} · ${n}</button>`;
+      }).join('');
+    }
+
+    const rows = inboxData.filter(r => inboxFilter==='all' || r.category===inboxFilter);
+    if(!rows.length){
+      list.innerHTML = '<div class="ib-empty">Пока никто не ждёт ответа 🎉</div>';
+      return;
+    }
+
+    list.innerHTML = rows.map(r => {
+      const clr = CAT_CLR[r.category] || '#666680';
+      const t = r.extracted_terms || {};
+      const terms = [
+        t.rs_ask  ? `просит RS ${esc(t.rs_ask)}%`   : '',
+        t.fix_ask ? `просит фикс $${esc(t.fix_ask)}` : '',
+        Array.isArray(t.geo) && t.geo.length ? 'GEO: ' + esc(t.geo.join(', ')) : '',
+        r.lang ? 'язык: ' + esc(r.lang) : '',
+        !r.lead_id ? 'нет лида в базе' : '',
+      ].filter(Boolean);
+
+      return `
+      <div class="ib-card" id="ib-${r.id}">
+        <div class="ib-head">
+          <span class="ib-from">${esc(r.from_email)}</span>
+          <span class="ib-cat" style="color:${clr};background:${clr}1f;">${esc(CAT_RU[r.category]||r.category||'—')}</span>
+          <span class="ib-when">${ago(r.received_at)}</span>
+        </div>
+        <div class="ib-subj">${esc(r.subject||'(без темы)')}</div>
+        <div class="ib-body">${esc((r.body||'').slice(0,1200))}</div>
+        ${terms.length ? `<div class="ib-terms">${terms.map(x=>`<span class="ib-term">${x}</span>`).join('')}</div>` : ''}
+        ${r.draft ? `
+          <div class="ib-draft">
+            <div style="font-size:10px;font-family:var(--font-mono);color:#34d399;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px;">Черновик ответа · можно править</div>
+            <textarea id="draft-${r.draft.id}">${esc(r.draft.draft_body)}</textarea>
+          </div>` : ''}
+        <div class="ib-actions">
+          ${r.draft
+            ? `<button class="ib-btn primary" onclick="approveDraft(${r.draft.id}, ${r.id})">Отправить ответ</button>
+               <button class="ib-btn" onclick="rejectDraft(${r.draft.id}, ${r.id})">Отклонить черновик</button>`
+            : ''}
+          <button class="ib-btn" onclick="markHandled(${r.id})">Отметить обработанным</button>
+          ${r.lead_id ? `<button class="ib-btn" onclick="goToLead('${esc(r.lead_id)}')">Открыть лид</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  window.setInboxFilter = function(v){ inboxFilter = v; renderInbox(); };
+
+  window.markHandled = async function(replyId){
+    await sb.from('replies').update({ handled:true }).eq('id', replyId);
+    inboxData = inboxData.filter(r => r.id !== replyId);
+    renderInbox(); refreshInboxBadge();
+    if(window.pushToast) pushToast({ type:'info', title:'Обработано', msg:'Ответ убран из инбокса', timeout:2000 });
+  };
+
+  window.rejectDraft = async function(draftId, replyId){
+    await sb.from('draft_replies').update({ status:'rejected' }).eq('id', draftId);
+    const row = inboxData.find(r => r.id === replyId);
+    if(row) row.draft = null;
+    renderInbox();
+    if(window.pushToast) pushToast({ type:'info', title:'Черновик отклонён', msg:'Ответ остался в инбоксе', timeout:2200 });
+  };
+
+  // Approval is the ONLY path that sends. The edited textarea wins over the
+  // stored draft, and the reply is threaded onto the original message so it
+  // lands in the same conversation rather than starting a new one.
+  window.approveDraft = async function(draftId, replyId){
+    const ta  = document.getElementById('draft-' + draftId);
+    const row = inboxData.find(r => r.id === replyId);
+    if(!row || !row.draft) return;
+    const body = ta ? ta.value.trim() : row.draft.draft_body;
+    if(!body){
+      if(window.pushToast) pushToast({ type:'error', title:'Пусто', msg:'Черновик пустой', timeout:2500 });
+      return;
+    }
+    const btns = document.querySelectorAll('#ib-' + replyId + ' .ib-btn');
+    btns.forEach(b => b.disabled = true);
+    try{
+      const res = await fetch(FUNCTIONS_URL + '/send-email', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'apikey':SUPABASE_KEY, 'Authorization':'Bearer ' + SUPABASE_KEY },
+        body: JSON.stringify({
+          to: row.from_email,
+          subject: row.draft.subject || ('Re: ' + (row.subject||'')),
+          body,
+          account:'main',
+          in_reply_to: row.thread_id || undefined,
+        }),
+      });
+      const data = await res.json().catch(()=>({}));
+      if(!res.ok || !data.success) throw new Error(data.error || 'send failed');
+
+      const now = new Date().toISOString();
+      await sb.from('draft_replies').update({ status:'sent', sent_at:now, draft_body:body }).eq('id', draftId);
+      await sb.from('replies').update({ handled:true }).eq('id', replyId);
+      await sb.from('email_log').insert([{
+        email: row.from_email, brand:'1xbet', subject: row.draft.subject || '',
+        gmail_account:'main', sent_at:now, bounced:false, source:'reply',
+        gmail_message_id: data.gmail_message_id || null,
+      }]);
+
+      inboxData = inboxData.filter(r => r.id !== replyId);
+      renderInbox(); refreshInboxBadge();
+      if(window.pushToast) pushToast({ type:'success', title:'Ответ отправлен', msg: row.from_email, timeout:3000 });
+    }catch(e){
+      btns.forEach(b => b.disabled = false);
+      if(window.pushToast) pushToast({ type:'error', title:'Не отправилось', msg: String(e.message||e), timeout:4500 });
+    }
+  };
+
+  window.refreshInboxBadge = async function(){
+    try{
+      const { count } = await sb.from('replies')
+        .select('id', { count:'exact', head:true })
+        .eq('handled', false).in('category', ['interested','asks_fixed_fee','question']);
+      document.querySelectorAll('.nav-badge').forEach(b => {
+        b.textContent = count || 0;
+        b.style.display = count ? 'inline-flex' : 'none';
+      });
+    }catch(_){ /* badge is cosmetic */ }
+  };
+
+  // Load when the tab is opened, and keep the badge fresh in the background.
+  const _goTo = window.goTo;
+  if(typeof _goTo === 'function'){
+    window.goTo = function(page, el){
+      const r = _goTo.apply(this, arguments);
+      if(page === 'inbox') loadInbox();
+      return r;
+    };
+  }
+  setTimeout(refreshInboxBadge, 2500);
+  setInterval(refreshInboxBadge, 120000);
 })();
 </script>
 

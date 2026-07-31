@@ -419,14 +419,45 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      const subject = buildSubject(lead.name, lead.url || '', item.brand, lead.geo as string);
-      const body    = buildEmailBody(lead, item.brand);
+      let subject = buildSubject(lead.name, lead.url || '', item.brand, lead.geo as string);
+      let body    = buildEmailBody(lead, item.brand);
+      let inReplyTo: string | undefined;
+
+      // ── Follow-up steps (P0.3) ────────────────────────────────────────────
+      // A queue row carrying step_no >= 2 is a sequence touch, not a cold email:
+      // it must use that step's own copy and thread onto the original message,
+      // otherwise the recipient gets the opening pitch a second time as a fresh
+      // conversation.
+      if (item.step_no && item.step_no >= 2 && item.sequence_id) {
+        const { data: step } = await supabase.from('sequence_steps')
+          .select('subject_variant, body_template, template_key')
+          .eq('sequence_id', item.sequence_id).eq('step_no', item.step_no).maybeSingle();
+
+        if (step?.body_template) {
+          const geoName = GEO_NAMES[String(lead.geo || '').toUpperCase()] || String(lead.geo || 'your market');
+          const site    = (lead.name as string) || nameFromDomain(String(lead.url || '')) || 'your site';
+          const contact = lead.contact_name ? ' ' + String(lead.contact_name).split(' ')[0] : '';
+          body = String(step.body_template)
+            .replace(/\{contact\}/g, contact)
+            .replace(/\{geo\}/g, geoName)
+            .replace(/\{site\}/g, site);
+          if (step.subject_variant) subject = toAsciiSafe(String(step.subject_variant));
+        }
+
+        // Thread onto the first message we sent this lead.
+        const { data: firstSend } = await supabase.from('email_log')
+          .select('gmail_message_id')
+          .eq('lead_id', item.lead_id).not('gmail_message_id', 'is', null)
+          .order('sent_at', { ascending: true }).limit(1).maybeSingle();
+        if (firstSend?.gmail_message_id) inReplyTo = firstSend.gmail_message_id as string;
+      }
 
       // Send
       let sendResult: { ok: boolean; data: unknown };
       try {
         sendResult = await callFunction('send-email', {
           to: lead.contact_email, subject, body, account,
+          ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
         });
       } catch (e: any) {
         const msg = `Network error calling send-email: ${e.message}`;
@@ -454,6 +485,10 @@ Deno.serve(async (req: Request) => {
           bounced:       false,
           source:        (lead.source as string) || 'seo',
           ...(gmailMessageId ? { gmail_message_id: gmailMessageId } : {}),
+          // P1.4 — which variant/step produced this send, so reply rate can later
+          // be reported per variant x geo x step.
+          ...(item.variant_key ? { variant_key: item.variant_key } : {}),
+          ...(item.step_no ? { sequence_step: item.step_no } : {}),
         }]);
 
         const { data: cur } = await supabase.from('api_usage')

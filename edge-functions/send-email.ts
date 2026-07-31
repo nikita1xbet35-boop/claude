@@ -62,6 +62,9 @@ async function smtpSend(cfg: {
   from: string;     fromName: string;
   to: string;       replyTo: string;
   subject: string;  body: string;
+  messageId: string;                 // bare id, without angle brackets
+  inReplyTo?: string;                // bare id of the message being answered
+  references?: string;               // space-separated bare ids of the thread
 }): Promise<void> {
   const enc = new TextEncoder();
   const dec = new TextDecoder();
@@ -129,17 +132,30 @@ async function smtpSend(cfg: {
     await cmd(`DATA`,                    '354');
 
     // Build the MIME message.
-    const msg = [
+    // We set Message-ID ourselves instead of letting Gmail assign one: it is the
+    // only way to learn the id of what we just sent over SMTP, and matching an
+    // incoming reply's In-Reply-To/References back to a lead depends on it.
+    const headers = [
       `From: ${cfg.fromName} <${cfg.from}>`,
       `To: ${cfg.to}`,
       `Reply-To: ${cfg.replyTo}`,
       `Subject: ${encodeHeader(cfg.subject)}`,
+      `Message-ID: <${cfg.messageId}>`,
+    ];
+    // Threading headers, so a follow-up lands inside the original conversation
+    // rather than starting a new one in the recipient's client.
+    if (cfg.inReplyTo)  headers.push(`In-Reply-To: <${cfg.inReplyTo}>`);
+    if (cfg.references) {
+      headers.push('References: ' + cfg.references.split(/\s+/).filter(Boolean).map(r => `<${r}>`).join(' '));
+    }
+    headers.push(
       `MIME-Version: 1.0`,
       `Content-Type: text/plain; charset=utf-8`,
       `Content-Transfer-Encoding: base64`,
       ``,
       base64Body(cfg.body),
-    ].join('\r\n');
+    );
+    const msg = headers.join('\r\n');
 
     // RFC 2822: end DATA with CRLF.CRLF
     await conn.write(enc.encode(msg + '\r\n.\r\n'));
@@ -168,8 +184,9 @@ Deno.serve(async (req: Request) => {
       { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  const { to, subject, body: emailBody, account } = body as {
+  const { to, subject, body: emailBody, account, in_reply_to, references } = body as {
     to: string; subject: string; body: string; account: string;
+    in_reply_to?: string; references?: string;
   };
 
   if (!to || !subject || !emailBody) {
@@ -199,6 +216,14 @@ Deno.serve(async (req: Request) => {
 
   const senderName = useLp ? 'Nick - LuckyPari Partners' : 'Nick - 1xPartners';
 
+  // Real RFC 5322 Message-ID, generated before the send so we can both stamp it
+  // on the outgoing mail and hand it back to be stored in email_log. Previously
+  // this returned a made-up pseudo id that appeared nowhere in the actual email,
+  // which made it impossible to tie an incoming reply back to the message it
+  // answered.
+  const domain    = (gmailUser.split('@')[1] || 'gmail.com').trim();
+  const messageId = `${crypto.randomUUID()}@${domain}`;
+
   try {
     await smtpSend({
       hostname: 'smtp.gmail.com',
@@ -211,10 +236,12 @@ Deno.serve(async (req: Request) => {
       replyTo:  gmailUser,
       subject,
       body:     emailBody,
+      messageId,
+      inReplyTo:  in_reply_to,
+      references: references || in_reply_to,
     });
 
-    const pseudoId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    return new Response(JSON.stringify({ success: true, gmail_message_id: pseudoId }),
+    return new Response(JSON.stringify({ success: true, gmail_message_id: messageId }),
       { headers: { ...cors, 'Content-Type': 'application/json' } });
 
   } catch (e: any) {
