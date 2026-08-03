@@ -3,7 +3,7 @@
 // Deploy: supabase functions deploy send-alert
 // Env vars needed: ALERTS_BOT_TOKEN, ALERTS_CHAT_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const BOT_TOKEN    = Deno.env.get('ALERTS_BOT_TOKEN')!;
 const CHAT_ID      = Deno.env.get('ALERTS_CHAT_ID')!;

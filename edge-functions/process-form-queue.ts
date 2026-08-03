@@ -14,7 +14,7 @@
 // Deploy: supabase functions deploy process-form-queue --no-verify-jwt
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), FORM_SENDING_ENABLED ('true' to arm)
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;

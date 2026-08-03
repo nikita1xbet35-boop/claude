@@ -25,7 +25,7 @@
 //      GROQ_API_KEY (+ GROQ_KEY_2/3), ANTHROPIC_API_KEY (optional, preferred),
 //      ALERTS_BOT_TOKEN, ALERTS_CHAT_ID
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
