@@ -11,7 +11,7 @@
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), YOUTUBE_API_KEY
 // (deploy trigger: partner-bases migrations 008/009 ship with this run)
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
