@@ -30,9 +30,9 @@ const SERPAPI_ACCOUNTS = [
   { service: 'serpapi_3', key: Deno.env.get('SERPAPI_KEY_3') || '' },
 ].filter(a => a.key);
 const SERPAPI_MONTHLY_LIMIT = 250;
-// Pace SerpApi so 3×250=750 searches/month aren't burned in a day. Only ~1 in
-// SERP_EVERY runs uses SerpApi, and only for SERP_KW_PER_RUN keyword(s).
-const SERP_EVERY = 20;
+// Pace SerpApi so 3×250=750 searches/month aren't burned in a day. v6 fires it on
+// two fixed slots per 40 (see the serpFire logic below) ≈ 24 calls/day, and only
+// for SERP_KW_PER_RUN keyword(s) each time.
 const SERP_KW_PER_RUN = 1;
 // Groq keys — rotated per call to multiply the free-tier TPM budget. Key #1 is
 // the env var (with the legacy hardcoded fallback); keys #2/#3 come from secrets
@@ -1056,8 +1056,16 @@ Deno.serve(async (req: Request) => {
     // corporate pages (/advertise, media kits) and exact quoted footprints far
     // better than DDG, while layer A is served fine by DDG — paying Google for it
     // was the wasteful part.
-    const serpEligible = layer === 'B' || layer === 'C';
-    if (SERPAPI_ACCOUNTS.length > 0 && serpEligible && slotIndex % SERP_EVERY === 0) {
+    //
+    // The old pacing `slotIndex % 20 === 0` cannot be reused here: that instant
+    // always lands on layer A (slot%10===0), so combined with the B/C-only gate it
+    // would have fired SerpApi NEVER. Instead pick two fixed slots per 40 — one on
+    // a layer-C slot (slot%10===9) and one on a layer-B slot (slot%10===8) — which
+    // is ~24 calls/day, matching the 3×250/month budget (pickSerpAccount still
+    // hard-caps per account, so this only controls spread, not the ceiling).
+    const serpSlot = slotIndex % 40;
+    const serpFire = serpSlot === 9   /* layer C */ || serpSlot === 28 /* layer B */;
+    if (SERPAPI_ACCOUNTS.length > 0 && serpFire) {
       const acct = await pickSerpAccount();
       if (acct) {
         const serpKws = keywords.slice(0, SERP_KW_PER_RUN);
