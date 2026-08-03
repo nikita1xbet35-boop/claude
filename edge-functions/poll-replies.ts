@@ -401,7 +401,7 @@ async function logInfo(message: string, level = 'info') {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
-  const stats = { fetched: 0, saved: 0, skipped: 0, interested: 0, drafted: 0, orphan: 0, reason: '' };
+  const stats = { fetched: 0, saved: 0, skipped: 0, interested: 0, notified: 0, drafted: 0, orphan: 0, reason: '' };
 
   if (!GMAIL_USER || !GMAIL_PASS) {
     return new Response(JSON.stringify({ ...stats, error: 'GMAIL_USER_MAIN / GMAIL_PASS_MAIN not set' }),
@@ -553,6 +553,7 @@ Deno.serve(async (req: Request) => {
       }
 
       // ── P1.2 draft on approval queue ────────────────────────────────────
+      let draftMade = false;
       if (['interested', 'question', 'asks_fixed_fee'].includes(cat)) {
         const replyRow = await supabase.from('replies')
           .select('id').eq('imap_uid', uid).maybeSingle();
@@ -567,18 +568,33 @@ Deno.serve(async (req: Request) => {
             status: 'pending',
           }]).catch(() => {});
           stats.drafted++;
+          draftMade = true;
         }
       }
 
-      if (cat === 'interested' || cat === 'asks_fixed_fee') {
-        stats.interested++;
+      // ── Telegram: notify on EVERY human reply ───────────────────────────
+      // The operator answers from the mailbox, so every real answer gets mirrored
+      // to TG. Autoresponders (auto_reply/ooo) are not answers and stay silent —
+      // they were already marked handled above.
+      if (cat !== 'auto_reply' && cat !== 'ooo') {
+        stats.notified++;
+        if (cat === 'interested' || cat === 'asks_fixed_fee') stats.interested++;
+        const CAT_TG: Record<string, string> = {
+          interested:     '🔥 Заинтересован',
+          asks_fixed_fee: '💰 Просит фикс',
+          question:       '❓ Вопрос',
+          soft_no:        '🟡 Мягкий отказ',
+          hard_no:        '⛔ Отказ',
+          unsubscribe:    '🚫 Отписка',
+        };
         const terms = cls.extracted_terms || {};
         await tg(
-          `🔥 <b>Ответ: ${cat === 'interested' ? 'заинтересован' : 'просит фикс'}</b>\n` +
+          `<b>${CAT_TG[cat] || '✉️ Ответ'}</b>\n` +
           `От: <code>${fromEmail}</code>\n` +
           `Тема: ${(mail.subject || '—').slice(0, 120)}\n` +
           (terms.rs_ask ? `Просит RS: ${terms.rs_ask}%\n` : '') +
           (terms.fix_ask ? `Просит фикс: $${terms.fix_ask}\n` : '') +
+          (draftMade ? '📝 Черновик готов в разделе «Инбокс»\n' : '') +
           `\n${cleaned.slice(0, 400)}`
         );
       }
