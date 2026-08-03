@@ -517,3 +517,5 @@ Deno.serve(async (req: Request) => {
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 });
+
+// redeploy trigger: 2026-08-03 — retry after transient esm.sh 522 during bundling
