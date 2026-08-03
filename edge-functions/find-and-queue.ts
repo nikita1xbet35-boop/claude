@@ -876,20 +876,25 @@ async function bumpUsage(service: string, delta: number) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-// This function is fired on the */3 cron tick. The old ~9-min throttle was added
-// when Groq's free-tier quota was permanently saturated (~100% of runs hit HTTP
-// 429). That condition is gone — Groq now sits at a few calls/day with zero 429s,
-// and the real bottleneck moved to LEAD SUPPLY (most found sites are already in the
-// DB). Throttling search frequency now only reduces coverage, so run every tick
-// (RUN_EVERY_TICKS = 1 → never skips) to maximise the chance of hitting fresh sites.
-// Re-raise this only if 429s reappear in the find-and-queue logs.
-const RUN_EVERY_TICKS = 1;
+// This function is fired on the */3 cron tick, but the heavy search only runs
+// every RUN_EVERY_TICKS-th tick (~every 9 min).
+//
+// HISTORY: this was briefly set to 1 (run every tick) on the theory that more
+// frequency = more coverage. It backfired badly. Tripling the request rate to
+// DuckDuckGo's HTML endpoint got the shared Supabase egress IP rate-limited:
+// within ~2 days every query returned an EMPTY result page (found=0 across the
+// board, Groq/SerpApi consumption dropped to zero, lead intake stopped). At the
+// proven-good cadence of ~9 min the same searches returned ~1985 results/24h.
+// DuckDuckGo scraping punishes burst rate, not total volume — spacing requests
+// out yields far MORE than hammering. Do not lower this without a replacement
+// search source.
+const RUN_EVERY_TICKS = 3;
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   if (Math.floor(Date.now() / (3 * 60 * 1000)) % RUN_EVERY_TICKS !== 0) {
-    return new Response(JSON.stringify({ skipped: true, reason: 'throttled — heavy run ~every 9 min to avoid Groq 429' }),
+    return new Response(JSON.stringify({ skipped: true, reason: 'throttled — heavy run ~every 9 min (DDG rate-limit protection)' }),
       { headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
@@ -1100,6 +1105,38 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // 4c. DDG rate-limit safety net. DuckDuckGo periodically returns empty result
+    // pages for our shared datacenter IP; when a run comes back with nothing at
+    // all, fall back to SerpApi (Google, reliable) regardless of layer, capped to
+    // a daily budget kept in app_state so the 3×250/month quota isn't drained in
+    // a couple of days. Skips if a targeted B/C SerpApi call already ran this tick.
+    const ddgTotal = serpBatches.reduce((s, b) => s + b.results.length, 0);
+    if (ddgTotal === 0 && SERPAPI_ACCOUNTS.length > 0 && !(stats as any).serp) {
+      const DAILY_SERP_CAP = 24;              // ≈720/month across the 3 accounts
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: sd } = await supabase.from('app_state').select('value').eq('key', 'serp_daily').maybeSingle();
+      const [sdDay, sdCntRaw] = String(sd?.value || '').split(':');
+      const usedToday = sdDay === today ? (parseInt(sdCntRaw, 10) || 0) : 0;
+      if (usedToday < DAILY_SERP_CAP) {
+        const acct = await pickSerpAccount();
+        if (acct) {
+          let serpCalls = 0;
+          for (const kw of keywords.slice(0, SERP_KW_PER_RUN)) {
+            const results = await searchSerpApi(`${kw}${cityPart}`, RESULTS_PER_KW, acct.key);
+            serpBatches.push({ kw, results });
+            serpCalls++;
+          }
+          await bumpSerpAccount(acct.service, serpCalls);
+          await supabase.from('app_state').upsert(
+            { key: 'serp_daily', value: `${today}:${usedToday + serpCalls}`, updated_at: new Date().toISOString() },
+            { onConflict: 'key' },
+          );
+          (stats as any).serp_fallback = serpCalls;
+          (stats as any).serp_acct = acct.service;
+        }
+      }
+    }
+
     // Merge, dedup by domain across all keywords, and apply the cheap pre-filters now
     // so the expensive Groq+fetch loop only sees real candidates.
     // Each candidate carries the keyword that surfaced it (stored on the lead).
@@ -1288,6 +1325,7 @@ Deno.serve(async (req: Request) => {
         + `irrelevant=${stats.irrelevant} not_owner=${stats.not_audience_owner} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
         + `saved=${stats.saved} contacts=${stats.contacts} groqCalls=${groqCount}`
         + ((stats as any).serp ? ` serp=${(stats as any).serp}(${(stats as any).serp_acct})` : '')
+        + ((stats as any).serp_fallback ? ` serpFallback=${(stats as any).serp_fallback}(${(stats as any).serp_acct})` : '')
         + (groqLastError ? ` groqErr="${groqLastError}"` : '')
         + (stats.errors.length ? ' | ' + stats.errors.slice(0, 3).join('; ') : ''),
     }]);
