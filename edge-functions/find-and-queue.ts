@@ -362,17 +362,41 @@ function stripHtml(html: string): string {
 /** Search DuckDuckGo HTML.
  *  page=1: plain GET. page=2/3: GET page 1 first (to extract vqd token),
  *  then POST to the proper paginated endpoint so we really get page 2/3. */
+// Real browser User-Agents. The old UA — "Mozilla/5.0 (compatible; AffiliateOS/1.0)"
+// — is a blatant bot signature; once the request rate spiked, DuckDuckGo flagged it
+// and that string makes it trivial to keep flagged. Rotating realistic browser UAs
+// (varied per query so it doesn't look like one client) is far less block-prone.
+const BROWSER_UAS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+];
+function pickUA(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  return BROWSER_UAS[Math.abs(h) % BROWSER_UAS.length];
+}
+
 async function searchDuckDuckGo(
   query: string, num: number, page = 1,
 ): Promise<Array<{ link: string; title: string; snippet: string }>> {
-  const UA = 'Mozilla/5.0 (compatible; AffiliateOS/1.0)';
+  const UA = pickUA(query);
   const baseUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
 
   // Always fetch page 1 — needed for vqd token and as fallback
   let html1 = '';
   try {
-    const res = await fetch(baseUrl,
-      { headers: { 'User-Agent': UA, 'Accept': 'text/html' }, signal: AbortSignal.timeout(12_000) });
+    const res = await fetch(baseUrl, {
+      headers: {
+        'User-Agent': UA,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://duckduckgo.com/',
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
     if (res.ok) html1 = await res.text();
   } catch (_) {}
 
@@ -393,7 +417,8 @@ async function searchDuckDuckGo(
       headers: {
         'User-Agent': UA,
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'text/html',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
         'Referer': 'https://duckduckgo.com/',
       },
       body: body.toString(),
