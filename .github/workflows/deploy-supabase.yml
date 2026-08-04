@@ -173,6 +173,7 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           MILLIONVERIFIER_KEY: ${{ secrets.MILLIONVERIFIER_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SERP_DAILY_CAP: ${{ secrets.SERP_DAILY_CAP }}
         run: |
           ARGS=""
           [ -n "$SERPAPI_KEY_1" ] && ARGS="$ARGS SERPAPI_KEY_1=$SERPAPI_KEY_1"
@@ -186,6 +187,10 @@ jobs:
           # classifier falls back to Groq, so absence degrades rather than breaks.
           [ -n "$MILLIONVERIFIER_KEY" ] && ARGS="$ARGS MILLIONVERIFIER_KEY=$MILLIONVERIFIER_KEY"
           [ -n "$ANTHROPIC_API_KEY" ] && ARGS="$ARGS ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+          # Daily SerpApi cap in find-and-queue. Default in code is 60/day; set the
+          # SERP_DAILY_CAP GitHub secret to (paid monthly quota / days in month) to
+          # raise it without a code change.
+          [ -n "$SERP_DAILY_CAP" ] && ARGS="$ARGS SERP_DAILY_CAP=$SERP_DAILY_CAP"
           if [ -n "$ARGS" ]; then
             supabase secrets set $ARGS --project-ref lxsyrserfuighwxuymgb && echo "Optional API keys set"
           else

@@ -1130,14 +1130,20 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 4c. DDG rate-limit safety net. DuckDuckGo periodically returns empty result
-    // pages for our shared datacenter IP; when a run comes back with nothing at
-    // all, fall back to SerpApi (Google, reliable) regardless of layer, capped to
-    // a daily budget kept in app_state so the 3×250/month quota isn't drained in
-    // a couple of days. Skips if a targeted B/C SerpApi call already ran this tick.
+    // 4c. SerpApi as a working co-source while DuckDuckGo is rate-limited. DDG
+    // keeps returning near-empty pages for our datacenter IP, so when a run comes
+    // back thin (< 5 results) we pull the run's primary keyword through SerpApi
+    // (reliable Google) regardless of layer. Bounded by a daily cap kept in
+    // app_state so the monthly SerpApi budget isn't drained all at once, and by
+    // pickSerpAccount's per-account monthly hard cap. The daily cap is
+    // env-tunable (SERP_DAILY_CAP) so it can be raised without a deploy once the
+    // real quota is known. Default 60/day:
+    //   • free 3×250 = 750/month  -> ~12 days of coverage (front-loaded, fine
+    //     while DDG recovers), and pickSerpAccount stops at the monthly cap anyway.
+    //   • paid plan -> set SERP_DAILY_CAP to plan_monthly / days_in_month.
     const ddgTotal = serpBatches.reduce((s, b) => s + b.results.length, 0);
-    if (ddgTotal === 0 && SERPAPI_ACCOUNTS.length > 0 && !(stats as any).serp) {
-      const DAILY_SERP_CAP = 24;              // ≈720/month across the 3 accounts
+    if (ddgTotal < 5 && SERPAPI_ACCOUNTS.length > 0 && !(stats as any).serp) {
+      const DAILY_SERP_CAP = parseInt(Deno.env.get('SERP_DAILY_CAP') || '60', 10) || 60;
       const today = new Date().toISOString().slice(0, 10);
       const { data: sd } = await supabase.from('app_state').select('value').eq('key', 'serp_daily').maybeSingle();
       const [sdDay, sdCntRaw] = String(sd?.value || '').split(':');
