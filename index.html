@@ -7974,9 +7974,24 @@ function pbRenderToggle(){
 async function pbToggleSending(){
   if(!pbCurrentBase) return;
   const on = document.getElementById('pb-send-toggle').checked;
-  pbCurrentBase.sending_enabled = on;
+  // Persist FIRST, then reflect the real saved state. The old version flipped the
+  // UI to "включена" before the DB write and never checked the result, so a failed
+  // write left the toggle showing enabled while the base stayed off — which is
+  // exactly how a base looked "on" in the UI but never sent.
+  const { data, error } = await sb.from('partner_bases')
+    .update({ sending_enabled: on }).eq('id', pbCurrentBase.id).select().single();
+  if(error || !data){
+    // revert the checkbox to the last known-good state and tell the user
+    pbRenderToggle();
+    if(window.pushToast) pushToast({ type:'error', title:'Не сохранилось',
+      msg: 'Отправка по базе НЕ ' + (on?'включена':'выключена') + ': ' + (error?.message||'ошибка записи'), timeout:5000 });
+    return;
+  }
+  pbCurrentBase.sending_enabled = data.sending_enabled;
   pbRenderToggle();
-  await sb.from('partner_bases').update({ sending_enabled: on }).eq('id', pbCurrentBase.id);
+  if(window.pushToast) pushToast({ type: data.sending_enabled?'success':'info',
+    title: data.sending_enabled?'Отправка включена':'Отправка выключена',
+    msg: pbCurrentBase.name + (data.sending_enabled?` · до ${data.daily_limit||100}/день`:''), timeout:3000 });
 }
 
 async function pbSaveSettings(){
