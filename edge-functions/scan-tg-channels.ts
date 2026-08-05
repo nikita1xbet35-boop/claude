@@ -13,8 +13,10 @@
 // on its own, i.e. the whole quota several times over.
 //
 // Rides the existing */15 Cloudflare tick (the free plan caps cron triggers at
-// 5, all taken) and self-gates to MIN_INTERVAL_MIN so it really runs ~2x/hour.
-// Accepts { force: true } to bypass the gate.
+// 5, all taken) and fires on every one of them, round the clock. Each run takes
+// QUERIES_PER_RUN queries off the pool least-recently-used first and walks
+// pages 1→2→3 across successive runs of the same query, so breadth and depth
+// both keep turning over instead of re-reading the same first page.
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY (+GROQ_KEY_2/3),
 //      optional TG_SCAN_USE_SERP + SERPAPI_KEY_1/2/3
@@ -37,11 +39,15 @@ const SERPAPI_ACCOUNTS = [
   { service: 'serpapi_3', key: Deno.env.get('SERPAPI_KEY_3') || '' },
 ].filter(a => a.key);
 
-const MIN_INTERVAL_MIN  = 25;   // ~2 runs/hour off the */15 tick
-const QUERIES_PER_RUN   = 2;
-const RESULTS_PER_QUERY = 25;
+// Volume mode: this is discovery only — no message ever reaches a channel owner
+// from here — so it runs flat out on every tick to build the base as fast as the
+// free search source allows.
+const QUERIES_PER_RUN   = 6;
+const RESULTS_PER_QUERY = 30;
+const SCORE_CHUNK       = 20;   // candidates per Groq call — a 180-item prompt is
+                                // both slow and past what an 8b model reads reliably
 const MIN_SCORE         = 40;   // below this a channel is not worth a contact lookup
-const STATE_KEY         = 'tg_scan_last_run';
+const DEADLINE_MS       = 110_000; // stop starting new work; edge functions get ~150s
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -127,20 +133,57 @@ function parseDdgHtml(html: string, num: number): Hit[] {
   return out;
 }
 
-async function searchDdg(query: string, num: number): Promise<Hit[]> {
+function extractVqd(html: string): string {
+  return html.match(/name=["']vqd["'][^>]*value=["']([^"']+)["']/i)?.[1]
+    || html.match(/value=["']([^"']+)["'][^>]*name=["']vqd["']/i)?.[1]
+    || html.match(/vqd\s*[=:]\s*['"]([^'"]+)['"]/)?.[1]
+    || '';
+}
+
+/** Search DuckDuckGo HTML. Page 1 is a plain GET; deeper pages need the vqd
+ *  token off page 1 and a POST. Rotating the page per query run is what keeps a
+ *  fixed pool of queries producing new channels instead of re-reading the same
+ *  top 30 results forever. */
+async function searchDdg(query: string, num: number, page = 1): Promise<Hit[]> {
+  const UA = pickUA(query);
+  const headers = {
+    'User-Agent': UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://duckduckgo.com/',
+  };
+
+  let html1 = '';
   try {
     const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-      headers: {
-        'User-Agent': pickUA(query),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://duckduckgo.com/',
-      },
+      headers, signal: AbortSignal.timeout(12_000),
+    });
+    if (res.ok) html1 = await res.text();
+    else res.body?.cancel().catch(() => {});
+  } catch { /* fall through to the empty parse */ }
+
+  if (page === 1 || !html1) return parseDdgHtml(html1, num);
+
+  const vqd = extractVqd(html1);
+  if (!vqd) return parseDdgHtml(html1, num);
+
+  const offset = (page - 1) * 30;
+  try {
+    const res = await fetch('https://html.duckduckgo.com/html/', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        q: query, s: String(offset), dc: String(offset + 1),
+        v: 'l', o: 'json', api: '/d.js', nextParams: '', vqd, kl: '',
+      }).toString(),
       signal: AbortSignal.timeout(12_000),
     });
-    if (!res.ok) { res.body?.cancel().catch(() => {}); return []; }
-    return parseDdgHtml(await res.text(), num);
-  } catch { return []; }
+    if (!res.ok) { res.body?.cancel().catch(() => {}); return parseDdgHtml(html1, num); }
+    const paged = parseDdgHtml(await res.text(), num);
+    // A rejected POST returns a near-empty page — fall back to page 1 rather
+    // than reporting the query as barren.
+    return paged.length >= 3 ? paged : parseDdgHtml(html1, num);
+  } catch { return parseDdgHtml(html1, num); }
 }
 
 // ── Search: SerpApi (opt-in only) ───────────────────────────────────────────
@@ -277,24 +320,11 @@ Deno.serve(async (req: Request) => {
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
 
+  const startedAt = Date.now();
+  const outOfTime = () => Date.now() - startedAt > DEADLINE_MS;
+
   try {
-    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
-    const force = !!body.force;
-
-    // Self-gate: this rides a */15 tick but should only fire ~2x/hour.
-    const { data: last } = await supabase.from('app_state')
-      .select('value').eq('key', STATE_KEY).maybeSingle();
-    if (!force && last?.value) {
-      const ageMin = (Date.now() - new Date(last.value).getTime()) / 60_000;
-      if (ageMin < MIN_INTERVAL_MIN) {
-        stats.reason = `throttled — ${Math.round(ageMin)}m since last run`;
-        return json(stats);
-      }
-    }
-    await supabase.from('app_state')
-      .upsert({ key: STATE_KEY, value: new Date().toISOString(), updated_at: new Date().toISOString() });
     stats.ran = true;
-
     if (!GROQ_KEYS.length) { stats.reason = 'no Groq key configured'; return json(stats); }
 
     // Round-robin over the query pool: least-recently-used first, so every angle
@@ -316,11 +346,23 @@ Deno.serve(async (req: Request) => {
     const serpAcct = USE_SERP ? await pickSerpAccount() : null;
     stats.source = serpAcct ? 'serpapi' : 'ddg';
 
+    // find-and-queue already leans hard on DuckDuckGo and has been rate-limited
+    // there before. If the first few queries come back empty, DDG is throttling
+    // us — bail out of the run rather than keep hammering and make it worse for
+    // the main search pipeline.
+    let emptyStreak = 0;
+
     for (const q of queries) {
+      if (outOfTime()) break;
+      if (emptyStreak >= 3) { stats.reason = 'search source returning nothing — backing off'; break; }
       stats.queries.push(q.query);
+      // Walk pages 1→2→3 across successive runs of the same query, so a query
+      // that has already given up its first page reaches further down instead of
+      // returning the same URLs to be discarded as duplicates.
+      const page = 1 + ((q.runs ?? 0) % 3);
       const hits = serpAcct
         ? await searchSerp(q.query, RESULTS_PER_QUERY, serpAcct.key)
-        : await searchDdg(q.query, RESULTS_PER_QUERY);
+        : await searchDdg(q.query, RESULTS_PER_QUERY, page);
       if (serpAcct) {
         const { data: u } = await supabase.from('api_usage')
           .select('used').eq('service', serpAcct.service).single();
@@ -328,6 +370,7 @@ Deno.serve(async (req: Request) => {
           .update({ used: (u?.used ?? 0) + 1, updated_at: new Date().toISOString() })
           .eq('service', serpAcct.service);
       }
+      emptyStreak = hits.length ? 0 : emptyStreak + 1;
       for (const h of hits) {
         const url = normalizeTgUrl(h.link);
         if (!url || seen.has(url)) continue;
@@ -337,21 +380,33 @@ Deno.serve(async (req: Request) => {
       await supabase.from('tg_search_queries')
         .update({ runs: (q.runs ?? 0) + 1, last_run_at: new Date().toISOString() })
         .eq('id', q.id);
-      await sleep(1500);
+      await sleep(700);
     }
     stats.candidates = cands.length;
     if (!cands.length) { stats.reason = 'no t.me results'; return json(stats); }
 
     // Drop everything already known — including rejected/dead ones, so a spent
-    // channel can't come back round after round.
-    const { data: known } = await supabase.from('telegram_channels')
-      .select('channel_url').in('channel_url', cands.map(c => c.url));
-    const knownSet = new Set((known || []).map(r => r.channel_url));
+    // channel can't come back round after round. Chunked: a single .in() over
+    // ~180 URLs builds a query string long enough to be rejected outright.
+    const knownSet = new Set<string>();
+    for (let i = 0; i < cands.length; i += 60) {
+      const { data: known } = await supabase.from('telegram_channels')
+        .select('channel_url').in('channel_url', cands.slice(i, i + 60).map(c => c.url));
+      for (const r of known || []) knownSet.add(r.channel_url);
+    }
     const fresh = cands.filter(c => !knownSet.has(c.url));
     stats.fresh = fresh.length;
     if (!fresh.length) { stats.reason = 'all candidates already known'; return json(stats); }
 
-    const verdicts = await scoreBatch(fresh);
+    // Score in chunks, and keep whatever is scored when the clock runs out —
+    // a partial harvest beats losing the whole run to a timeout.
+    const verdicts = new Map<number, Verdict>();
+    for (let i = 0; i < fresh.length; i += SCORE_CHUNK) {
+      if (outOfTime()) { stats.reason = `deadline — scored ${i}/${fresh.length}`; break; }
+      const chunk = fresh.slice(i, i + SCORE_CHUNK);
+      for (const [j, v] of await scoreBatch(chunk)) verdicts.set(i + j, v);
+    }
+
     const rows = fresh.map((c, i) => ({ c, v: verdicts.get(i) }))
       .filter(x => x.v && x.v.score >= MIN_SCORE)
       .map(({ c, v }) => ({

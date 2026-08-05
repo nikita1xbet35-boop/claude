@@ -23,9 +23,10 @@ const GROQ_KEYS = [
 ].filter(Boolean);
 const MANAGER = Deno.env.get('TG_MANAGER_USERNAME') || '@aff_manager_xbet';
 
-const BATCH    = 10;
-const DELAY_MS = 1500;
-const MAX_LEN  = 700;
+const BATCH       = 30;      // capped in practice by DEADLINE_MS below
+const DELAY_MS    = 400;
+const MAX_LEN     = 700;
+const DEADLINE_MS = 110_000; // edge functions get ~150s; stop before the axe falls
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -136,6 +137,8 @@ Deno.serve(async (req: Request) => {
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
 
+  const startedAt = Date.now();
+
   try {
     if (!GROQ_KEYS.length) return json({ ...stats, reason: 'no Groq key configured' });
 
@@ -150,6 +153,9 @@ Deno.serve(async (req: Request) => {
     if (!rows?.length) return json({ ...stats, reason: 'nothing to draft' });
 
     for (const ch of rows as Row[]) {
+      // Each draft is committed as it lands, so stopping early just defers the
+      // rest to the next tick.
+      if (Date.now() - startedAt > DEADLINE_MS) break;
       stats.processed++;
       const text = await draft(ch);
       if (!text) {

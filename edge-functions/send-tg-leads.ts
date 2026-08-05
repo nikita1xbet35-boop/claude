@@ -11,10 +11,10 @@
 // ever talks to the operator. It never messages a channel owner: the draft is
 // delivered to the operator to send by hand.
 //
-// Guard rails against turning the operator's chat into a firehose:
-//   · SEND_BATCH cards per run
-//   · DAILY_CAP cards per day (GMT+3)
-//   · quiet hours — nothing between 22:00 and 08:00 GMT+3
+// Volume mode: runs round the clock, up to DAILY_CAP cards a day. Quiet hours
+// are opt-in via TG_LEADS_QUIET=true. The daily cap is the one hard stop, and it
+// exists to stay clear of Telegram's per-chat flood limits rather than to ration
+// the operator's attention.
 //
 // Rides the existing */15 Cloudflare tick.
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ALERTS_BOT_TOKEN, ALERTS_CHAT_ID
@@ -26,11 +26,16 @@ const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const BOT_TOKEN    = Deno.env.get('ALERTS_BOT_TOKEN') || '';
 const CHAT_ID      = Deno.env.get('ALERTS_CHAT_ID') || '';
 
-const SEND_BATCH = 3;
-const DAILY_CAP  = Number(Deno.env.get('TG_LEADS_DAILY_CAP') || 30);
+const SEND_BATCH = 8;
+const DAILY_CAP  = Number(Deno.env.get('TG_LEADS_DAILY_CAP') || 200);
+// Round the clock. These are search results, not messages to partners — the
+// operator works the base by hand whenever they get to it, so there is nothing
+// to hold back for business hours. Set TG_LEADS_QUIET=true to restore a
+// 22:00–08:00 GMT+3 window.
+const QUIET      = (Deno.env.get('TG_LEADS_QUIET') || '').toLowerCase() === 'true';
 const QUIET_FROM = 22;   // GMT+3
 const QUIET_TO   = 8;
-const DELAY_MS   = 1200;
+const DELAY_MS   = 900;  // Telegram tolerates ~20 msg/min to one chat
 const STATE_KEY  = 'tg_leads_sent';   // "YYYY-MM-DD|N"
 
 const cors = {
@@ -144,7 +149,7 @@ Deno.serve(async (req: Request) => {
 
     const { hour, date } = gmt3();
     const force = !!body.force;
-    if (!force && (hour >= QUIET_FROM || hour < QUIET_TO)) {
+    if (QUIET && !force && (hour >= QUIET_FROM || hour < QUIET_TO)) {
       stats.reason = 'quiet hours';
       return json(stats);
     }

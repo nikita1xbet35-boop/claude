@@ -29,11 +29,12 @@ const GROQ_KEYS = [
   Deno.env.get('GROQ_KEY_3') || '',
 ].filter(Boolean);
 
-const BATCH        = 10;
+const BATCH        = 40;     // capped in practice by DEADLINE_MS below
 const MAX_ATTEMPTS = 3;      // then the page is called dead and stops being retried
 const MIN_SUBS     = 300;    // below this a channel is not worth a manual message
-const DELAY_MS     = 2500;   // between channels — this is a polite crawler
-const FETCH_MS     = 12_000;
+const DELAY_MS     = 700;    // between channels — still ~1 req/s at t.me
+const FETCH_MS     = 10_000;
+const DEADLINE_MS  = 110_000; // edge functions get ~150s; stop before the axe falls
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -254,6 +255,8 @@ Deno.serve(async (req: Request) => {
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
 
+  const startedAt = Date.now();
+
   try {
     const { data: rows, error } = await supabase.from('telegram_channels')
       .select('id, channel_url, ai_score, attempts, subscribers')
@@ -266,6 +269,9 @@ Deno.serve(async (req: Request) => {
     if (!rows?.length) return json({ ...stats, reason: 'nothing to extract' });
 
     for (const ch of rows) {
+      // Every channel already handled is committed, so stopping early costs
+      // nothing — the next tick picks up where this one left off.
+      if (Date.now() - startedAt > DEADLINE_MS) break;
       stats.processed++;
       const self = ch.channel_url.split('/').pop() || '';
       const attempts = (ch.attempts ?? 0) + 1;

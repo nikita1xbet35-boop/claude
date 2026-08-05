@@ -593,11 +593,13 @@ export default {
       // Telegram outreach agent (discovery only — nothing is ever sent to a
       // channel owner automatically). All four stages ride this tick because the
       // free plan caps cron triggers at 5 and all 5 are taken:
-      //   scan-tg-channels   — self-throttles to ~2 runs/hour internally
+      //   scan-tg-channels   — 6 queries/run, rotating pages, every tick
       //   extract-tg-contact — reads public channel pages for an owner contact
       //   draft-tg-message   — writes the message the operator will paste
       //   send-tg-leads      — delivers lead cards to the operator's own chat
-      //                        (batch + daily cap + quiet hours inside)
+      // All four run round the clock: this is search, and the operator works the
+      // resulting base by hand. Each self-limits on a ~110s internal deadline so
+      // a long run ends cleanly instead of being killed mid-batch.
       await Promise.all([
         call('check-limits', { cron }),
         call('run-sequences', {}),
