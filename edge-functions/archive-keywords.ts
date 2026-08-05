@@ -133,10 +133,15 @@ Deno.serve(async (req: Request) => {
       await tg(lines.join('\n'));
     }
 
-    await supabase.from('error_log').insert([{
-      level: 'info', service: 'archive-keywords',
-      message: `checked=${stats.checked} archived=${stats.archived} thin_pools=${stats.thin_pools}`,
-    }]).catch(() => {});
+    // NB: a Supabase query builder is a thenable WITHOUT .catch — chaining
+    // `.catch()` onto it throws TypeError, which used to turn this Monday-only
+    // job into a 500 right after it had already done its work.
+    try {
+      await supabase.from('error_log').insert([{
+        level: 'info', service: 'archive-keywords',
+        message: `checked=${stats.checked} archived=${stats.archived} thin_pools=${stats.thin_pools}`,
+      }]);
+    } catch { /* logging is best-effort */ }
 
     return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
   } catch (e: any) {
