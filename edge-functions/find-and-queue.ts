@@ -73,9 +73,30 @@ const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixture
 // Layer B hunts for ad inventory, so agencies SELLING marketing services are noise.
 const LAYER_B_MINUS = ' -"marketing agency" -"seo services" -"web design"';
 
-// Pre-filter: drop results whose title/snippet/URL contain these strings (catches what DDG misses)
-const RESULT_NOISE_TERMS = ['forum','reddit','wikipedia','livescore','flashscore','sofascore','results','fixtures','how to play','rules of ','login','sign up','download','apk','app store','google play'];
+// Pre-filter: drop results whose title/snippet/URL contain these strings (catches what DDG misses).
+// v6.1: added wrong-target categories that were slipping through and getting emailed —
+// banks / payment providers, academic & research sites, government, and pure news wires.
+// We do NOT want to pitch a partnership to a bank or a university.
+const RESULT_NOISE_TERMS = [
+  'forum','reddit','wikipedia','livescore','flashscore','sofascore','results','fixtures',
+  'how to play','rules of ','login','sign up','download','apk','app store','google play',
+  // financial institutions / payment rails — not affiliate partners
+  'bank','banque','banco','microfinance','sacco','insurance','loan','mortgage','fintech',
+  // academic / research / reference
+  'mdpi.com','sciencedirect','researchgate','.edu','cairn.info','ssrn','jstor','academia.edu',
+  'journal of','university','université','faculty','thesis','dissertation','scholar',
+  // government / NGO / official bodies
+  '.gov','.gouv','.go.ke','.go.tz','.go.ug','ministry','commission','regulatory','gazette',
+  // law firms
+  'law firm','avocat','attorney','lawyer','legal services','solicitor',
+];
+function domainNoise(url: string): boolean {
+  const h = url.toLowerCase();
+  return h.endsWith('.gov') || h.includes('.gov.') || h.endsWith('.edu') || h.includes('.edu.')
+      || h.includes('.gouv.') || h.includes('.go.ke') || h.includes('.go.tz') || h.includes('.go.ug');
+}
 function isNoisyResult(url: string, title: string, snippet: string): boolean {
+  if (domainNoise(url)) return true;
   const haystack = (url + ' ' + title + ' ' + snippet).toLowerCase();
   return RESULT_NOISE_TERMS.some(t => haystack.includes(t));
 }
@@ -652,9 +673,17 @@ bonus/promo-code sites, and anyone already promoting a bookmaker.
 Writing guides, tutorials or promoting bookmakers is a POSITIVE signal — it proves they own
 betting audience and know how to monetise it.
 
-We do NOT want: the bookmakers themselves (operators), livescore/stats-only services,
-streaming sites, forums, app-download pages, marketplaces, job boards, and pages with no
-owned audience.
+We do NOT want (set audience_owner=false AND relevant=false for ALL of these):
+- the bookmakers themselves (operators) AND their official affiliate PROGRAM pages
+- banks, microfinance, SACCOs, insurance, loan/mortgage sites, payment providers, fintech
+- academic / research / journal / university sites, .edu, papers, theses
+- government, regulatory, ministry, NGO and official-body sites (.gov, .gouv, .go.*)
+- law firms, attorneys, legal-services sites
+- livescore/stats-only services, streaming sites, forums, app-download pages,
+  marketplaces, job boards, and any page with no owned audience.
+It is a serious error to pitch a partnership to a bank, a law firm, a university,
+a government body, or a competitor's own affiliate programme. When unsure whether a
+site OWNS a betting audience, answer audience_owner=false.
 
 You get ${cands.length} numbered sites. Return ONLY JSON, one entry per site, same numbering:
 {"results":[{
