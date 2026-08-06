@@ -113,23 +113,6 @@ async function watchdogApply(id, decision, env) {
   } catch (e) { return e && e.message; }
 }
 
-// Record the operator's verdict on a Telegram lead card. The state machine lives
-// in send-tg-leads (same pattern as watchdogApply above) — the Worker only relays
-// the button press.
-async function tgLeadDecide(id, action, userId, env) {
-  const SUPABASE_URL = env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
-  const KEY = env.SUPABASE_ANON_KEY || DEFAULT_ANON_KEY;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-tg-leads`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': KEY, 'Authorization': 'Bearer ' + KEY },
-      body: JSON.stringify({ decide: { id, action, user_id: String(userId) } }),
-    });
-    const d = await res.json().catch(() => ({}));
-    return d?.result || (res.ok ? 'ok' : 'error');
-  } catch (e) { return e && e.message; }
-}
-
 async function handleTgUpdate(update, env) {
   if (update.callback_query) {
     const cq = update.callback_query;
@@ -144,25 +127,9 @@ async function handleTgUpdate(update, env) {
       }, env);
       return;
     }
-    // Telegram lead cards: "tgl:take:<id>" / "tgl:rej:<id>"
-    const tgl = data.match(/^tgl:(take|rej):(\d+)$/);
-    if (tgl && cq.from?.id === TG_MY_USER_ID(env)) {
-      const result = await tgLeadDecide(Number(tgl[2]), tgl[1] === 'take' ? 'take' : 'reject', cq.from.id, env);
-      await tgCall('answerCallbackQuery', {
-        callback_query_id: cq.id,
-        text: String(result).slice(0, 190),
-      }, env);
-      // Drop the buttons so a handled card can't be pressed again.
-      if (cq.message?.message_id) {
-        await tgCall('editMessageReplyMarkup', {
-          chat_id: cq.message.chat.id,
-          message_id: cq.message.message_id,
-          reply_markup: { inline_keyboard: [] },
-        }, env);
-      }
-      return;
-    }
-
+    // Telegram lead cards used to carry take/reject buttons here. They are now
+    // decided in the Telegram tab of the dashboard, which owns the whole base —
+    // old cards still in the chat may fire "tgl:…", so acknowledge and drop it.
     await tgCall('answerCallbackQuery', { callback_query_id: cq.id }, env);
     return;
   }

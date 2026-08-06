@@ -3,9 +3,13 @@
 // Stage 4 of the Telegram outreach pipeline: DELIVERY TO THE OPERATOR.
 //
 // Sends a lead card — channel facts + the ready-to-paste draft — to ONE chat:
-// ALERTS_CHAT_ID, the operator's own chat with the notification bot. The card
-// carries two buttons ("Беру" / "Отклонить") which come back through the Worker
-// webhook as { decide: { id, action } } on this same function.
+// ALERTS_CHAT_ID, the operator's own chat with the notification bot.
+//
+// The card carries no buttons. Every lead also lands in the Telegram tab of the
+// dashboard, which holds the whole base, the per-day stats and the take/reject
+// actions; duplicating those actions on the card only split the record of what
+// had been decided across two places. The card is a notification now — the
+// decision is made on the site, which POSTs { decide: { id, action } } here.
 //
 // This is the only place in the pipeline that talks to Telegram, and it only
 // ever talks to the operator. It never messages a channel owner: the draft is
@@ -100,7 +104,7 @@ function card(ch: Row): string {
   ].filter(Boolean).join('\n');
 }
 
-// ── Operator decision (comes from the Worker's callback_query handler) ───────
+// ── Operator decision (comes from the Telegram tab of the dashboard) ─────────
 async function decide(id: number, action: string, userId?: string): Promise<string> {
   const { data: row } = await supabase.from('tg_outreach_channels')
     .select('id, status, channel_url, channel_name').eq('id', id).maybeSingle();
@@ -181,12 +185,6 @@ Deno.serve(async (req: Request) => {
         text: card(ch),
         parse_mode: 'HTML',
         disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '✅ Беру',      callback_data: `tgl:take:${ch.id}` },
-            { text: '❌ Отклонить', callback_data: `tgl:rej:${ch.id}` },
-          ]],
-        },
       });
       // Only mark as delivered if Telegram actually accepted it — otherwise the
       // lead would silently vanish from the queue without ever being seen.
