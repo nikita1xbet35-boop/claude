@@ -390,7 +390,7 @@ Deno.serve(async (req: Request) => {
     // ~180 URLs builds a query string long enough to be rejected outright.
     const knownSet = new Set<string>();
     for (let i = 0; i < cands.length; i += 60) {
-      const { data: known } = await supabase.from('telegram_channels')
+      const { data: known } = await supabase.from('tg_outreach_channels')
         .select('channel_url').in('channel_url', cands.slice(i, i + 60).map(c => c.url));
       for (const r of known || []) knownSet.add(r.channel_url);
     }
@@ -425,13 +425,13 @@ Deno.serve(async (req: Request) => {
     if (rows.length) {
       // ignoreDuplicates: a concurrent run (or a manual add) may have inserted
       // the same URL between the dedup check and here.
-      const { data: ins, error } = await supabase.from('telegram_channels')
+      const { data: ins, error } = await supabase.from('tg_outreach_channels')
         .upsert(rows, { onConflict: 'channel_url', ignoreDuplicates: true })
         .select('id');
       if (error) throw new Error(error.message);
       stats.inserted = ins?.length ?? 0;
       if (ins?.length) {
-        await quiet(supabase.from('telegram_channel_log').insert(
+        await quiet(supabase.from('tg_outreach_log').insert(
           ins.map(r => ({ channel_id: r.id, action: 'created', metadata: { source: stats.source } })),
         ));
       }

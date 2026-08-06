@@ -258,7 +258,7 @@ Deno.serve(async (req: Request) => {
   const startedAt = Date.now();
 
   try {
-    const { data: rows, error } = await supabase.from('telegram_channels')
+    const { data: rows, error } = await supabase.from('tg_outreach_channels')
       .select('id, channel_url, ai_score, attempts, subscribers')
       .eq('status', 'new')
       .is('owner_contact', null)
@@ -278,8 +278,8 @@ Deno.serve(async (req: Request) => {
       const page = await fetchChannelPage(ch.channel_url);
 
       const finish = async (patch: Record<string, unknown>, action: string, meta?: unknown) => {
-        await supabase.from('telegram_channels').update({ ...patch, attempts }).eq('id', ch.id);
-        await quiet(supabase.from('telegram_channel_log')
+        await supabase.from('tg_outreach_channels').update({ ...patch, attempts }).eq('id', ch.id);
+        await quiet(supabase.from('tg_outreach_log')
           .insert([{ channel_id: ch.id, action, metadata: (meta ?? null) as any }]));
       };
 
@@ -298,7 +298,7 @@ Deno.serve(async (req: Request) => {
           await finish({ status: 'dead', notes: `unreachable after ${attempts} attempts` }, 'dead');
         } else {
           stats.retry++;
-          await supabase.from('telegram_channels').update({ attempts }).eq('id', ch.id);
+          await supabase.from('tg_outreach_channels').update({ attempts }).eq('id', ch.id);
         }
         await sleep(DELAY_MS);
         continue;
@@ -345,7 +345,7 @@ Deno.serve(async (req: Request) => {
           // Groq down/rate-limited: leave the row in 'new' and retry next run
           // rather than committing a guess.
           stats.retry++;
-          await supabase.from('telegram_channels').update({ attempts }).eq('id', ch.id);
+          await supabase.from('tg_outreach_channels').update({ attempts }).eq('id', ch.id);
           await sleep(DELAY_MS);
           continue;
         }
