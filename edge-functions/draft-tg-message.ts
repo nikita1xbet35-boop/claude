@@ -26,6 +26,7 @@ const MANAGER = Deno.env.get('TG_MANAGER_USERNAME') || '@aff_manager_xbet';
 const BATCH       = 30;      // capped in practice by DEADLINE_MS below
 const DELAY_MS    = 400;
 const MAX_LEN     = 700;
+const MIN_SCORE   = 40;      // judged here when scan could not score the row
 const DEADLINE_MS = 110_000; // edge functions get ~150s; stop before the axe falls
 
 const cors = {
@@ -100,6 +101,56 @@ interface Row {
   niche: string | null; description: string | null; ai_score: number | null;
 }
 
+/** Score a channel that reached this stage without a verdict.
+ *
+ *  scan keeps candidates Groq could not score (its keys are shared with
+ *  find-and-queue and spend most of the day at their cap), which is right — the
+ *  search result is the expensive part — but it means the quality filter would
+ *  be off entirely if nothing ever scored them. Scoring HERE costs one call per
+ *  channel that already has a contact, i.e. roughly 4% of what scan sees, and it
+ *  happens exactly where a bad channel would otherwise become a card.
+ *
+ *  Returns null when Groq is unavailable: the row is left for the next run
+ *  rather than let through unjudged. */
+async function score(ch: Row): Promise<{ score: number; geo: string; language: string;
+  niche: string; reasoning: string } | null> {
+  const raw = await groqChat({
+    model: 'llama-3.1-8b-instant',
+    messages: [{
+      role: 'user',
+      content: `Ты аналитик партнёрской программы букмекера 1xBet (фокус — Африка).
+Оцени публичный Telegram-канал как потенциального партнёра-аффилиата.
+
+Канал: ${ch.channel_name || ch.channel_url}
+Ссылка: ${ch.channel_url}
+Подписчиков: ${ch.subscribers ?? 'неизвестно'}
+Описание: ${(ch.description || '').slice(0, 600)}
+
+Высокий балл (70-100): канал с собственной аудиторией по ставкам/прогнозам/казино/Aviator, ведёт автор или команда, есть признаки монетизации.
+Средний (40-69): тематика подходит, масштаб или авторство неясны.
+Низкий (0-39): ОФИЦИАЛЬНЫЙ канал букмекера или конкурента (SportyBet, Betway, Bet9ja, 1xBet, Melbet и т.п.), новостной агрегатор, скам, не про ставки.
+
+Верни СТРОГО JSON:
+{"score":75,"geo":"NG","language":"en","niche":"betting_tips","reasoning":"кратко, 1 предложение"}
+niche — одно из: betting_tips, casino, aviator, esports, crypto, sports_news, other.`,
+    }],
+    temperature: 0.1,
+    max_tokens: 250,
+    response_format: { type: 'json_object' },
+  });
+  if (raw === null) return null;
+  try {
+    const p = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+    return {
+      score: Math.max(0, Math.min(100, Number(p.score) || 0)),
+      geo: String(p.geo || '').slice(0, 8),
+      language: String(p.language || '').slice(0, 8),
+      niche: String(p.niche || 'other').slice(0, 40),
+      reasoning: String(p.reasoning || '').slice(0, 500),
+    };
+  } catch { return null; }
+}
+
 async function draft(ch: Row): Promise<string | null> {
   const langCode = (ch.language || '').toLowerCase().slice(0, 2);
   const langName = LANGS[langCode] || LANGS.en;
@@ -139,7 +190,7 @@ async function draft(ch: Row): Promise<string | null> {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
-  const stats = { processed: 0, drafted: 0, failed: 0 };
+  const stats = { processed: 0, drafted: 0, failed: 0, rejected: 0, unjudged: 0 };
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
 
@@ -163,6 +214,31 @@ Deno.serve(async (req: Request) => {
       // rest to the next tick.
       if (Date.now() - startedAt > DEADLINE_MS) break;
       stats.processed++;
+
+      // Judge first, if scan could not. A channel that fails here never becomes
+      // a card — this is where the official-bookmaker and off-topic channels
+      // that scan waved through unscored get stopped.
+      if (ch.ai_score === null) {
+        const v = await score(ch);
+        if (!v) { stats.unjudged++; await sleep(DELAY_MS); continue; }
+        Object.assign(ch, { geo: v.geo || ch.geo, language: v.language || ch.language,
+          niche: v.niche || ch.niche, ai_score: v.score });
+        if (v.score < MIN_SCORE) {
+          await supabase.from('tg_outreach_channels').update({
+            ai_score: v.score, ai_reasoning: v.reasoning, geo: ch.geo, language: ch.language,
+            niche: ch.niche, status: 'rejected', reviewed_at: new Date().toISOString(),
+            notes: `score ${v.score} < ${MIN_SCORE}`,
+          }).eq('id', ch.id);
+          stats.rejected++;
+          await sleep(DELAY_MS);
+          continue;
+        }
+        await supabase.from('tg_outreach_channels').update({
+          ai_score: v.score, ai_reasoning: v.reasoning,
+          geo: ch.geo, language: ch.language, niche: ch.niche,
+        }).eq('id', ch.id);
+      }
+
       const text = await draft(ch);
       if (!text) {
         // Left as-is: the row stays in 'new' and the next run retries it. Groq
@@ -181,7 +257,8 @@ Deno.serve(async (req: Request) => {
 
     await quiet(supabase.from('error_log').insert([{
       level: 'info', service: 'draft-tg-message',
-      message: `processed=${stats.processed} drafted=${stats.drafted} failed=${stats.failed}`,
+      message: `processed=${stats.processed} drafted=${stats.drafted} failed=${stats.failed} `
+        + `rejected=${stats.rejected} unjudged=${stats.unjudged}`,
     }]));
 
     return json(stats);
