@@ -70,6 +70,8 @@ jobs:
           echo "--- extract now also reads the t.me/s/<name> post feed, so rows written off"
           echo "    as no_contact by the bio-only version deserve another pass ---"
           q "UPDATE tg_outreach_channels SET status='new', attempts=0 WHERE status='no_contact' RETURNING id;"; echo ""
+          echo "--- and the unscored rows scan let through: draft now judges them ---"
+          q "SELECT count(*) AS unscored_awaiting_judgement FROM tg_outreach_channels WHERE ai_score IS NULL;"; echo ""
 
           echo ""
           echo "████ 5. RUN THE REST OF THE CHAIN DIRECTLY ████"
@@ -85,4 +87,4 @@ jobs:
 
           echo "████ END TG DIAG ████"
 
-# ping 3
+# ping 4
