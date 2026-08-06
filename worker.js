@@ -7,6 +7,7 @@
 //                + extract-contacts (contact search — runs near-continuously until all leads covered)
 //   every 5 min  → find-and-queue   (search → Groq analysis → lead insert — 3x faster than before)
 //   every 15 min → check-limits
+//                + the Telegram outreach agent (scan/extract/draft/send-tg-*)
 //   every 30 min → daily-report
 //   06:00 UTC    → daily-report (also fires via */30)
 //
@@ -112,6 +113,23 @@ async function watchdogApply(id, decision, env) {
   } catch (e) { return e && e.message; }
 }
 
+// Record the operator's verdict on a Telegram lead card. The state machine lives
+// in send-tg-leads (same pattern as watchdogApply above) — the Worker only relays
+// the button press.
+async function tgLeadDecide(id, action, userId, env) {
+  const SUPABASE_URL = env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const KEY = env.SUPABASE_ANON_KEY || DEFAULT_ANON_KEY;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-tg-leads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': KEY, 'Authorization': 'Bearer ' + KEY },
+      body: JSON.stringify({ decide: { id, action, user_id: String(userId) } }),
+    });
+    const d = await res.json().catch(() => ({}));
+    return d?.result || (res.ok ? 'ok' : 'error');
+  } catch (e) { return e && e.message; }
+}
+
 async function handleTgUpdate(update, env) {
   if (update.callback_query) {
     const cq = update.callback_query;
@@ -126,6 +144,25 @@ async function handleTgUpdate(update, env) {
       }, env);
       return;
     }
+    // Telegram lead cards: "tgl:take:<id>" / "tgl:rej:<id>"
+    const tgl = data.match(/^tgl:(take|rej):(\d+)$/);
+    if (tgl && cq.from?.id === TG_MY_USER_ID(env)) {
+      const result = await tgLeadDecide(Number(tgl[2]), tgl[1] === 'take' ? 'take' : 'reject', cq.from.id, env);
+      await tgCall('answerCallbackQuery', {
+        callback_query_id: cq.id,
+        text: String(result).slice(0, 190),
+      }, env);
+      // Drop the buttons so a handled card can't be pressed again.
+      if (cq.message?.message_id) {
+        await tgCall('editMessageReplyMarkup', {
+          chat_id: cq.message.chat.id,
+          message_id: cq.message.message_id,
+          reply_markup: { inline_keyboard: [] },
+        }, env);
+      }
+      return;
+    }
+
     await tgCall('answerCallbackQuery', { callback_query_id: cq.id }, env);
     return;
   }
@@ -552,11 +589,26 @@ export default {
       //                     reach send_queue, so dead ones never burn domain rep.
       //   score-leads     — P1.1. Scores + hard-filters new leads so the queue
       //                     goes out best-first instead of in import order.
+      //
+      // Telegram outreach agent (discovery only — nothing is ever sent to a
+      // channel owner automatically). All four stages ride this tick because the
+      // free plan caps cron triggers at 5 and all 5 are taken:
+      //   scan-tg-channels   — 6 queries/run, rotating pages, every tick
+      //   extract-tg-contact — reads public channel pages for an owner contact
+      //   draft-tg-message   — writes the message the operator will paste
+      //   send-tg-leads      — delivers lead cards to the operator's own chat
+      // All four run round the clock: this is search, and the operator works the
+      // resulting base by hand. Each self-limits on a ~110s internal deadline so
+      // a long run ends cleanly instead of being killed mid-batch.
       await Promise.all([
         call('check-limits', { cron }),
         call('run-sequences', {}),
         call('validate-emails', {}),
         call('score-leads', {}),
+        call('scan-tg-channels', {}),
+        call('extract-tg-contact', {}),
+        call('draft-tg-message', {}),
+        call('send-tg-leads', {}),
       ]);
       return;
     }

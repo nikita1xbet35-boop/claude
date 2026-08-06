@@ -1,0 +1,177 @@
+-- Telegram discovery: widen the query pool for volume.
+--
+-- The 28 seed queries in 020 cycle out in about an hour at 6 queries/run × 4
+-- runs/hour, after which every run re-reads results it has already discarded as
+-- duplicates. Page rotation (scan walks pages 1→2→3 per query) buys depth; this
+-- buys breadth, which is what actually keeps new channels arriving.
+--
+-- Angles added here:
+--   · the rest of the African betting map (ZA, ET, CD, CI, SN, ML, BF, RW, MW,
+--     ZW, BW, NA, MZ, AO, GA, BJ, TG, NE, GN, SL, LR, SD, LY, DZ, MA, TN, EG)
+--   · local languages — French, Portuguese, Swahili, Amharic, Arabic, Hausa,
+--     Yoruba, Igbo, Pidgin, Zulu, Afrikaans
+--   · bookmaker-brand angles (SportyBet, Betway, Melbet, 22Bet, Bet9ja, MozzartBet,
+--     Premier Bet, 1win…) — channels that already push a competitor's book are
+--     exactly the ones with a monetised audience
+--   · format angles: VIP/paid tips, accumulators, correct score, both-teams-to-score,
+--     jackpot, livescore, cash-out, bankroll
+--   · non-site: angles ("telegram channel", "join our telegram") that surface
+--     channels through the pages that link them rather than through t.me itself
+--
+-- Idempotent via ON CONFLICT — re-running adds nothing.
+INSERT INTO public.tg_search_queries (query)
+SELECT q FROM (VALUES
+  -- ── West Africa ──────────────────────────────────────────────────────────
+  ('site:t.me bet9ja predictions channel'),
+  ('site:t.me sportybet booking codes nigeria'),
+  ('site:t.me naija betting tips daily'),
+  ('site:t.me nigeria football prediction vip'),
+  ('site:t.me hausa betting tips'),
+  ('site:t.me yoruba betting predictions'),
+  ('site:t.me igbo sports betting channel'),
+  ('site:t.me nigeria pidgin betting tips'),
+  ('site:t.me ghana betting predictions vip'),
+  ('site:t.me betway ghana tips channel'),
+  ('site:t.me premier bet togo pronostics'),
+  ('site:t.me pronostics benin paris sportifs'),
+  ('site:t.me pronostics burkina faso foot'),
+  ('site:t.me pronostics mali paris sportifs'),
+  ('site:t.me pronostics niger football'),
+  ('site:t.me pronostics guinee paris sportifs'),
+  ('site:t.me sierra leone betting tips'),
+  ('site:t.me liberia betting tips channel'),
+  ('site:t.me pronostics senegal foot vip'),
+  ('site:t.me cote ivoire pronostics vip'),
+  -- ── East Africa ──────────────────────────────────────────────────────────
+  ('site:t.me sportpesa mega jackpot tips'),
+  ('site:t.me betika grand jackpot predictions'),
+  ('site:t.me odibets tips kenya channel'),
+  ('site:t.me mozzartbet kenya jackpot tips'),
+  ('site:t.me kenya sure bets vip channel'),
+  ('site:t.me swahili mabao utabiri'),
+  ('site:t.me tanzania betting tips vip'),
+  ('site:t.me premier bet tanzania tips'),
+  ('site:t.me uganda betting tips vip'),
+  ('site:t.me betpawa uganda predictions'),
+  ('site:t.me rwanda betting tips channel'),
+  ('site:t.me ethiopia betting tips telegram'),
+  ('site:t.me amharic betting predictions'),
+  ('site:t.me somalia betting tips channel'),
+  ('site:t.me south sudan betting tips'),
+  -- ── Southern Africa ──────────────────────────────────────────────────────
+  ('site:t.me south africa betting tips vip'),
+  ('site:t.me hollywoodbets tips channel'),
+  ('site:t.me betway south africa predictions'),
+  ('site:t.me afrikaans wedde voorspellings'),
+  ('site:t.me zulu betting tips channel'),
+  ('site:t.me zambia betting tips vip'),
+  ('site:t.me zimbabwe betting tips channel'),
+  ('site:t.me malawi betting tips'),
+  ('site:t.me botswana betting predictions'),
+  ('site:t.me namibia betting tips channel'),
+  ('site:t.me mozambique apostas palpites vip'),
+  ('site:t.me angola apostas desportivas vip'),
+  ('site:t.me premier bet malawi tips'),
+  -- ── Central + North Africa ───────────────────────────────────────────────
+  ('site:t.me pronostics congo rdc paris'),
+  ('site:t.me pronostics cameroun vip foot'),
+  ('site:t.me pronostics gabon paris sportifs'),
+  ('site:t.me pronostics tchad football'),
+  ('site:t.me egypt betting tips arabic'),
+  ('site:t.me morocco paris sportifs pronostics'),
+  ('site:t.me algerie pronostics paris sportifs'),
+  ('site:t.me tunisie pronostics foot'),
+  ('site:t.me توقعات المراهنات كرة القدم'),
+  ('site:t.me رهانات رياضية قناة'),
+  -- ── Bookmaker-brand angles (already-monetised audiences) ─────────────────
+  ('site:t.me melbet promo code channel'),
+  ('site:t.me 22bet predictions channel'),
+  ('site:t.me betwinner tips channel'),
+  ('site:t.me 1win predictions channel africa'),
+  ('site:t.me parimatch africa tips'),
+  ('site:t.me betpawa predictions channel'),
+  ('site:t.me msport betting tips'),
+  ('site:t.me betking booking codes'),
+  ('site:t.me paripesa tips channel'),
+  ('site:t.me linebet predictions channel'),
+  -- ── Format / product angles ──────────────────────────────────────────────
+  ('site:t.me vip betting tips paid subscription'),
+  ('site:t.me sure 2 odds daily channel'),
+  ('site:t.me 10 odds accumulator channel'),
+  ('site:t.me correct score predictions channel'),
+  ('site:t.me both teams to score tips channel'),
+  ('site:t.me over 2.5 goals tips channel'),
+  ('site:t.me draw predictions football channel'),
+  ('site:t.me jackpot predictions channel africa'),
+  ('site:t.me livescore betting tips channel'),
+  ('site:t.me bankroll management betting channel'),
+  ('site:t.me free tips telegram channel football'),
+  ('site:t.me betting syndicate tips channel'),
+  ('site:t.me arbitrage betting signals channel'),
+  ('site:t.me value bets signals channel'),
+  ('site:t.me tipster channel africa football'),
+  -- ── Casino / crash / slots ───────────────────────────────────────────────
+  ('site:t.me aviator predictor apk channel'),
+  ('site:t.me aviator hack signals channel'),
+  ('site:t.me spribe aviator signals'),
+  ('site:t.me jetx predictions channel'),
+  ('site:t.me lucky jet signals channel'),
+  ('site:t.me crash game signals telegram'),
+  ('site:t.me slots bonus hunt channel'),
+  ('site:t.me casino free spins channel africa'),
+  ('site:t.me roulette strategy channel'),
+  ('site:t.me plinko mines signals channel'),
+  ('site:t.me mines predictor signals'),
+  -- ── Esports / crypto ─────────────────────────────────────────────────────
+  ('site:t.me cs2 betting tips channel'),
+  ('site:t.me dota2 betting predictions channel'),
+  ('site:t.me fifa esports betting tips'),
+  ('site:t.me crypto casino signals channel'),
+  ('site:t.me bitcoin betting tips channel'),
+  -- ── Sport-specific ───────────────────────────────────────────────────────
+  ('site:t.me afcon predictions channel'),
+  ('site:t.me caf champions league tips'),
+  ('site:t.me npfl predictions channel'),
+  ('site:t.me psl south africa betting tips'),
+  ('site:t.me la liga betting tips channel'),
+  ('site:t.me serie a betting tips channel'),
+  ('site:t.me bundesliga betting tips channel'),
+  ('site:t.me cricket betting tips channel africa'),
+  ('site:t.me tennis betting tips channel'),
+  ('site:t.me basketball betting tips channel'),
+  ('site:t.me horse racing tips channel africa'),
+  ('site:t.me virtual football tips channel'),
+  -- ── Affiliate / B2B angles (owners already thinking commercially) ────────
+  ('site:t.me betting affiliate manager channel'),
+  ('site:t.me igaming affiliates africa channel'),
+  ('site:t.me casino affiliate program channel'),
+  ('site:t.me traffic arbitrage gambling channel'),
+  ('site:t.me media buying gambling africa'),
+  -- ── Off-t.me angles: pages that LIST channels ────────────────────────────
+  ('"t.me" betting tips telegram channel nigeria list'),
+  ('"t.me" best telegram channels for betting kenya'),
+  ('"t.me" telegram channels football predictions ghana'),
+  ('"t.me" meilleurs canaux telegram pronostics'),
+  ('"t.me" melhores canais telegram apostas'),
+  ('best telegram channels betting tips africa 2025'),
+  ('top telegram channels sports predictions nigeria'),
+  ('telegram betting tips channel join link kenya'),
+  ('join our telegram channel betting tips ghana'),
+  ('telegram channel aviator predictions join'),
+  ('liste canaux telegram pronostics afrique'),
+  ('canais telegram apostas desportivas angola'),
+  ('telegram channel sure odds join link tanzania'),
+  ('betting tipster telegram channel review africa'),
+  ('telegram vip betting group subscription africa'),
+  -- ── Russian-language angles (CIS-run channels targeting Africa traffic) ──
+  ('site:t.me прогнозы на спорт бесплатно канал'),
+  ('site:t.me ставки на спорт вип канал'),
+  ('site:t.me экспрессы дня прогнозы канал'),
+  ('site:t.me авиатор сигналы канал'),
+  ('site:t.me казино бонусы канал телеграм'),
+  ('site:t.me арбитраж трафика гемблинг канал'),
+  ('site:t.me беттинг инсайды канал'),
+  ('лучшие телеграм каналы прогнозы на спорт'),
+  ('телеграм канал ставки африка трафик')
+) AS v(q)
+ON CONFLICT (query) DO NOTHING;

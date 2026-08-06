@@ -135,6 +135,10 @@ jobs:
             run-sequences
             score-leads
             archive-keywords
+            scan-tg-channels
+            extract-tg-contact
+            draft-tg-message
+            send-tg-leads
           "
           for fn in $FUNCTIONS; do
             mkdir -p "supabase/functions/$fn"
