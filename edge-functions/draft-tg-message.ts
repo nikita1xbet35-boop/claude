@@ -55,21 +55,27 @@ let groqKeyIdx = 0;
 async function groqChat(body: Record<string, unknown>): Promise<string | null> {
   const n = GROQ_KEYS.length;
   if (!n) return null;
-  for (let i = 0; i < n; i++) {
-    const idx = (groqKeyIdx + i) % n;
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(25_000),
-      });
-      if (res.status === 429 || res.status >= 500) { res.body?.cancel().catch(() => {}); continue; }
-      if (!res.ok) { res.body?.cancel().catch(() => {}); return null; }
-      const d = await res.json();
-      groqKeyIdx = (idx + 1) % n;
-      return d?.choices?.[0]?.message?.content || '';
-    } catch { /* next key */ }
+  // Two passes over the key ring with a pause between. These keys are shared
+  // with find-and-queue, which keeps them near their per-minute cap, so all
+  // three can be 429 at one instant and fine a second later.
+  for (let round = 0; round < 2; round++) {
+    if (round) await sleep(2000);
+    for (let i = 0; i < n; i++) {
+      const idx = (groqKeyIdx + i) % n;
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(25_000),
+        });
+        if (res.status === 429 || res.status >= 500) { res.body?.cancel().catch(() => {}); continue; }
+        if (!res.ok) { res.body?.cancel().catch(() => {}); return null; }
+        const d = await res.json();
+        groqKeyIdx = (idx + 1) % n;
+        return d?.choices?.[0]?.message?.content || '';
+      } catch { /* next key */ }
+    }
   }
   groqKeyIdx = (groqKeyIdx + 1) % n;
   return null;
@@ -147,7 +153,7 @@ Deno.serve(async (req: Request) => {
       .eq('status', 'new')
       .not('owner_contact', 'is', null)
       .is('draft_message', null)
-      .order('ai_score', { ascending: false })
+      .order('ai_score', { ascending: false, nullsFirst: false })
       .limit(BATCH);
     if (error) throw new Error(error.message);
     if (!rows?.length) return json({ ...stats, reason: 'nothing to draft' });

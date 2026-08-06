@@ -170,7 +170,7 @@ Deno.serve(async (req: Request) => {
       .select('id, channel_url, channel_name, subscribers, geo, language, niche, '
         + 'ai_score, ai_reasoning, owner_contact, contact_type, draft_message')
       .eq('status', 'ready')
-      .order('ai_score', { ascending: false })
+      .order('ai_score', { ascending: false, nullsFirst: false })
       .limit(Math.min(SEND_BATCH, room));
     if (error) throw new Error(error.message);
     if (!rows?.length) { stats.reason = 'no ready leads'; return json(stats); }
@@ -206,6 +206,11 @@ Deno.serve(async (req: Request) => {
         key: STATE_KEY, value: `${date}|${sentToday}`, updated_at: new Date().toISOString(),
       });
     }
+
+    await quiet(supabase.from('error_log').insert([{
+      level: 'info', service: 'send-tg-leads',
+      message: `sent=${stats.sent} today=${sentToday}/${DAILY_CAP} ${stats.reason}`,
+    }]));
 
     return json(stats);
   } catch (e: any) {

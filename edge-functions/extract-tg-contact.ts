@@ -2,9 +2,12 @@
 // ════════════════════════════════════════════════════════════════════════════
 // Stage 2 of the Telegram outreach pipeline: OWNER CONTACT.
 //
-// Reads the PUBLIC channel page (https://t.me/<name> — the same page any browser
-// gets, no login, no API, no private invites) and pulls the contact the owner
-// published themselves in the bio: an email, an @username, or a contact bot.
+// Reads the PUBLIC channel page (https://t.me/<name>) AND the public post feed
+// (https://t.me/s/<name>) — the same pages any browser gets, no login, no API,
+// no private invites — and pulls the contact the owner published themselves: an
+// email, an @username, or a contact bot. The feed matters: the first live run
+// found a contact on only 1 of 8 channels from the bio alone, because owners
+// put "for ads write to @x" in a pinned or recent post far more often.
 // Also refreshes the real subscriber count and description, which the search
 // snippet could only guess at.
 //
@@ -30,7 +33,7 @@ const GROQ_KEYS = [
 ].filter(Boolean);
 
 const BATCH        = 40;     // capped in practice by DEADLINE_MS below
-const MAX_ATTEMPTS = 3;      // then the page is called dead and stops being retried
+const MAX_ATTEMPTS = 5;      // then the page is called dead and stops being retried
 const MIN_SUBS     = 300;    // below this a channel is not worth a manual message
 const DELAY_MS     = 700;    // between channels — still ~1 req/s at t.me
 const FETCH_MS     = 10_000;
@@ -89,10 +92,45 @@ function parseSubscribers(html: string): number | null {
 interface Page {
   ok: boolean; dead: boolean; name: string; description: string;
   subscribers: number | null; links: string[];
+  posts: string; postLinks: string[];
+}
+
+/** The public post feed at t.me/s/<name>. The bio alone is a thin source — the
+ *  first live run found a contact on 1 of 8 channels — because owners put "for
+ *  ads write to @x" in a pinned or recent post far more often than in the bio.
+ *  Same public page a browser gets; no login, no API. */
+async function fetchPreview(name: string): Promise<{ posts: string; links: string[] }> {
+  try {
+    const res = await fetch(`https://t.me/s/${name}`, {
+      headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' },
+      signal: AbortSignal.timeout(FETCH_MS),
+      redirect: 'follow',
+    });
+    if (!res.ok) { res.body?.cancel().catch(() => {}); return { posts: '', links: [] }; }
+    const html = (await res.text()).slice(0, 600_000);
+
+    const texts: string[] = [];
+    const msgRe = /class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = msgRe.exec(html)) !== null && texts.length < 25) {
+      const t = decodeEntities(m[1]);
+      if (t) texts.push(t);
+    }
+
+    // Only links inside message bodies — the page chrome is full of Telegram's own.
+    const links: string[] = [];
+    const bodyRe = /class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
+    while ((m = bodyRe.exec(html)) !== null && links.length < 60) {
+      const hrefRe = /href="(mailto:[^"]+|https?:\/\/[^"]+)"/gi;
+      let h: RegExpExecArray | null;
+      while ((h = hrefRe.exec(m[1])) !== null && links.length < 60) links.push(h[1]);
+    }
+    return { posts: texts.join('\n').slice(0, 12_000), links };
+  } catch { return { posts: '', links: [] }; }
 }
 
 async function fetchChannelPage(url: string): Promise<Page> {
-  const empty: Page = { ok: false, dead: false, name: '', description: '', subscribers: null, links: [] };
+  const empty: Page = { ok: false, dead: false, name: '', description: '', subscribers: null, links: [], posts: '', postLinks: [] };
   let res: Response;
   try {
     res = await fetch(url, {
@@ -130,7 +168,14 @@ async function fetchChannelPage(url: string): Promise<Page> {
   let m: RegExpExecArray | null;
   while ((m = linkRe.exec(html)) !== null && links.length < 40) links.push(m[1]);
 
-  return { ok: true, dead: false, name: title, description, subscribers: parseSubscribers(html), links };
+  // The post feed is a second, richer source for the owner contact.
+  const preview = await fetchPreview(url.split('/').pop() || '');
+
+  return {
+    ok: true, dead: false, name: title, description,
+    subscribers: parseSubscribers(html), links,
+    posts: preview.posts, postLinks: preview.links,
+  };
 }
 
 // ── Contact candidates ──────────────────────────────────────────────────────
@@ -191,21 +236,27 @@ let groqKeyIdx = 0;
 async function groqChat(body: Record<string, unknown>): Promise<string | null> {
   const n = GROQ_KEYS.length;
   if (!n) return null;
-  for (let i = 0; i < n; i++) {
-    const idx = (groqKeyIdx + i) % n;
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (res.status === 429 || res.status >= 500) { res.body?.cancel().catch(() => {}); continue; }
-      if (!res.ok) { res.body?.cancel().catch(() => {}); return null; }
-      const d = await res.json();
-      groqKeyIdx = (idx + 1) % n;
-      return d?.choices?.[0]?.message?.content || '';
-    } catch { /* next key */ }
+  // Two passes over the key ring with a pause between. These keys are shared
+  // with find-and-queue, which keeps them near their per-minute cap, so all
+  // three can be 429 at one instant and fine a second later.
+  for (let round = 0; round < 2; round++) {
+    if (round) await sleep(2000);
+    for (let i = 0; i < n; i++) {
+      const idx = (groqKeyIdx + i) % n;
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (res.status === 429 || res.status >= 500) { res.body?.cancel().catch(() => {}); continue; }
+        if (!res.ok) { res.body?.cancel().catch(() => {}); return null; }
+        const d = await res.json();
+        groqKeyIdx = (idx + 1) % n;
+        return d?.choices?.[0]?.message?.content || '';
+      } catch { /* next key */ }
+    }
   }
   groqKeyIdx = (groqKeyIdx + 1) % n;
   return null;
@@ -263,7 +314,7 @@ Deno.serve(async (req: Request) => {
       .eq('status', 'new')
       .is('owner_contact', null)
       .lt('attempts', MAX_ATTEMPTS)
-      .order('ai_score', { ascending: false })
+      .order('ai_score', { ascending: false, nullsFirst: false })
       .limit(BATCH);
     if (error) throw new Error(error.message);
     if (!rows?.length) return json({ ...stats, reason: 'nothing to extract' });
@@ -322,7 +373,20 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      const cands = candidates(page.description, page.links, self);
+      // Bio first, then the post feed. A post-sourced contact is weighted one
+      // step lower: posts are full of cross-promo @mentions, while anything in
+      // the bio the owner deliberately put there.
+      const bioCands = candidates(page.description, page.links, self);
+      const postCands = candidates(page.posts, page.postLinks, self)
+        .map(c => ({ ...c, weight: Math.max(1, c.weight - 1) }));
+      const merged = new Map<string, Cand>();
+      for (const c of [...bioCands, ...postCands]) {
+        const k = c.value.toLowerCase();
+        const prev = merged.get(k);
+        if (!prev || prev.weight < c.weight) merged.set(k, c);
+      }
+      const cands = [...merged.values()].sort((a, b) => b.weight - a.weight);
+
       if (!cands.length) {
         stats.no_contact++;
         await finish({ ...base, status: 'no_contact', contact_type: 'none' }, 'extracted', { contact: null });
@@ -340,7 +404,7 @@ Deno.serve(async (req: Request) => {
       let chosen: string | null = best.value;
 
       if (!(best.type === 'email' || (best.weight >= 3 && !tied))) {
-        const pick = await pickContact(page.description, cands);
+        const pick = await pickContact(page.description + '\n' + page.posts.slice(0, 1500), cands);
         if (!pick.ok && attempts < MAX_ATTEMPTS) {
           // Groq down/rate-limited: leave the row in 'new' and retry next run
           // rather than committing a guess.
