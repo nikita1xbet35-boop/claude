@@ -32,12 +32,13 @@ const GROQ_KEYS = [
   Deno.env.get('GROQ_KEY_3') || '',
 ].filter(Boolean);
 
-const BATCH        = 40;     // capped in practice by DEADLINE_MS below
-const MAX_ATTEMPTS = 5;      // then the page is called dead and stops being retried
-const MIN_SUBS     = 300;    // below this a channel is not worth a manual message
-const DELAY_MS     = 700;    // between channels — still ~1 req/s at t.me
-const FETCH_MS     = 10_000;
-const DEADLINE_MS  = 110_000; // edge functions get ~150s; stop before the axe falls
+const BATCH          = 40;     // capped in practice by DEADLINE_MS below
+const MAX_ATTEMPTS   = 5;      // then the page is called dead and stops being retried
+const MIN_SUBS       = 1000;   // below this a channel is not worth a manual message
+const MAX_STALE_DAYS = 7;      // no post in this long → the channel reads as abandoned
+const DELAY_MS       = 700;    // between channels — still ~1 req/s at t.me
+const FETCH_MS       = 10_000;
+const DEADLINE_MS    = 110_000; // edge functions get ~150s; stop before the axe falls
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -92,21 +93,34 @@ function parseSubscribers(html: string): number | null {
 interface Page {
   ok: boolean; dead: boolean; name: string; description: string;
   subscribers: number | null; links: string[];
-  posts: string; postLinks: string[];
+  posts: string; postLinks: string[]; lastPostAt: string | null;
+}
+
+/** Every rendered message carries `<time datetime="2024-06-01T12:00:00+00:00">`.
+ *  The feed lists oldest→newest, so the LAST match on the page is the newest
+ *  post — that is the number that decides whether a channel is still alive. */
+function parseLastPostDate(html: string): string | null {
+  const re = /class="tgme_widget_message_date"[^>]*>\s*<time[^>]+datetime="([^"]+)"/gi;
+  let latest: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) latest = m[1];
+  if (!latest) return null;
+  const d = new Date(latest);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 /** The public post feed at t.me/s/<name>. The bio alone is a thin source — the
  *  first live run found a contact on 1 of 8 channels — because owners put "for
  *  ads write to @x" in a pinned or recent post far more often than in the bio.
  *  Same public page a browser gets; no login, no API. */
-async function fetchPreview(name: string): Promise<{ posts: string; links: string[] }> {
+async function fetchPreview(name: string): Promise<{ posts: string; links: string[]; lastPostAt: string | null }> {
   try {
     const res = await fetch(`https://t.me/s/${name}`, {
       headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' },
       signal: AbortSignal.timeout(FETCH_MS),
       redirect: 'follow',
     });
-    if (!res.ok) { res.body?.cancel().catch(() => {}); return { posts: '', links: [] }; }
+    if (!res.ok) { res.body?.cancel().catch(() => {}); return { posts: '', links: [], lastPostAt: null }; }
     const html = (await res.text()).slice(0, 600_000);
 
     const texts: string[] = [];
@@ -125,12 +139,12 @@ async function fetchPreview(name: string): Promise<{ posts: string; links: strin
       let h: RegExpExecArray | null;
       while ((h = hrefRe.exec(m[1])) !== null && links.length < 60) links.push(h[1]);
     }
-    return { posts: texts.join('\n').slice(0, 12_000), links };
-  } catch { return { posts: '', links: [] }; }
+    return { posts: texts.join('\n').slice(0, 12_000), links, lastPostAt: parseLastPostDate(html) };
+  } catch { return { posts: '', links: [], lastPostAt: null }; }
 }
 
 async function fetchChannelPage(url: string): Promise<Page> {
-  const empty: Page = { ok: false, dead: false, name: '', description: '', subscribers: null, links: [], posts: '', postLinks: [] };
+  const empty: Page = { ok: false, dead: false, name: '', description: '', subscribers: null, links: [], posts: '', postLinks: [], lastPostAt: null };
   let res: Response;
   try {
     res = await fetch(url, {
@@ -174,7 +188,7 @@ async function fetchChannelPage(url: string): Promise<Page> {
   return {
     ok: true, dead: false, name: title, description,
     subscribers: parseSubscribers(html), links,
-    posts: preview.posts, postLinks: preview.links,
+    posts: preview.posts, postLinks: preview.links, lastPostAt: preview.lastPostAt,
   };
 }
 
@@ -302,7 +316,7 @@ ${cands.map((c, i) => `${i}. ${c.value} (${c.type})`).join('\n')}
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
-  const stats = { processed: 0, found: 0, no_contact: 0, dead: 0, too_small: 0, retry: 0 };
+  const stats = { processed: 0, found: 0, no_contact: 0, dead: 0, too_small: 0, too_stale: 0, retry: 0 };
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
 
@@ -355,13 +369,17 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
+      // last_post_at is recorded on every reachable page, whether or not the
+      // channel survives the filters below — that is what makes "how many of
+      // the found channels are actually alive" answerable from the base later.
       const base: Record<string, unknown> = {
         subscribers: page.subscribers ?? ch.subscribers ?? null,
         description: page.description ? page.description.slice(0, 2000) : null,
+        last_post_at: page.lastPostAt,
       };
       if (page.name) base.channel_name = page.name.slice(0, 200);
 
-      // Audience size is the one hard filter here: a 50-subscriber channel is not
+      // Audience size is the first hard filter: a 50-subscriber channel is not
       // worth a hand-written message regardless of how well it scored on a snippet.
       if (page.subscribers !== null && page.subscribers < MIN_SUBS) {
         stats.too_small++;
@@ -371,6 +389,25 @@ Deno.serve(async (req: Request) => {
         );
         await sleep(DELAY_MS);
         continue;
+      }
+
+      // Second filter: a channel that has not posted in MAX_STALE_DAYS reads as
+      // abandoned — a cold message to its owner is unlikely to get a reply, and
+      // subscriber counts on dead channels are stale numbers, not a live audience.
+      // Only fires when the date is actually known: a preview that failed to load
+      // (feed disabled, timeout) must not read as "stale" — that would reject a
+      // live channel for a fetch hiccup instead of leaving it to retry.
+      if (page.lastPostAt) {
+        const ageDays = (Date.now() - new Date(page.lastPostAt).getTime()) / 86_400_000;
+        if (ageDays > MAX_STALE_DAYS) {
+          stats.too_stale++;
+          await finish(
+            { ...base, status: 'rejected', notes: `no post in ${Math.round(ageDays)}d`, reviewed_at: new Date().toISOString() },
+            'rejected', { reason: 'stale', last_post_at: page.lastPostAt, age_days: Math.round(ageDays) },
+          );
+          await sleep(DELAY_MS);
+          continue;
+        }
       }
 
       // Bio first, then the post feed. A post-sourced contact is weighted one
@@ -439,7 +476,7 @@ Deno.serve(async (req: Request) => {
     await quiet(supabase.from('error_log').insert([{
       level: 'info', service: 'extract-tg-contact',
       message: `processed=${stats.processed} found=${stats.found} no_contact=${stats.no_contact} `
-        + `dead=${stats.dead} small=${stats.too_small}`,
+        + `dead=${stats.dead} small=${stats.too_small} stale=${stats.too_stale}`,
     }]));
 
     return json(stats);
