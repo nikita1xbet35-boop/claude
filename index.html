@@ -12654,6 +12654,9 @@ function tgoPeriodBar(){
         style="padding:6px 10px;border-radius:8px;border:1px solid ${m==='custom'?'var(--accent2)':'var(--border2)'};background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);">
       <div style="flex:1;"></div>
       <button onclick="loadTGO()" style="padding:7px 14px;border-radius:9px;border:1px solid var(--border2);background:var(--bg);color:var(--text2);font-size:12px;font-family:var(--font-mono);cursor:pointer;">↻ Обновить</button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin:-14px 0 20px;">
+      ⓘ Агент сам отсеивает каналы младше 1000 подписчиков и без постов последние 7 дней — они попадают в «Отклонены» с причиной в подсказке при наведении на строку.
     </div>`;
 }
 
@@ -12833,14 +12836,54 @@ function tgoSetStatus(st){
 // поиска теряло бы фокус на каждом нажатии.
 function tgoSetSearch(v){ tgoFilter.q = v; renderTGOTable(); }
 
+// ── Сортировка таблицы ────────────────────────────────────────────────────
+let tgoSort = { key: 'found_at', dir: 'desc' };
+const TGO_SORT_COLS = {
+  id: 'ID', found_at: 'Найден', channel_name: 'Канал', subscribers: 'Подписчики',
+  geo: 'GEO', language: 'Язык', niche: 'Ниша', ai_score: 'Score',
+  last_post_at: 'Активность', status: 'Статус',
+};
+function tgoSortBy(key){
+  if(tgoSort.key === key) tgoSort.dir = tgoSort.dir === 'desc' ? 'asc' : 'desc';
+  // Текст по умолчанию — по алфавиту, числа и даты — по убыванию (сначала крупное/новое).
+  else { tgoSort.key = key; tgoSort.dir = (key === 'channel_name' || key === 'geo' || key === 'niche') ? 'asc' : 'desc'; }
+  renderTGOTable();
+}
+function tgoSortVal(r, key){
+  if(key === 'channel_name') return (r.channel_name || r.channel_url || '').toLowerCase();
+  if(key === 'found_at' || key === 'last_post_at') return r[key] ? new Date(r[key]).getTime() : null;
+  if(key === 'status') return tgoSt(r.status || 'new').label;
+  return r[key];
+}
+function tgoCompare(a, b, key){
+  const av = tgoSortVal(a, key), bv = tgoSortVal(b, key);
+  // Пустые значения — всегда в конец, независимо от направления сортировки,
+  // иначе "по возрастанию" выталкивало бы необработанные строки наверх.
+  if(av == null && bv == null) return 0;
+  if(av == null) return 1;
+  if(bv == null) return -1;
+  if(typeof av === 'string') return av.localeCompare(bv);
+  return av - bv;
+}
+
 function tgoVisibleRows(){
   const q = tgoFilter.q.trim().toLowerCase();
-  return tgoRows
+  const rows = tgoRows
     .filter(r => tgoInPeriod(r.found_at))
     .filter(r => tgoFilter.status === 'all' || (r.status || 'new') === tgoFilter.status)
     .filter(r => !q || [r.channel_name, r.channel_url, r.owner_contact, r.geo, r.niche, r.found_query]
-      .some(f => String(f || '').toLowerCase().includes(q)))
-    .sort((a,b) => new Date(b.found_at || 0) - new Date(a.found_at || 0));
+      .some(f => String(f || '').toLowerCase().includes(q)));
+  rows.sort((a,b) => {
+    const c = tgoCompare(a, b, tgoSort.key);
+    return tgoSort.dir === 'asc' ? c : -c;
+  });
+  return rows;
+}
+
+// Дней с последнего поста — используется и для цвета, и для подсказки.
+function tgoPostAge(iso){
+  if(!iso) return null;
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 }
 
 function renderTGOTable(){
@@ -12857,7 +12900,18 @@ function renderTGOTable(){
     + Object.keys(TGO_ST).map(k => chip(k, TGO_ST[k].label)).join('');
 
   const td = 'padding:9px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);vertical-align:middle;';
-  const th = 'padding:9px 10px;text-align:left;font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid var(--border2);white-space:nowrap;';
+  const thBase = 'padding:9px 10px;text-align:left;font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid var(--border2);white-space:nowrap;';
+
+  // Заголовок = кнопка сортировки. Не по всем колонкам есть смысл сортировать
+  // (контакт/черновик/действие — нет), для них просто статичный <th>.
+  const sortableTh = key => {
+    const active = tgoSort.key === key;
+    const arrow = active ? (tgoSort.dir === 'asc' ? ' ↑' : ' ↓') : '';
+    return `<th style="${thBase}padding:0;">
+      <button onclick="tgoSortBy('${key}')" style="width:100%;text-align:left;padding:9px 10px;background:none;border:none;cursor:pointer;font:inherit;color:${active?'var(--accent2)':'var(--text3)'};letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;">${TGO_SORT_COLS[key]}${arrow}</button>
+    </th>`;
+  };
+  const plainTh = label => `<th style="${thBase}">${label}</th>`;
 
   const body = rows.map(r => {
     const st = tgoSt(r.status || 'new');
@@ -12880,19 +12934,36 @@ function renderTGOTable(){
       ? `<button onclick="tgoShowDraft(${r.id})" style="padding:4px 9px;border-radius:6px;border:1px solid var(--border2);background:var(--bg);color:var(--accent2);font-size:11px;cursor:pointer;">Текст</button>`
       : '<span style="color:var(--text3);font-size:11px;">—</span>';
 
+    // Подписчики: настоящий "—" только когда канал уже обработан и число не
+    // получено (страница мертва/не парсится). Пока канал ещё в очереди
+    // (status='new', контакт не найден) — это "проверяется", а не дыра в базе.
+    const stillQueued = (r.status || 'new') === 'new';
+    const subsCell = r.subscribers
+      ? `${r.subscribers.toLocaleString('ru-RU')}`
+      : stillQueued
+        ? '<span style="color:var(--text3);font-style:italic;">проверяется…</span>'
+        : '<span style="color:var(--text3);">—</span>';
+
+    // Активность: дни с последнего поста, красным если давно молчит.
+    const age = tgoPostAge(r.last_post_at);
+    const activityCell = age == null
+      ? (stillQueued ? '<span style="color:var(--text3);font-style:italic;">—</span>' : '<span style="color:var(--text3);">неизв.</span>')
+      : `<span style="color:${age > 7 ? 'var(--red)' : age > 2 ? 'var(--amber)' : 'var(--green)'};" title="${tgoEsc(new Date(r.last_post_at).toLocaleString('ru-RU'))}">${age === 0 ? 'сегодня' : age + ' дн. назад'}</span>`;
+
     return `
-      <tr>
+      <tr title="${tgoEsc(r.notes || '')}">
         <td style="${td}font-family:var(--font-mono);color:var(--text3);">#${r.id}</td>
         <td style="${td}font-family:var(--font-mono);white-space:nowrap;">${r.found_at ? tgoEsc(new Date(r.found_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})) : '—'}</td>
         <td style="${td}max-width:260px;">
           <a href="${tgoEsc(r.channel_url)}" target="_blank" style="color:var(--text);text-decoration:none;font-weight:500;">${tgoEsc(name)}</a>
           <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${tgoEsc(r.channel_url)}</div>
         </td>
-        <td style="${td}font-family:var(--font-mono);">${r.subscribers ? r.subscribers.toLocaleString('ru-RU') : '—'}</td>
+        <td style="${td}font-family:var(--font-mono);">${subsCell}</td>
         <td style="${td}">${tgoEsc(r.geo || '—')}</td>
         <td style="${td}">${tgoEsc(r.language || '—')}</td>
         <td style="${td}">${tgoEsc(r.niche || '—')}</td>
         <td style="${td}font-family:var(--font-mono);color:${scoreColor};">${r.ai_score ?? '—'}</td>
+        <td style="${td}font-family:var(--font-mono);white-space:nowrap;">${activityCell}</td>
         <td style="${td}">${contact}</td>
         <td style="${td}"><span style="display:inline-block;padding:3px 8px;border-radius:6px;font-size:10px;font-family:var(--font-mono);background:${st.color}22;color:${st.color};white-space:nowrap;">${st.label}</span></td>
         <td style="${td}">${draftBtn}</td>
@@ -12914,10 +12985,10 @@ function renderTGOTable(){
       <div style="overflow-x:auto;max-height:640px;overflow-y:auto;">
         <table style="width:100%;border-collapse:collapse;">
           <thead style="position:sticky;top:0;background:var(--bg);z-index:1;"><tr>
-            <th style="${th}">ID</th><th style="${th}">Найден</th><th style="${th}">Канал</th>
-            <th style="${th}">Подписчики</th><th style="${th}">GEO</th><th style="${th}">Язык</th>
-            <th style="${th}">Ниша</th><th style="${th}">Score</th><th style="${th}">Контакт</th>
-            <th style="${th}">Статус</th><th style="${th}">Черновик</th><th style="${th}">Действие</th>
+            ${sortableTh('id')}${sortableTh('found_at')}${sortableTh('channel_name')}
+            ${sortableTh('subscribers')}${sortableTh('geo')}${sortableTh('language')}
+            ${sortableTh('niche')}${sortableTh('ai_score')}${sortableTh('last_post_at')}
+            ${plainTh('Контакт')}${sortableTh('status')}${plainTh('Черновик')}${plainTh('Действие')}
           </tr></thead>
           <tbody>${body}</tbody>
         </table>
