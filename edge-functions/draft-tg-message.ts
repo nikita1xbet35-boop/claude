@@ -6,7 +6,7 @@
 // channel (name, geo, niche, size), in the channel's own language, ending in a
 // question. It is stored on the row and shipped inside the lead card. This
 // function does not, and cannot, send anything: it has no Telegram token and
-// writes only to telegram_channels.draft_message.
+// writes only to tg_outreach_channels.draft_message.
 //
 // Rides the existing */15 Cloudflare tick.
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY (+GROQ_KEY_2/3),
@@ -142,7 +142,7 @@ Deno.serve(async (req: Request) => {
   try {
     if (!GROQ_KEYS.length) return json({ ...stats, reason: 'no Groq key configured' });
 
-    const { data: rows, error } = await supabase.from('telegram_channels')
+    const { data: rows, error } = await supabase.from('tg_outreach_channels')
       .select('id, channel_url, channel_name, subscribers, geo, language, niche, description, ai_score')
       .eq('status', 'new')
       .not('owner_contact', 'is', null)
@@ -165,9 +165,9 @@ Deno.serve(async (req: Request) => {
         await sleep(DELAY_MS);
         continue;
       }
-      await supabase.from('telegram_channels')
+      await supabase.from('tg_outreach_channels')
         .update({ draft_message: text, status: 'ready' }).eq('id', ch.id);
-      await quiet(supabase.from('telegram_channel_log')
+      await quiet(supabase.from('tg_outreach_log')
         .insert([{ channel_id: ch.id, action: 'drafted', metadata: { chars: text.length } }]));
       stats.drafted++;
       await sleep(DELAY_MS);

@@ -102,7 +102,7 @@ function card(ch: Row): string {
 
 // ── Operator decision (comes from the Worker's callback_query handler) ───────
 async function decide(id: number, action: string, userId?: string): Promise<string> {
-  const { data: row } = await supabase.from('telegram_channels')
+  const { data: row } = await supabase.from('tg_outreach_channels')
     .select('id, status, channel_url, channel_name').eq('id', id).maybeSingle();
   if (!row) return 'лид не найден';
   if (row.status === 'contacted' || row.status === 'rejected') {
@@ -111,16 +111,16 @@ async function decide(id: number, action: string, userId?: string): Promise<stri
 
   const now = new Date().toISOString();
   if (action === 'take') {
-    await supabase.from('telegram_channels')
+    await supabase.from('tg_outreach_channels')
       .update({ status: 'contacted', reviewed_at: now, contacted_at: now }).eq('id', id);
-    await quiet(supabase.from('telegram_channel_log')
+    await quiet(supabase.from('tg_outreach_log')
       .insert([{ channel_id: id, action: 'taken', user_id: userId ?? null }]));
     return `✅ Взят: ${row.channel_name || row.channel_url}`;
   }
 
-  await supabase.from('telegram_channels')
+  await supabase.from('tg_outreach_channels')
     .update({ status: 'rejected', reviewed_at: now }).eq('id', id);
-  await quiet(supabase.from('telegram_channel_log')
+  await quiet(supabase.from('tg_outreach_log')
     .insert([{ channel_id: id, action: 'rejected', user_id: userId ?? null }]));
   return `✖ Отклонён: ${row.channel_name || row.channel_url}`;
 }
@@ -166,7 +166,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const room = Math.max(0, DAILY_CAP - sentToday);
-    const { data: rows, error } = await supabase.from('telegram_channels')
+    const { data: rows, error } = await supabase.from('tg_outreach_channels')
       .select('id, channel_url, channel_name, subscribers, geo, language, niche, '
         + 'ai_score, ai_reasoning, owner_contact, contact_type, draft_message')
       .eq('status', 'ready')
@@ -192,9 +192,9 @@ Deno.serve(async (req: Request) => {
       // lead would silently vanish from the queue without ever being seen.
       if (!res?.ok) continue;
 
-      await supabase.from('telegram_channels')
+      await supabase.from('tg_outreach_channels')
         .update({ status: 'sent_to_bot' }).eq('id', ch.id);
-      await quiet(supabase.from('telegram_channel_log')
+      await quiet(supabase.from('tg_outreach_log')
         .insert([{ channel_id: ch.id, action: 'sent', metadata: { message_id: res?.result?.message_id } }]));
       stats.sent++;
       sentToday++;

@@ -11,11 +11,19 @@
 -- ready-to-paste draft" — the operator sends it by hand. Private invite links
 -- (t.me/+…, t.me/joinchat/…) are filtered out at discovery and never fetched.
 --
+-- NB the table is tg_outreach_channels, NOT telegram_channels. That name is
+-- already taken by the YouTube pipeline (channels stored there with
+-- partner_type='youtube', read by the dashboard and find-youtube). The first
+-- version of this migration used it and CREATE TABLE IF NOT EXISTS silently
+-- no-opped against that table, so the index on `status` failed and the whole
+-- migration rolled back. Sharing it would have been worse than failing: this
+-- pipeline would have been writing into the YouTube base.
+--
 -- Idempotent: safe to re-run.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ── Discovered channels ────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS public.telegram_channels (
+CREATE TABLE IF NOT EXISTS public.tg_outreach_channels (
   id            BIGSERIAL PRIMARY KEY,
   channel_url   TEXT UNIQUE NOT NULL,   -- canonical https://t.me/<username>
   channel_name  TEXT,
@@ -48,24 +56,24 @@ CREATE TABLE IF NOT EXISTS public.telegram_channels (
 
 -- The three pipeline stages all read "oldest interesting row in state X", so a
 -- composite (status, ai_score DESC) serves every one of them from one index.
-CREATE INDEX IF NOT EXISTS telegram_channels_status_score_idx
-  ON public.telegram_channels (status, ai_score DESC);
-CREATE INDEX IF NOT EXISTS telegram_channels_found_at_idx
-  ON public.telegram_channels (found_at DESC);
+CREATE INDEX IF NOT EXISTS tg_outreach_channels_status_score_idx
+  ON public.tg_outreach_channels (status, ai_score DESC);
+CREATE INDEX IF NOT EXISTS tg_outreach_channels_found_at_idx
+  ON public.tg_outreach_channels (found_at DESC);
 
 -- ── Audit trail ────────────────────────────────────────────────────────────
 -- Every state change an operator or a job makes, so "why is this channel
 -- rejected" is answerable after the fact.
-CREATE TABLE IF NOT EXISTS public.telegram_channel_log (
+CREATE TABLE IF NOT EXISTS public.tg_outreach_log (
   id         BIGSERIAL PRIMARY KEY,
-  channel_id BIGINT REFERENCES public.telegram_channels(id) ON DELETE CASCADE,
+  channel_id BIGINT REFERENCES public.tg_outreach_channels(id) ON DELETE CASCADE,
   action     TEXT,                      -- created | extracted | drafted | sent | taken | rejected | dead
   user_id    TEXT,                      -- Telegram user id when an operator acted
   metadata   JSONB,
   created_at TIMESTAMPTZ DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS telegram_channel_log_channel_idx
-  ON public.telegram_channel_log (channel_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS tg_outreach_log_channel_idx
+  ON public.tg_outreach_log (channel_id, created_at DESC);
 
 -- ── Search queries ─────────────────────────────────────────────────────────
 -- In the table rather than in code, for the same reason keywords are: retuning
@@ -84,15 +92,15 @@ CREATE INDEX IF NOT EXISTS tg_search_queries_rotation_idx
   ON public.tg_search_queries (last_run_at NULLS FIRST) WHERE active;
 
 -- ── Access (RLS off + grants to anon, matching the rest of this project) ────
-ALTER TABLE public.telegram_channels    DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.telegram_channel_log DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tg_outreach_channels    DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tg_outreach_log DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tg_search_queries    DISABLE ROW LEVEL SECURITY;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.telegram_channels    TO anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.telegram_channel_log TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.tg_outreach_channels    TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.tg_outreach_log TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.tg_search_queries    TO anon, authenticated;
-GRANT USAGE, SELECT ON SEQUENCE public.telegram_channels_id_seq    TO anon, authenticated;
-GRANT USAGE, SELECT ON SEQUENCE public.telegram_channel_log_id_seq TO anon, authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.tg_outreach_channels_id_seq    TO anon, authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.tg_outreach_log_id_seq TO anon, authenticated;
 GRANT USAGE, SELECT ON SEQUENCE public.tg_search_queries_id_seq    TO anon, authenticated;
 
 -- ── Seed queries ───────────────────────────────────────────────────────────
