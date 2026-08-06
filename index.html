@@ -1007,6 +1007,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -1046,6 +1047,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -1267,6 +1269,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -1371,6 +1374,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -1489,6 +1493,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -1608,6 +1613,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -1722,6 +1728,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -1759,6 +1766,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab active" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
 
     </nav>
@@ -2063,6 +2071,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -2220,6 +2229,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -2375,6 +2385,53 @@
   </div>
 </div>
 
+<!-- PAGE: TELEGRAM OUTREACH (полная база + статистика по дням) -->
+<div class="page" id="page-tgo">
+  <header class="topbar">
+    <div class="logo" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="goTo('dashboard',this)">
+      <svg class="logo-icon" width="22" height="22" viewBox="0 0 36 36" fill="none">
+        <rect x="2" y="2" width="14" height="14" rx="3" fill="var(--accent)" opacity="1"/>
+        <rect x="20" y="2" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".7"/>
+        <rect x="2" y="20" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".5"/>
+        <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
+      </svg>
+      Affiliate<span>OS</span>
+    </div>
+    <nav class="nav-tabs">
+      <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
+      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
+      <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
+      <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
+      <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
+      <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
+      <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
+      <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
+      <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
+      <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab active" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
+      <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
+    </nav>
+    <div class="topbar-right">
+      <span class="badge-count" id="tgo-badge">0 каналов</span>
+      <div class="status-dot"></div>
+    </div>
+  </header>
+  <div id="tgo-content" style="flex:1;overflow-y:auto;padding:28px 32px;background:var(--bg2);">
+    <div style="text-align:center;color:var(--text3);padding:80px;font-size:13px;">Загрузка...</div>
+  </div>
+</div>
+
+<!-- TGO: черновик сообщения -->
+<div id="tgo-draft-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding-top:70px;">
+  <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;width:640px;max-width:92vw;max-height:78vh;display:flex;flex-direction:column;animation:fadeUp .2s cubic-bezier(.16,1,.3,1) both;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <div id="tgo-draft-title" style="font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--text);">Черновик</div>
+      <button onclick="tgoCloseDraft()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;line-height:1;">×</button>
+    </div>
+    <div id="tgo-draft-body" style="flex:1;overflow-y:auto;padding:18px 20px;"></div>
+  </div>
+</div>
+
 <!-- PAGE: BLACKLIST -->
 <div class="page" id="page-blacklist">
   <header class="topbar">
@@ -2402,6 +2459,7 @@
       <button class="nav-tab active" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -2499,6 +2557,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -2642,6 +2701,7 @@
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab active" onclick="goTo('bases',this)">🗂 Базы</button>
     </nav>
     <div class="topbar-right">
@@ -3910,6 +3970,7 @@ function goTo(page, el){
   if(page === 'yt') initYT();
   if(page === 'bases') initBases();
   if(page === 'tg') initTG();
+  if(page === 'tgo') initTGO();
   if(page === 'analytics') loadAutomatTab();
   if(page === 'gmail') initGmailOutreach();
 }
@@ -11621,6 +11682,7 @@ try {
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -11672,6 +11734,7 @@ try {
       <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
       <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
       <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
+      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
       <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
       
     </nav>
@@ -12464,6 +12527,443 @@ try {
   setTimeout(refreshInboxBadge, 2500);
   setInterval(refreshInboxBadge, 120000);
 })();
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  ВКЛАДКА TELEGRAM — вся база outreach-агента + статистика по дням
+//
+//  Лиды из этого пайплайна приходят двумя путями: карточкой в бота (быстрое
+//  уведомление) и сюда (полная база). В боте карточек ровно столько, сколько
+//  каналов дошло до конца воронки; здесь видно ВСЁ, что агент нашёл, включая
+//  отсеянное на каждом шаге — иначе номера в карточках (#39, #45) выглядят
+//  случайными, хотя это просто id строки.
+//
+//  Решение «беру / отклонить» тоже принимается здесь, а не в боте: одно место
+//  вместо двух, и статус виден рядом с остальной базой.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let tgoRows   = [];    // tg_outreach_channels целиком
+let tgoLog    = [];    // tg_outreach_log — из него берётся «отправлено/взято по дням»
+let tgoLoaded = false;
+let tgoPeriod = { mode: 'all', from: null, to: null };
+let tgoFilter = { status: 'all', q: '' };
+
+const TGO_ST = {
+  new:         { label: 'Ждут контакт',      color: 'var(--blue)'    },
+  no_contact:  { label: 'Без контакта',      color: 'var(--text3)'   },
+  dead:        { label: 'Недоступны',        color: 'var(--red)'     },
+  ready:       { label: 'Готовы к отправке', color: 'var(--amber)'   },
+  sent_to_bot: { label: 'Отправлены в бот',  color: 'var(--accent2)' },
+  contacted:   { label: 'Взяты в работу',    color: 'var(--green)'   },
+  rejected:    { label: 'Отклонены',         color: 'var(--red)'     },
+};
+const tgoSt = s => TGO_ST[s] || { label: s || '—', color: 'var(--text3)' };
+
+const tgoEsc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const tgoDayKey = d => {
+  const x = new Date(d);
+  return x.getFullYear() + '-' + String(x.getMonth()+1).padStart(2,'0') + '-' + String(x.getDate()).padStart(2,'0');
+};
+
+// ── Загрузка ───────────────────────────────────────────────────────────────
+function initTGO(){
+  if(tgoLoaded) renderTGO();      // мгновенно показываем то, что уже есть
+  loadTGO();                      // и молча обновляем
+}
+
+async function loadTGO(){
+  try {
+    // Supabase отдаёт максимум 1000 строк за запрос — пагинируем, иначе база
+    // тихо обрежется и статистика соврёт.
+    const PAGE = 1000;
+    const pull = async (table, order) => {
+      let from = 0, out = [];
+      while(true){
+        const { data, error } = await sb.from(table).select('*')
+          .order(order, { ascending: false }).range(from, from + PAGE - 1);
+        if(error) throw error;
+        out = out.concat(data || []);
+        if(!data || data.length < PAGE || out.length >= 20000) break;
+        from += PAGE;
+      }
+      return out;
+    };
+    const [rows, log] = await Promise.all([
+      pull('tg_outreach_channels', 'found_at'),
+      pull('tg_outreach_log', 'created_at').catch(() => []),
+    ]);
+    tgoRows = rows; tgoLog = log; tgoLoaded = true;
+    renderTGO();
+  } catch(e){
+    const el = document.getElementById('tgo-content');
+    if(el && !tgoLoaded) el.innerHTML =
+      '<div style="text-align:center;color:var(--text3);padding:80px;font-size:13px;">Не удалось загрузить базу: '
+      + tgoEsc(e.message || e) + '</div>';
+  }
+}
+
+// ── Период ─────────────────────────────────────────────────────────────────
+function tgoSetPeriod(mode){ tgoPeriod = { mode, from:null, to:null }; renderTGO(); }
+function tgoSetCustom(){
+  const f = (document.getElementById('tgo-from')||{}).value || null;
+  const t = (document.getElementById('tgo-to')||{}).value || null;
+  if(!f && !t){ tgoSetPeriod('all'); return; }
+  tgoPeriod = { mode:'custom', from:f, to:t };
+  renderTGO();
+}
+function tgoRange(){
+  const { mode, from, to } = tgoPeriod;
+  const now = new Date();
+  let start = null, end = null;
+  if(mode === 'today'){ start = new Date(now); start.setHours(0,0,0,0); }
+  else if(mode === '7d'){ start = new Date(now); start.setDate(now.getDate()-6); start.setHours(0,0,0,0); }
+  else if(mode === '30d'){ start = new Date(now); start.setDate(now.getDate()-29); start.setHours(0,0,0,0); }
+  else if(mode === 'custom'){
+    if(from){ start = new Date(from); start.setHours(0,0,0,0); }
+    if(to){ end = new Date(to); end.setHours(23,59,59,999); }
+  }
+  return { start, end };
+}
+function tgoInPeriod(ts){
+  if(tgoPeriod.mode === 'all') return true;
+  if(!ts) return false;
+  const { start, end } = tgoRange();
+  const d = new Date(ts);
+  if(start && d < start) return false;
+  if(end && d > end) return false;
+  return true;
+}
+function tgoPeriodBar(){
+  const m = tgoPeriod.mode;
+  const btn = (mode,label) =>
+    '<button onclick="tgoSetPeriod(\'' + mode + '\')" style="padding:7px 14px;border-radius:9px;border:1px solid '
+    + (m===mode?'var(--accent2)':'var(--border2)') + ';background:' + (m===mode?'var(--accent2)':'var(--bg)')
+    + ';color:' + (m===mode?'#fff':'var(--text2)')
+    + ';font-size:12px;font-family:var(--font-mono);cursor:pointer;transition:all .15s;">' + label + '</button>';
+  return `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:22px;">
+      ${btn('today','Сегодня')}${btn('7d','7 дней')}${btn('30d','30 дней')}${btn('all','Всё время')}
+      <div style="width:1px;height:24px;background:var(--border2);margin:0 4px;"></div>
+      <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">от</span>
+      <input type="date" id="tgo-from" value="${tgoPeriod.from||''}" onchange="tgoSetCustom()"
+        style="padding:6px 10px;border-radius:8px;border:1px solid ${m==='custom'?'var(--accent2)':'var(--border2)'};background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);">
+      <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">до</span>
+      <input type="date" id="tgo-to" value="${tgoPeriod.to||''}" onchange="tgoSetCustom()"
+        style="padding:6px 10px;border-radius:8px;border:1px solid ${m==='custom'?'var(--accent2)':'var(--border2)'};background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);">
+      <div style="flex:1;"></div>
+      <button onclick="loadTGO()" style="padding:7px 14px;border-radius:9px;border:1px solid var(--border2);background:var(--bg);color:var(--text2);font-size:12px;font-family:var(--font-mono);cursor:pointer;">↻ Обновить</button>
+    </div>`;
+}
+
+// ── Рендер ─────────────────────────────────────────────────────────────────
+function renderTGO(){
+  const el = document.getElementById('tgo-content');
+  if(!el) return;
+  const badge = document.getElementById('tgo-badge');
+  if(badge) badge.textContent = tgoRows.length + ' каналов';
+
+  if(!tgoRows.length){
+    el.innerHTML = tgoPeriodBar()
+      + '<div style="text-align:center;color:var(--text3);padding:70px;font-size:13px;">База пуста. Агент сканирует каналы каждые 15 минут — первые строки появятся сами.</div>';
+    return;
+  }
+
+  const rows = tgoRows.filter(r => tgoInPeriod(r.found_at));
+  const total = rows.length;
+
+  const byStatus = {}, byGeo = {}, byNiche = {};
+  let withContact = 0, drafted = 0, sent = 0, taken = 0, rejected = 0, scoreSum = 0, scoreN = 0;
+  rows.forEach(r => {
+    const st = r.status || 'new';
+    byStatus[st] = (byStatus[st]||0) + 1;
+    if(r.owner_contact) withContact++;
+    if(r.draft_message) drafted++;
+    if(st === 'sent_to_bot' || st === 'contacted' || st === 'rejected') sent++;
+    if(st === 'contacted') taken++;
+    if(st === 'rejected') rejected++;
+    if(r.ai_score != null){ scoreSum += r.ai_score; scoreN++; }
+    byGeo[r.geo || '—'] = (byGeo[r.geo || '—']||0) + 1;
+    byNiche[r.niche || '—'] = (byNiche[r.niche || '—']||0) + 1;
+  });
+  const avgScore = scoreN ? Math.round(scoreSum/scoreN) : 0;
+  const conv = sent ? Math.round(taken/sent*100) : 0;
+
+  const kpi = (icon,label,val,color,sub) => `
+    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;padding:18px 20px;">
+      <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px;">${icon} ${label}</div>
+      <div style="font-size:32px;font-weight:500;font-family:var(--font-mono);color:${color};">${val}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;">${sub}</div>
+    </div>`;
+
+  const pct = n => total ? Math.round(n/total*100) + '% от найденных' : '—';
+
+  el.innerHTML = tgoPeriodBar() + `
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:22px;">
+      ${kpi('◎','Найдено каналов', total,       'var(--accent2)', tgoPeriod.mode==='all' ? 'за всё время' : 'за период')}
+      ${kpi('✉','С контактом',     withContact, 'var(--blue)',    pct(withContact))}
+      ${kpi('✍','С черновиком',    drafted,     'var(--purple)',  pct(drafted))}
+      ${kpi('📨','Карточек в бот',  sent,        'var(--amber)',   pct(sent))}
+      ${kpi('✓','Взято в работу',  taken,       'var(--green)',   conv + '% от отправленных')}
+      ${kpi('★','Средний score',   avgScore,    'var(--text)',    scoreN + ' оценено')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:14px;">
+      ${tgoDailyCard(rows)}
+      ${tgoStatusCard(byStatus, total)}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px;">
+      ${tgoBarsCard('Топ GEO', byGeo, total, 'var(--blue)')}
+      ${tgoBarsCard('По нише', byNiche, total, 'var(--accent2)')}
+    </div>
+
+    <div id="tgo-table-wrap"></div>`;
+
+  renderTGOTable();
+}
+
+// Воронка по дням: найдено / отправлено карточкой / взято в работу.
+// «Найдено» берётся из самих каналов, «отправлено» и «взято» — из журнала,
+// потому что статус в строке хранит только последнее состояние.
+function tgoDailyCard(rows){
+  const { mode } = tgoPeriod;
+  const days = mode === 'today' ? 1 : mode === '7d' ? 7 : mode === '30d' ? 30 : 14;
+  const keys = [];
+  const base = new Date();
+  for(let i = days - 1; i >= 0; i--){
+    const d = new Date(base); d.setDate(base.getDate() - i);
+    keys.push(tgoDayKey(d));
+  }
+  const found = {}, sent = {}, taken = {};
+  rows.forEach(r => { if(r.found_at){ const k = tgoDayKey(r.found_at); found[k] = (found[k]||0)+1; } });
+  tgoLog.forEach(l => {
+    if(!l.created_at) return;
+    const k = tgoDayKey(l.created_at);
+    if(l.action === 'sent')  sent[k]  = (sent[k]||0)+1;
+    if(l.action === 'taken') taken[k] = (taken[k]||0)+1;
+  });
+  const max = Math.max(1, ...keys.map(k => Math.max(found[k]||0, sent[k]||0, taken[k]||0)));
+
+  const cols = keys.map(k => {
+    const f = found[k]||0, s = sent[k]||0, t = taken[k]||0;
+    const col = (v,c) => `<div title="${v}" style="width:5px;height:${Math.round(v/max*110)}px;min-height:${v?2:0}px;background:${c};border-radius:2px 2px 0 0;"></div>`;
+    const dd = k.slice(8) + '.' + k.slice(5,7);
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;min-width:0;">
+        <div style="display:flex;align-items:flex-end;gap:2px;height:110px;">
+          ${col(f,'var(--accent2)')}${col(s,'var(--amber)')}${col(t,'var(--green)')}
+        </div>
+        <span style="font-size:9px;color:var(--text3);font-family:var(--font-mono);white-space:nowrap;">${dd}</span>
+      </div>`;
+  }).join('');
+
+  const dot = (c,l) => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);"><span style="width:8px;height:8px;border-radius:50%;background:${c};"></span>${l}</span>`;
+  return `
+    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;padding:22px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;">По дням</div>
+        <div style="display:flex;gap:12px;">${dot('var(--accent2)','найдено')}${dot('var(--amber)','в бот')}${dot('var(--green)','взято')}</div>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:3px;">${cols}</div>
+    </div>`;
+}
+
+function tgoStatusCard(byStatus, total){
+  const segs = Object.entries(byStatus)
+    .sort((a,b) => b[1]-a[1])
+    .map(([k,v]) => ({ val:v, color:tgoSt(k).color, label:tgoSt(k).label, key:k }));
+  const sum = segs.reduce((s,x) => s+x.val, 0);
+  let cum = 0;
+  const r = 46, cx = 60, cy = 60, stroke = 14, circ = 2*Math.PI*r;
+  const arcs = segs.map(s => {
+    const dash = (s.val/sum)*circ, offset = circ - cum*circ;
+    cum += s.val/sum;
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${stroke}" stroke-dasharray="${dash} ${circ-dash}" stroke-dashoffset="${offset}" style="transform:rotate(-90deg);transform-origin:${cx}px ${cy}px;"></circle>`;
+  }).join('');
+  return `
+    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;padding:22px;">
+      <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:16px;">По статусам</div>
+      <div style="display:flex;align-items:center;gap:20px;">
+        <svg width="120" height="120" viewBox="0 0 120 120">${arcs}
+          <circle cx="${cx}" cy="${cy}" r="${r-stroke/2-2}" fill="var(--bg3)"></circle>
+          <text x="${cx}" y="${cy+5}" text-anchor="middle" fill="var(--text)" font-size="18" font-family="DM Mono,monospace" font-weight="500">${total}</text>
+        </svg>
+        <div style="display:flex;flex-direction:column;gap:6px;flex:1;">
+          ${segs.map(s => `
+            <div onclick="tgoSetStatus('${s.key}')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <div style="width:8px;height:8px;border-radius:50%;background:${s.color};flex-shrink:0;"></div>
+                <span style="font-size:11px;color:var(--text2);">${s.label}</span>
+              </div>
+              <span style="font-size:11px;font-family:var(--font-mono);color:var(--text);">${s.val}</span>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function tgoBarsCard(title, map, total, color){
+  const top = Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0,8);
+  if(!top.length) return '';
+  const max = top[0][1];
+  return `
+    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;padding:22px;">
+      <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:16px;">${title}</div>
+      <div style="display:flex;flex-direction:column;gap:9px;">
+        ${top.map(([k,v]) => `
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+              <span style="font-size:12px;color:var(--text);">${tgoEsc(k)}</span>
+              <span style="font-size:11px;color:var(--text2);font-family:var(--font-mono);">${v} · ${Math.round(v/total*100)}%</span>
+            </div>
+            <div style="height:8px;background:var(--bg4);border-radius:4px;overflow:hidden;"><div style="height:100%;width:${Math.round(v/max*100)}%;background:${color};border-radius:4px;transition:width .6s ease;"></div></div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+// ── Таблица: вся база ──────────────────────────────────────────────────────
+function tgoSetStatus(st){
+  tgoFilter.status = (tgoFilter.status === st) ? 'all' : st;
+  renderTGOTable();
+}
+// Ищем в отдельной функции, чтобы перерисовывать только таблицу — иначе поле
+// поиска теряло бы фокус на каждом нажатии.
+function tgoSetSearch(v){ tgoFilter.q = v; renderTGOTable(); }
+
+function tgoVisibleRows(){
+  const q = tgoFilter.q.trim().toLowerCase();
+  return tgoRows
+    .filter(r => tgoInPeriod(r.found_at))
+    .filter(r => tgoFilter.status === 'all' || (r.status || 'new') === tgoFilter.status)
+    .filter(r => !q || [r.channel_name, r.channel_url, r.owner_contact, r.geo, r.niche, r.found_query]
+      .some(f => String(f || '').toLowerCase().includes(q)))
+    .sort((a,b) => new Date(b.found_at || 0) - new Date(a.found_at || 0));
+}
+
+function renderTGOTable(){
+  const wrap = document.getElementById('tgo-table-wrap');
+  if(!wrap) return;
+  const rows = tgoVisibleRows();
+
+  const chip = (key,label) => {
+    const on = tgoFilter.status === key;
+    return `<button onclick="tgoSetStatus('${key}')" style="padding:5px 11px;border-radius:7px;border:1px solid ${on?'var(--accent2)':'var(--border2)'};background:${on?'var(--accent2)':'var(--bg)'};color:${on?'#fff':'var(--text2)'};font-size:11px;font-family:var(--font-mono);cursor:pointer;">${label}</button>`;
+  };
+  const allOn = tgoFilter.status === 'all';
+  const chips = `<button onclick="tgoSetStatus('all')" style="padding:5px 11px;border-radius:7px;border:1px solid ${allOn?'var(--accent2)':'var(--border2)'};background:${allOn?'var(--accent2)':'var(--bg)'};color:${allOn?'#fff':'var(--text2)'};font-size:11px;font-family:var(--font-mono);cursor:pointer;">Все</button>`
+    + Object.keys(TGO_ST).map(k => chip(k, TGO_ST[k].label)).join('');
+
+  const td = 'padding:9px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);vertical-align:middle;';
+  const th = 'padding:9px 10px;text-align:left;font-size:10px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid var(--border2);white-space:nowrap;';
+
+  const body = rows.map(r => {
+    const st = tgoSt(r.status || 'new');
+    const name = r.channel_name || r.channel_url;
+    const contact = r.owner_contact
+      ? (r.contact_type === 'email'
+          ? `<span style="font-family:var(--font-mono);font-size:11px;">${tgoEsc(r.owner_contact)}</span>`
+          : `<a href="https://t.me/${tgoEsc(String(r.owner_contact).replace(/^@/,''))}" target="_blank" style="color:var(--accent2);text-decoration:none;font-family:var(--font-mono);font-size:11px;">${tgoEsc(r.owner_contact)}</a>`)
+      : '<span style="color:var(--text3);">—</span>';
+    const scoreColor = r.ai_score == null ? 'var(--text3)'
+      : r.ai_score >= 70 ? 'var(--green)' : r.ai_score >= 40 ? 'var(--amber)' : 'var(--red)';
+    const decided = r.status === 'contacted' || r.status === 'rejected';
+    const act = decided
+      ? '<span style="color:var(--text3);font-size:11px;">—</span>'
+      : `<div style="display:flex;gap:4px;">
+           <button onclick="tgoDecide(${r.id},'take')" style="padding:4px 9px;border-radius:6px;border:none;background:var(--green);color:#fff;font-size:11px;cursor:pointer;">Беру</button>
+           <button onclick="tgoDecide(${r.id},'reject')" style="padding:4px 9px;border-radius:6px;border:1px solid var(--border2);background:var(--bg);color:var(--text2);font-size:11px;cursor:pointer;">Отклонить</button>
+         </div>`;
+    const draftBtn = r.draft_message
+      ? `<button onclick="tgoShowDraft(${r.id})" style="padding:4px 9px;border-radius:6px;border:1px solid var(--border2);background:var(--bg);color:var(--accent2);font-size:11px;cursor:pointer;">Текст</button>`
+      : '<span style="color:var(--text3);font-size:11px;">—</span>';
+
+    return `
+      <tr>
+        <td style="${td}font-family:var(--font-mono);color:var(--text3);">#${r.id}</td>
+        <td style="${td}font-family:var(--font-mono);white-space:nowrap;">${r.found_at ? tgoEsc(new Date(r.found_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})) : '—'}</td>
+        <td style="${td}max-width:260px;">
+          <a href="${tgoEsc(r.channel_url)}" target="_blank" style="color:var(--text);text-decoration:none;font-weight:500;">${tgoEsc(name)}</a>
+          <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${tgoEsc(r.channel_url)}</div>
+        </td>
+        <td style="${td}font-family:var(--font-mono);">${r.subscribers ? r.subscribers.toLocaleString('ru-RU') : '—'}</td>
+        <td style="${td}">${tgoEsc(r.geo || '—')}</td>
+        <td style="${td}">${tgoEsc(r.language || '—')}</td>
+        <td style="${td}">${tgoEsc(r.niche || '—')}</td>
+        <td style="${td}font-family:var(--font-mono);color:${scoreColor};">${r.ai_score ?? '—'}</td>
+        <td style="${td}">${contact}</td>
+        <td style="${td}"><span style="display:inline-block;padding:3px 8px;border-radius:6px;font-size:10px;font-family:var(--font-mono);background:${st.color}22;color:${st.color};white-space:nowrap;">${st.label}</span></td>
+        <td style="${td}">${draftBtn}</td>
+        <td style="${td}">${act}</td>
+      </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div style="background:var(--bg);border:1px solid var(--border2);border-radius:14px;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:16px 18px;border-bottom:1px solid var(--border);">
+        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-right:4px;">Вся база</div>
+        ${chips}
+        <div style="flex:1;"></div>
+        <input value="${tgoEsc(tgoFilter.q)}" oninput="tgoSetSearch(this.value)" placeholder="поиск по названию, контакту, GEO…"
+          style="width:240px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-size:12px;padding:6px 10px;border-radius:7px;outline:none;">
+        <span style="font-size:11px;color:var(--text3);font-family:var(--font-mono);">${rows.length}</span>
+      </div>
+      ${rows.length ? `
+      <div style="overflow-x:auto;max-height:640px;overflow-y:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead style="position:sticky;top:0;background:var(--bg);z-index:1;"><tr>
+            <th style="${th}">ID</th><th style="${th}">Найден</th><th style="${th}">Канал</th>
+            <th style="${th}">Подписчики</th><th style="${th}">GEO</th><th style="${th}">Язык</th>
+            <th style="${th}">Ниша</th><th style="${th}">Score</th><th style="${th}">Контакт</th>
+            <th style="${th}">Статус</th><th style="${th}">Черновик</th><th style="${th}">Действие</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>` : '<div style="padding:50px;text-align:center;color:var(--text3);font-size:13px;">Ничего не найдено по этому фильтру.</div>'}
+    </div>`;
+}
+
+// ── Действия ───────────────────────────────────────────────────────────────
+// Статус меняем через send-tg-leads, а не прямым UPDATE: там же пишется журнал,
+// и переход остаётся в одном месте для бота и для сайта.
+async function tgoDecide(id, action){
+  const row = tgoRows.find(r => r.id === id);
+  const prev = row ? row.status : null;
+  if(row){ row.status = action === 'take' ? 'contacted' : 'rejected'; renderTGOTable(); }
+  try {
+    const res = await fetch(FUNCTIONS_URL + '/send-tg-leads', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'apikey':SUPABASE_KEY, 'Authorization':'Bearer '+SUPABASE_KEY },
+      body: JSON.stringify({ decide: { id, action } }),
+    });
+    const d = await res.json();
+    if(!res.ok || d.error) throw new Error(d.error || 'ошибка');
+    renderTGO();
+  } catch(e){
+    if(row){ row.status = prev; renderTGOTable(); }
+    showError('Не удалось: ' + (e.message || e));
+  }
+}
+
+function tgoShowDraft(id){
+  const r = tgoRows.find(x => x.id === id);
+  if(!r) return;
+  document.getElementById('tgo-draft-title').textContent = (r.channel_name || r.channel_url) + ' — черновик';
+  document.getElementById('tgo-draft-body').innerHTML = `
+    <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px;">${tgoEsc(r.channel_url)}</div>
+    ${r.ai_reasoning ? `<div style="font-size:12px;color:var(--text2);background:var(--bg3);border-radius:8px;padding:10px 12px;margin-bottom:12px;">🧠 ${tgoEsc(r.ai_reasoning)}</div>` : ''}
+    <div style="white-space:pre-wrap;font-size:13px;line-height:1.55;color:var(--text);background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:14px;">${tgoEsc(r.draft_message || '')}</div>
+    <button onclick="tgoCopyDraft(${r.id})" style="margin-top:12px;padding:7px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:12px;cursor:pointer;">Скопировать</button>`;
+  document.getElementById('tgo-draft-modal').style.display = 'flex';
+}
+function tgoCloseDraft(){ document.getElementById('tgo-draft-modal').style.display = 'none'; }
+function tgoCopyDraft(id){
+  const r = tgoRows.find(x => x.id === id);
+  if(!r) return;
+  navigator.clipboard.writeText(r.draft_message || '').then(() => toast()).catch(() => {});
+}
 </script>
 
 </body>
