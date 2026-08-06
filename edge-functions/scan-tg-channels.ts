@@ -42,7 +42,7 @@ const SERPAPI_ACCOUNTS = [
 // Volume mode: this is discovery only — no message ever reaches a channel owner
 // from here — so it runs flat out on every tick to build the base as fast as the
 // free search source allows.
-const QUERIES_PER_RUN   = 6;
+const QUERIES_PER_RUN   = 4;
 const RESULTS_PER_QUERY = 30;
 const SCORE_CHUNK       = 20;   // candidates per Groq call — a 180-item prompt is
                                 // both slow and past what an 8b model reads reliably
@@ -226,24 +226,31 @@ let groqKeyIdx = 0;
 
 /** Groq chat with per-key rotation: a 429 retries on the next key rather than
  *  dropping the batch (no sleeping — we can't stall inside an edge function). */
+// Two passes over the key ring with a pause between them. One pass was not
+// enough: these keys are shared with find-and-queue, which keeps them near their
+// per-minute cap, so all three can be 429 at the same instant and be fine a
+// second later.
 async function groqChat(body: Record<string, unknown>): Promise<string | null> {
   const n = GROQ_KEYS.length;
   if (!n) return null;
-  for (let i = 0; i < n; i++) {
-    const idx = (groqKeyIdx + i) % n;
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(25_000),
-      });
-      if (res.status === 429 || res.status >= 500) { res.body?.cancel().catch(() => {}); continue; }
-      if (!res.ok) { res.body?.cancel().catch(() => {}); return null; }
-      const d = await res.json();
-      groqKeyIdx = (idx + 1) % n;
-      return d?.choices?.[0]?.message?.content || '';
-    } catch { /* next key */ }
+  for (let round = 0; round < 2; round++) {
+    if (round) await sleep(2000);
+    for (let i = 0; i < n; i++) {
+      const idx = (groqKeyIdx + i) % n;
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(25_000),
+        });
+        if (res.status === 429 || res.status >= 500) { res.body?.cancel().catch(() => {}); continue; }
+        if (!res.ok) { res.body?.cancel().catch(() => {}); return null; }
+        const d = await res.json();
+        groqKeyIdx = (idx + 1) % n;
+        return d?.choices?.[0]?.message?.content || '';
+      } catch { /* next key */ }
+    }
   }
   groqKeyIdx = (groqKeyIdx + 1) % n;
   return null;
@@ -315,7 +322,7 @@ Deno.serve(async (req: Request) => {
 
   const stats = {
     ran: false, queries: [] as string[], candidates: 0, fresh: 0,
-    inserted: 0, source: USE_SERP ? 'serpapi' : 'ddg', reason: '',
+    inserted: 0, unscored: 0, source: USE_SERP ? 'serpapi' : 'ddg', reason: '',
   };
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -380,7 +387,10 @@ Deno.serve(async (req: Request) => {
       await supabase.from('tg_search_queries')
         .update({ runs: (q.runs ?? 0) + 1, last_run_at: new Date().toISOString() })
         .eq('id', q.id);
-      await sleep(700);
+      // 2s between queries. At 700ms DuckDuckGo started returning empty pages
+      // partway through a 6-query run — it throttles bursts from one IP, and the
+      // empty-streak guard below then aborted the rest of the run.
+      await sleep(2000);
     }
     stats.candidates = cands.length;
     if (!cands.length) { stats.reason = 'no t.me results'; return json(stats); }
@@ -407,20 +417,27 @@ Deno.serve(async (req: Request) => {
       for (const [j, v] of await scoreBatch(chunk)) verdicts.set(i + j, v);
     }
 
+    // A candidate with no verdict is KEPT, not dropped. Groq shares its keys with
+    // find-and-queue and spends much of the day rate-limited; the first hour of
+    // this pipeline's life discarded 36 real channels across three runs
+    // (inserted=0 while fresh=14/10/12) purely because scoring 429'd. Search
+    // results are the expensive part — an unscored row still carries a URL for
+    // extract to work on, and the operator sees the card either way.
     const rows = fresh.map((c, i) => ({ c, v: verdicts.get(i) }))
-      .filter(x => x.v && x.v.score >= MIN_SCORE)
+      .filter(x => !x.v || x.v.score >= MIN_SCORE)
       .map(({ c, v }) => ({
         channel_url:  c.url,
-        channel_name: v!.name || c.title.slice(0, 200) || c.url.split('/').pop(),
-        geo:          v!.geo || null,
-        language:     v!.language || null,
-        niche:        v!.niche,
+        channel_name: v?.name || c.title.slice(0, 200) || c.url.split('/').pop(),
+        geo:          v?.geo || null,
+        language:     v?.language || null,
+        niche:        v?.niche || null,
         description:  c.snippet.slice(0, 1000) || null,
-        ai_score:     v!.score,
-        ai_reasoning: v!.reasoning,
+        ai_score:     v ? v.score : null,
+        ai_reasoning: v ? v.reasoning : 'не оценён — Groq был недоступен',
         status:       'new',
         found_query:  c.query,
       }));
+    stats.unscored = rows.filter(r => r.ai_score === null).length;
 
     if (rows.length) {
       // ignoreDuplicates: a concurrent run (or a manual add) may have inserted
@@ -447,7 +464,8 @@ Deno.serve(async (req: Request) => {
 
     await quiet(supabase.from('error_log').insert([{
       level: 'info', service: 'scan-tg-channels',
-      message: `cands=${stats.candidates} fresh=${stats.fresh} inserted=${stats.inserted} src=${stats.source}`,
+      message: `cands=${stats.candidates} fresh=${stats.fresh} inserted=${stats.inserted} `
+        + `unscored=${stats.unscored} src=${stats.source} ${stats.reason}`,
     }]));
 
     return json(stats);
