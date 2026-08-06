@@ -1,0 +1,82 @@
+name: TG Pipeline Diag
+
+# One-shot probe for the Telegram outreach pipeline. Separate from livediag.yml
+# so the health watchdog stays untouched. Runs on demand, and on any push that
+# touches this file (bump the ping line at the bottom to trigger a run).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/tg-diag.yml'
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe the Telegram pipeline
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set +e
+          ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM"
+          FN="https://lxsyrserfuighwxuymgb.supabase.co/functions/v1"
+          q() {
+            curl -sf -X POST \
+              "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\":\"$1\"}"
+          }
+          invoke() {  # $1 = function name, $2 = json body
+            curl -s -m 150 -X POST "$FN/$1" \
+              -H "Content-Type: application/json" \
+              -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" \
+              -d "$2"; echo ""
+          }
+
+          echo "████ 1. DO THE TABLES EXIST AND WHAT IS IN THEM ████"
+          q "SELECT status, count(*) FROM tg_outreach_channels GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          q "SELECT count(*) AS total_channels FROM tg_outreach_channels;"; echo ""
+          q "SELECT count(*) AS total_queries, count(*) FILTER (WHERE runs > 0) AS queries_run, sum(runs) AS total_runs, sum(channels_found) AS channels_found FROM tg_search_queries;"; echo ""
+
+          echo ""
+          echo "████ 2. DID THE CRON EVER CALL THEM (worker deployed?) ████"
+          echo "--- if total_runs above is 0 AND no logs below, the Worker is not calling these ---"
+          q "SELECT service, max(created_at) AS last_log, round(extract(epoch FROM (now()-max(created_at)))/60)::int AS mins_ago, count(*) AS logs FROM error_log WHERE service IN ('scan-tg-channels','extract-tg-contact','draft-tg-message','send-tg-leads') GROUP BY 1 ORDER BY 2 DESC NULLS LAST;"; echo ""
+          echo "--- last 15 log lines from the 4 TG functions ---"
+          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, service, level, left(message,200) AS msg FROM error_log WHERE service LIKE '%-tg-%' OR service='scan-tg-channels' ORDER BY created_at DESC LIMIT 15;"; echo ""
+          echo "--- for contrast: is the */15 tick alive at all? (check-limits rides the same tick) ---"
+          q "SELECT service, max(created_at) AS last_log, round(extract(epoch FROM (now()-max(created_at)))/60)::int AS mins_ago FROM error_log WHERE service IN ('check-limits','validate-emails','score-leads','run-sequences') GROUP BY 1 ORDER BY 3;"; echo ""
+
+          echo ""
+          echo "████ 3. RUN scan DIRECTLY — the response says WHY it found nothing ████"
+          echo "--- stats.candidates=0 + reason='no t.me results' means the search source returned nothing ---"
+          invoke scan-tg-channels '{"force":true}'
+
+          echo ""
+          echo "████ 4. IS DUCKDUCKGO ALIVE FOR THE SUPABASE EGRESS IP? ████"
+          echo "--- same query the scanner uses, from the RUNNER (github egress, expected to work) ---"
+          curl -s -m 20 "https://html.duckduckgo.com/html/?q=site%3At.me+betting+tips+nigeria" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            -H "Accept-Language: en-US,en;q=0.9" -H "Referer: https://duckduckgo.com/" \
+            | grep -c 'class="result__a"'
+          echo "^ result count from the GitHub runner (0 = DDG blocks even here; >0 = DDG fine here)"
+          echo "--- and what find-and-queue (same Supabase egress) has been getting from DDG ---"
+          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, left(message,180) AS msg FROM error_log WHERE service='find-and-queue' ORDER BY created_at DESC LIMIT 6;"; echo ""
+
+          echo ""
+          echo "████ 5. RUN THE REST OF THE CHAIN DIRECTLY ████"
+          echo "--- extract ---"; invoke extract-tg-contact '{}'
+          echo "--- draft ---";   invoke draft-tg-message   '{}'
+          echo "--- send (force: ignores daily cap) ---"; invoke send-tg-leads '{"force":true}'
+
+          echo ""
+          echo "████ 6. STATE AFTER THE FORCED RUN ████"
+          q "SELECT status, count(*) FROM tg_outreach_channels GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          q "SELECT to_char(found_at,'MM-DD HH24:MI') AS t, left(channel_url,45) AS url, ai_score, status, left(coalesce(owner_contact,'-'),28) AS contact FROM tg_outreach_channels ORDER BY found_at DESC LIMIT 15;"; echo ""
+          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, service, left(message,200) AS msg FROM error_log WHERE service IN ('scan-tg-channels','extract-tg-contact','draft-tg-message','send-tg-leads') ORDER BY created_at DESC LIMIT 8;"; echo ""
+
+          echo "████ END TG DIAG ████"
+
+# ping 1
