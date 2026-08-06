@@ -259,7 +259,13 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
 interface Verdict {
   i: number; score: number; name: string; geo: string;
   language: string; niche: string; reasoning: string;
+  ourBrand: boolean; promotesBrand: string;
 }
+
+// Same group list score-leads.ts uses for its own-brand hard filter — kept in
+// sync so a channel already pushing our own group doesn't get scored as a
+// prospect twice under two different definitions of "ours".
+const OUR_GROUP = ['1xbet', '1x bet', 'betwinner', 'melbet', 'megapari', 'paripesa', '22bet', '1xpartners'];
 
 /** One Groq call for the whole candidate batch (title+snippet only). Per-channel
  *  calls would multiply quota use for no gain — the page itself is read later,
@@ -275,14 +281,19 @@ async function scoreBatch(cands: Hit[]): Promise<Map<number, Verdict>> {
   const prompt = `Ты аналитик партнёрской программы букмекера 1xBet (фокус — Африка).
 Ниже список ПУБЛИЧНЫХ Telegram-каналов из поисковой выдачи. Оцени каждый как потенциального партнёра-аффилиата.
 
-Высокий балл (70-100): канал с собственной аудиторией по ставкам/прогнозам/казино/Aviator, ведёт автор или команда, есть признаки монетизации (промокоды, реферальные ссылки, реклама).
-Средний (40-69): тематика подходит, но масштаб или авторство неясны.
-Низкий (0-39): официальный канал букмекера или конкурента, новостной агрегатор, скам/"гарантированные выигрыши", не по теме, не про ставки/казино, канал на русском рынке РФ/СНГ без связи с Африкой.
+Высокий балл (70-100): канал с собственной аудиторией по ставкам/прогнозам/казино/Aviator, ведёт автор или команда, есть признаки монетизации (промокоды, реферальные ссылки, реклама на букмекера/казино — ЛЮБОГО, не обязательно нашего).
+Средний (40-69): тематика подходит, но масштаб, авторство или монетизация неясны.
+Низкий (0-39): официальный канал букмекера, новостной агрегатор без своей аудитории, скам/"гарантированные выигрыши", ВЗРОСЛЫЙ КОНТЕНТ (порно, секс, 18+, NSFW — в любом виде, даже если тематика рядом со ставками), не по теме, не про ставки/казино, канал на русском рынке РФ/СНГ без связи с Африкой, канал уже продвигает нашу собственную группу брендов.
+
+Наша группа брендов (если канал промоутит именно их — это НЕ цель для переманивания, ставь низкий балл): ${OUR_GROUP.join(', ')}.
+Если в тексте виден промокод/реф-ссылка НЕ нашего букмекера (например Bet9ja, Betway, 1win, Melbet-конкурент и т.п.) — это сильный ПОЛОЖИТЕЛЬНЫЙ сигнал: канал уже умеет монетизировать ставочную аудиторию, его есть смысл переманивать.
 
 Верни СТРОГО JSON вида:
-{"results":[{"i":0,"score":75,"name":"название канала","geo":"NG","language":"en","niche":"betting_tips","reasoning":"кратко, 1 предложение"}]}
+{"results":[{"i":0,"score":75,"name":"название канала","geo":"NG","language":"en","niche":"betting_tips","ourBrand":false,"promotesBrand":"bet9ja","reasoning":"кратко, 1 предложение"}]}
 geo — ISO-код страны или "" если неясно. language — ISO-код (en/ru/fr/pt/sw/…) или "".
 niche — одно из: betting_tips, casino, aviator, esports, crypto, sports_news, other.
+ourBrand — true, если канал уже продвигает один из наших брендов (список выше).
+promotesBrand — название букмекера/казино, чей промокод или реф-ссылка замечены в title/snippet, "" если не видно.
 Только JSON, без markdown.
 
 Каналы:
@@ -302,14 +313,21 @@ ${list}`;
     for (const r of (parsed?.results || [])) {
       const i = Number(r.i);
       if (!Number.isInteger(i) || i < 0 || i >= cands.length) continue;
+      // Don't rely on the model alone for "is this our own brand" — cross-check
+      // the raw title+snippet text deterministically. Groq can miss a mention
+      // it wasn't asked to focus on; a regex over OUR_GROUP can't.
+      const rawText = (cands[i].title + ' ' + cands[i].snippet).toLowerCase();
+      const ourBrand = Boolean(r.ourBrand) || OUR_GROUP.some(b => rawText.includes(b));
       out.set(i, {
         i,
-        score: Math.max(0, Math.min(100, Number(r.score) || 0)),
+        score: ourBrand ? 0 : Math.max(0, Math.min(100, Number(r.score) || 0)),
         name: String(r.name || '').slice(0, 200),
         geo: String(r.geo || '').slice(0, 8),
         language: String(r.language || '').slice(0, 8),
         niche: String(r.niche || 'other').slice(0, 40),
         reasoning: String(r.reasoning || '').slice(0, 500),
+        ourBrand,
+        promotesBrand: String(r.promotesBrand || '').slice(0, 60),
       });
     }
   } catch { /* unparseable batch — treated as "no verdicts" */ }
@@ -433,7 +451,9 @@ Deno.serve(async (req: Request) => {
         niche:        v?.niche || null,
         description:  c.snippet.slice(0, 1000) || null,
         ai_score:     v ? v.score : null,
-        ai_reasoning: v ? v.reasoning : 'не оценён — Groq был недоступен',
+        ai_reasoning: v
+          ? (v.promotesBrand ? `[промо: ${v.promotesBrand}] ` : '') + v.reasoning
+          : 'не оценён — Groq был недоступен',
         status:       'new',
         found_query:  c.query,
       }));
