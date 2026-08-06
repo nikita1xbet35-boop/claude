@@ -66,6 +66,12 @@ jobs:
           q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, left(message,180) AS msg FROM error_log WHERE service='find-and-queue' ORDER BY created_at DESC LIMIT 6;"; echo ""
 
           echo ""
+          echo "████ 4b. RE-QUEUE no_contact ROWS ████"
+          echo "--- extract now also reads the t.me/s/<name> post feed, so rows written off"
+          echo "    as no_contact by the bio-only version deserve another pass ---"
+          q "UPDATE tg_outreach_channels SET status='new', attempts=0 WHERE status='no_contact' RETURNING id;"; echo ""
+
+          echo ""
           echo "████ 5. RUN THE REST OF THE CHAIN DIRECTLY ████"
           echo "--- extract ---"; invoke extract-tg-contact '{}'
           echo "--- draft ---";   invoke draft-tg-message   '{}'
@@ -79,4 +85,4 @@ jobs:
 
           echo "████ END TG DIAG ████"
 
-# ping 2
+# ping 3
