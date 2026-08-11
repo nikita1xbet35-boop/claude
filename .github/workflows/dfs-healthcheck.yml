@@ -107,7 +107,7 @@ jobs:
           # fire exactly one harvest on merge, then set it straight back to
           # 'none'. Leaving it armed would spend money on every unrelated edit to
           # this file, so treat flipping it as a one-shot.
-          PUSH_HARVEST=none
+          PUSH_HARVEST=intersect
           PUSH_BUDGET=0.10
           PUSH_ROWS=100
 
@@ -145,4 +145,4 @@ jobs:
           q "SELECT domain, intersect_count, dfs_rank, spam_score, array_to_string(competitors_list,'|') AS books FROM public.dfs_domains ORDER BY intersect_count DESC, dfs_rank DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: pilot harvest 2026-08-11e (against deploy 129)
+# ping: pilot harvest 2026-08-11f (fixed extraction, against deploy 130)
