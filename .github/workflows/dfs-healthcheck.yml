@@ -107,7 +107,7 @@ jobs:
           # fire exactly one harvest on merge, then set it straight back to
           # 'none'. Leaving it armed would spend money on every unrelated edit to
           # this file, so treat flipping it as a one-shot.
-          PUSH_HARVEST=intersect
+          PUSH_HARVEST=none
           PUSH_BUDGET=0.35
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
