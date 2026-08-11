@@ -1,0 +1,88 @@
+name: DataForSEO healthcheck
+
+# Manual, read-only verification that the DataForSEO module is actually alive:
+# schema applied, functions deployed and reachable, API credentials valid,
+# and the pipeline's own stages reporting in.
+#
+# Exists because the module cannot be verified from a development sandbox — the
+# network policy there blocks both supabase.co and api.dataforseo.com, so
+# "deployed successfully" was previously the last thing anyone could confirm.
+# A runner has open egress, so this closes that gap.
+#
+# Spends nothing: estimate_only only calls /v3/appendix/user_data, which is free.
+
+# Runs on demand, and on any push touching this file — same convention as
+# tg-diag.yml, so merging it is itself the first run.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/dfs-healthcheck.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check schema, functions and DataForSEO credentials
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -uo pipefail
+          PROJECT=lxsyrserfuighwxuymgb
+          API="https://api.supabase.com/v1/projects/$PROJECT/database/query"
+
+          q() {  # $1 = SQL -> prints JSON result
+            python3 -c "import json,sys; print(json.dumps({'query': sys.argv[1]}))" "$1" > /tmp/q.json
+            curl -s -X POST "$API" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" --data-binary @/tmp/q.json
+          }
+
+          echo "── 1. migrations recorded ──────────────────────────────────"
+          q "SELECT name FROM public.schema_migrations WHERE name LIKE '02%' ORDER BY name;"
+          echo; echo
+
+          echo "── 2. module tables present ────────────────────────────────"
+          q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('dfs_domains','dfs_competitors','dfs_usage','owner_clusters','source_health','pipeline_limits') ORDER BY table_name;"
+          echo; echo
+
+          echo "── 3. seed + limits ────────────────────────────────────────"
+          q "SELECT (SELECT count(*) FROM public.dfs_competitors WHERE active) AS competitors, (SELECT count(*) FROM public.keywords WHERE layer='A' AND active) AS layer_a_keys, (SELECT count(*) FROM public.keywords WHERE layer IN ('B','C') AND source_pref='dataforseo') AS dfs_routed_keys;"
+          echo; echo
+          q "SELECT pipeline, daily_limit, paused FROM public.pipeline_limits ORDER BY pipeline;"
+          echo; echo
+
+          echo "── 4. pipeline state ───────────────────────────────────────"
+          q "SELECT status, count(*) FROM public.dfs_domains GROUP BY status ORDER BY status;"
+          echo; echo
+          q "SELECT coalesce(sum(cost_usd),0) AS spent_total, count(*) AS calls FROM public.dfs_usage;"
+          echo; echo
+
+          echo "── 5. recent stage logs (are the crons running?) ───────────"
+          q "SELECT service, level, left(message,150) AS message, created_at FROM public.error_log WHERE service LIKE 'dfs-%' OR service='recover-contacts' OR service='generate-queue-dfs' ORDER BY created_at DESC LIMIT 12;"
+          echo; echo
+
+          echo "── 6. functions reachable + DataForSEO credentials ─────────"
+          # estimate_only is free: it only reads the account balance.
+          # The anon key is the same public key the site ships with, read straight
+          # out of index.html rather than duplicated into a secret.
+          ANON=$(grep -oE "const SUPABASE_KEY  = '[^']+'" index.html | head -1 | sed "s/.*'\(.*\)'/\1/")
+          if [ -z "$ANON" ]; then echo "::error::could not read anon key from index.html"; exit 1; fi
+          for fn in dfs-harvest dfs-qualify dfs-enrich generate-queue-dfs recover-contacts; do
+            printf '%-20s ' "$fn"
+            if [ "$fn" = "dfs-harvest" ]; then
+              BODY='{"estimate_only":true,"rows_per_call":1000}'
+            else
+              BODY='{}'
+            fi
+            code=$(curl -s -o /tmp/fn.txt -w '%{http_code}' -m 120 -X POST \
+              "https://$PROJECT.supabase.co/functions/v1/$fn" \
+              -H "Content-Type: application/json" \
+              -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+              -d "$BODY")
+            echo "HTTP $code"
+            head -c 500 /tmp/fn.txt; echo; echo
+          done
