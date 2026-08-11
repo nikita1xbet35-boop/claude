@@ -291,6 +291,91 @@ const str = (v: unknown, cap: number): string | null => {
   return s ? s.slice(0, cap) : null;
 };
 
+/** Flatten one domain_intersection item into a single row.
+ *
+ *  This endpoint does NOT put the domain at the top level. It returns one
+ *  sub-object per target, keyed by the target's index — "1", "2" — which is
+ *  exactly why its sort field had to be written "1.rank" rather than "rank".
+ *  Reading `it.domain` therefore found nothing, and every row was silently
+ *  skipped: a run reported 100 rows returned, 2905 available, and 0 saved, with
+ *  no error anywhere. The API was right the whole time.
+ *
+ *  The per-target sub-objects describe the SAME referring domain, so the fields
+ *  are merged rather than taken from one: best rank, lowest spam score, largest
+ *  link counts, earliest first_seen. Falls back to a flat shape in case the
+ *  response format changes again. */
+// Field names that have been seen to carry a referring domain across the
+// backlinks endpoints. Checked in order of preference.
+const DOMAIN_KEYS = ['domain', 'domain_from', 'referring_domain', 'target'];
+
+/** Collect every object inside `it` (to a shallow depth) that carries a
+ *  domain-like field. Shape-agnostic on purpose: three runs were lost to
+ *  guessing where the domain sits, the docs host is blocked by the same egress
+ *  policy as the API, and a parser that searches costs nothing extra to run. */
+function collectDomainParts(it: any, depth = 0, out: any[] = []): any[] {
+  if (!it || typeof it !== 'object' || depth > 3) return out;
+  if (Array.isArray(it)) {
+    for (const v of it) collectDomainParts(v, depth + 1, out);
+    return out;
+  }
+  if (DOMAIN_KEYS.some(k => typeof it[k] === 'string' && it[k].includes('.'))) out.push(it);
+  for (const k of Object.keys(it)) {
+    const v = it[k];
+    if (v && typeof v === 'object') collectDomainParts(v, depth + 1, out);
+  }
+  return out;
+}
+
+const domainOf = (o: any): string => {
+  for (const k of DOMAIN_KEYS) {
+    if (typeof o?.[k] === 'string' && o[k].includes('.')) return normDomain(o[k]);
+  }
+  return '';
+};
+
+function flattenIntersectionItem(it: any): {
+  domain: string; rank: number | null; spam: number | null;
+  backlinks: number | null; referringPages: number | null; firstSeen: string | null;
+} | null {
+  if (!it || typeof it !== 'object') return null;
+
+  // Prefer the per-target sub-objects under numeric keys ("1", "2") — that is
+  // the shape the accepted `1.rank` sort field implies. Fall back to a search so
+  // an unexpected layout still yields rows instead of silently dropping all of
+  // them, which is precisely how a run reported 100 returned / 2905 available /
+  // 0 saved with no error anywhere.
+  const numbered = Object.keys(it)
+    .filter(k => /^\d+$/.test(k))
+    .map(k => it[k])
+    .filter(s => s && typeof s === 'object' && domainOf(s));
+
+  const parts = numbered.length ? numbered : collectDomainParts(it);
+  if (!parts.length) return null;
+
+  const domain = domainOf(parts[0]);
+  if (!domain) return null;
+
+  const pick = (f: (s: any) => number | null, merge: (a: number, b: number) => number) => {
+    const vals = parts.map(f).filter((v): v is number => v !== null);
+    // reduce((a, b) => merge(a, b)), NOT reduce(merge): reduce hands the callback
+    // four arguments, and Math.max(a, b, index, array) coerces the array to NaN.
+    // Every metric came back NaN — which JSON renders as null, so it looked like
+    // missing data rather than a bug.
+    return vals.length ? vals.reduce((a, b) => merge(a, b)) : null;
+  };
+
+  const seen = parts.map(s => str(s.first_seen, 40)).filter((v): v is string => !!v).sort();
+
+  return {
+    domain,
+    rank:           pick(s => num(s.rank), Math.max),
+    spam:           pick(s => num(s.backlinks_spam_score), Math.min),
+    backlinks:      pick(s => num(s.backlinks), Math.max),
+    referringPages: pick(s => num(s.referring_pages), Math.max),
+    firstSeen:      seen[0] ?? null,
+  };
+}
+
 /** Push rows through the bulk upsert RPC. The RPC merges competitors_list and
  *  recomputes intersect_count in one statement — doing it here would be a
  *  read-modify-write per row. */
@@ -319,6 +404,9 @@ Deno.serve(async (req: Request) => {
     calls: 0,
     rows_seen: 0,
     junk_filtered: 0,
+    // Items the parser could not read a domain out of. Non-zero here means the
+    // response shape moved again — the failure that cost three runs to spot.
+    unparsed_items: 0,
     saved: 0,
     intersections: [] as Array<{ geo: string; targets: string[]; found: number; returned: number; total: number }>,
     broad: [] as Array<{ competitor: string; found: number; offset: number; total: number }>,
@@ -330,6 +418,8 @@ Deno.serve(async (req: Request) => {
     reason: '',
     error: '',
   };
+
+  let sampleLogged = false;
 
   const dropNote = (phase: string, fields: string[]) => {
     const seen = stats.dropped_fields[phase] || [];
@@ -476,26 +566,37 @@ Deno.serve(async (req: Request) => {
 
         if (!r.ok) { stats.reason = 'intersection failed: ' + r.error; continue; }
 
+        // Record ONE raw item verbatim, once per run. The docs host is blocked
+        // by the same egress policy as the API, so this log line is the only
+        // durable record of what this endpoint actually returns — without it the
+        // response shape has to be re-guessed from row counts every time, which
+        // has already cost three runs.
+        if (!sampleLogged && r.items.length) {
+          sampleLogged = true;
+          await quiet(supabase.from('error_log').insert([{
+            level: 'info', service: 'dfs-harvest',
+            message: 'RAW intersection item: ' + JSON.stringify(r.items[0]).slice(0, 1800),
+          }]));
+        }
+
         // Every domain here links to all targets, so it is emitted once per
         // competitor — the RPC merges them into one row with intersect_count=N.
         const rows: UpsertRow[] = [];
         for (const it of r.items) {
-          const domain = normDomain(it?.domain || it?.target || '');
-          if (!domain) continue;
-          // Enforce the rank floor here too. On the fallback path above the API
-          // applied no filter, so without this the bare retry would quietly pull
-          // in the scraper junk the floor exists to keep out.
-          const rank = num(it?.rank);
-          if (rank !== null && rank <= MIN_RANK) { stats.junk_filtered++; continue; }
+          const flat = flattenIntersectionItem(it);
+          if (!flat) { stats.unparsed_items++; continue; }
+          // Enforce the rank floor here too: the server-side filter was removed
+          // from this call, so nothing else keeps scraper junk out.
+          if (flat.rank !== null && flat.rank <= MIN_RANK) { stats.junk_filtered++; continue; }
           for (const comp of targetList) {
             rows.push({
-              domain, source: 'intersection', competitor: comp,
-              dfs_rank: num(it?.rank),
-              spam_score: num(it?.backlinks_spam_score),
-              backlinks_count: num(it?.backlinks),
-              referring_pages: num(it?.referring_pages),
+              domain: flat.domain, source: 'intersection', competitor: comp,
+              dfs_rank: flat.rank,
+              spam_score: flat.spam,
+              backlinks_count: flat.backlinks,
+              referring_pages: flat.referringPages,
               anchor: null, page_title: null,
-              first_seen: str(it?.first_seen, 40),
+              first_seen: flat.firstSeen,
             });
           }
         }
