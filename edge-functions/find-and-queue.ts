@@ -387,45 +387,119 @@ function stripHtml(html: string): string {
 // — is a blatant bot signature; once the request rate spiked, DuckDuckGo flagged it
 // and that string makes it trivial to keep flagged. Rotating realistic browser UAs
 // (varied per query so it doesn't look like one client) is far less block-prone.
+// Eighteen current desktop and mobile UAs. The point is not volume of variety —
+// it is that ONE run looks like ONE browser (see makeSession below). Rotating the
+// UA per request inside a run is its own tell: a real client does not change
+// browser between two searches a few seconds apart.
 const BROWSER_UAS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0',
+  'Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0.0.0 Mobile/15E148 Safari/604.1',
+  'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+  'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36',
+  'Mozilla/5.0 (Linux; Android 13; SM-A536B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
 ];
-function pickUA(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
-  return BROWSER_UAS[Math.abs(h) % BROWSER_UAS.length];
+const ACCEPT_LANGS = [
+  'en-US,en;q=0.9',
+  'en-GB,en;q=0.9',
+  'en-US,en;q=0.9,fr;q=0.8',
+  'en-US,en;q=0.8',
+];
+
+/** One coherent browser identity for the whole run, plus a per-query vqd cache.
+ *
+ *  The ban that killed the feed for two days was not caused by request VOLUME —
+ *  it was the machine signature: a fixed interval, a constant UA, no session
+ *  continuity, and five simultaneous requests. This models a single visitor
+ *  instead: same UA and headers throughout, and the vqd token fetched once per
+ *  query and reused for that query's pagination. */
+interface DdgSession {
+  ua: string;
+  acceptLang: string;
+  vqd: Map<string, string>;
+  requests: number;
+  emptyResponses: number;
+  resultsTotal: number;
 }
 
+function makeSession(): DdgSession {
+  return {
+    ua: BROWSER_UAS[Math.floor(Math.random() * BROWSER_UAS.length)],
+    acceptLang: ACCEPT_LANGS[Math.floor(Math.random() * ACCEPT_LANGS.length)],
+    vqd: new Map(),
+    requests: 0,
+    emptyResponses: 0,
+    resultsTotal: 0,
+  };
+}
+
+const ddgHeaders = (s: DdgSession) => ({
+  'User-Agent': s.ua,
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': s.acceptLang,
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Referer': 'https://duckduckgo.com/',
+  'Upgrade-Insecure-Requests': '1',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'same-origin',
+});
+
+/** Random pause between requests. A constant gap is the single most obvious
+ *  bot tell there is; jitter costs nothing and removes it. */
+const jitter = (minMs = 2000, maxMs = 6000) =>
+  new Promise(r => setTimeout(r, minMs + Math.floor(Math.random() * (maxMs - minMs))));
+
 async function searchDuckDuckGo(
-  query: string, num: number, page = 1,
+  query: string, num: number, page = 1, session?: DdgSession,
 ): Promise<Array<{ link: string; title: string; snippet: string }>> {
-  const UA = pickUA(query);
+  const s = session || makeSession();
   const baseUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
 
-  // Always fetch page 1 — needed for vqd token and as fallback
+  // Health is measured per SEARCH, not per HTTP request. Deep pages need an
+  // extra round trip purely to mint a vqd token, and that fetch yields no
+  // results of its own — counting it would halve the average on every page-2/3
+  // run and trip the throttle on perfectly healthy output.
+  s.requests++;
+  const record = (r: Array<{ link: string; title: string; snippet: string }>) => {
+    s.resultsTotal += r.length;
+    if (!r.length) s.emptyResponses++;
+    return r;
+  };
+
+  // Page 1 is needed for the vqd token and as the fallback, but only fetch it
+  // when the token for this query is not already in hand.
   let html1 = '';
-  try {
-    const res = await fetch(baseUrl, {
-      headers: {
-        'User-Agent': UA,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://duckduckgo.com/',
-      },
-      signal: AbortSignal.timeout(12_000),
-    });
-    if (res.ok) html1 = await res.text();
-  } catch (_) {}
+  let vqd = s.vqd.get(query) || '';
+  if (page === 1 || !vqd) {
+    try {
+      const res = await fetch(baseUrl, {
+        headers: ddgHeaders(s),
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (res.ok) html1 = await res.text();
+      else res.body?.cancel().catch(() => {});
+    } catch (_) { /* fall through to the empty parse */ }
 
-  if (page === 1 || !html1) return parseDdgHtml(html1, num);
+    if (html1 && !vqd) {
+      vqd = extractVqd(html1);
+      if (vqd) s.vqd.set(query, vqd);
+    }
+  }
 
-  // Extract vqd — DDG requires it for POST pagination
-  const vqd = extractVqd(html1);
-  if (!vqd) return parseDdgHtml(html1, num); // can't paginate; return page 1
+  if (page === 1 || !vqd) return record(parseDdgHtml(html1, num));
 
   const offset = (page - 1) * 30;
   try {
@@ -436,21 +510,160 @@ async function searchDuckDuckGo(
     const res = await fetch('https://html.duckduckgo.com/html/', {
       method: 'POST',
       headers: {
-        'User-Agent': UA,
+        ...ddgHeaders(s),
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://duckduckgo.com/',
+        'Sec-Fetch-Site': 'same-origin',
       },
       body: body.toString(),
       signal: AbortSignal.timeout(12_000),
     });
-    if (!res.ok) return parseDdgHtml(html1, num);
-    const html2 = await res.text();
-    const paged = parseDdgHtml(html2, num);
-    // If POST returned garbage (<3 results), fall back to page 1
-    return paged.length >= 3 ? paged : parseDdgHtml(html1, num);
-  } catch (_) { return parseDdgHtml(html1, num); }
+    if (!res.ok) {
+      res.body?.cancel().catch(() => {});
+      return record(parseDdgHtml(html1, num));
+    }
+    const paged = parseDdgHtml(await res.text(), num);
+    // A rejected POST returns a near-empty page — fall back to page 1 rather
+    // than reporting the query as barren.
+    return record(paged.length >= 3 ? paged : parseDdgHtml(html1, num));
+  } catch (_) {
+    return record(parseDdgHtml(html1, num));
+  }
+}
+
+// ── DataForSEO SERP (layers B and C) ───────────────────────────────────────
+// Google indexes corporate pages (/advertise, media kits) and exact quoted
+// footprints ("affiliate disclosure") far better than DuckDuckGo does, and those
+// are precisely what layers B and C hunt. depth:100 also returns eight times
+// what a DDG page does, with no IP bans to manage.
+//
+// OFF BY DEFAULT, and deliberately so. SERP endpoints are priced differently
+// from backlinks — live mode costs more than task_post/task_get, and the exact
+// figure has to be read off DataForSEO's own docs before anything runs at scale.
+// Turning per-search spending on for an account without confirming that price
+// first is how a balance disappears in an afternoon. Arm with DFS_SERP_ENABLED=true
+// once the tariff is known, and watch dfs_usage for the first few runs.
+const DFS_SERP_ENABLED = (Deno.env.get('DFS_SERP_ENABLED') || '').toLowerCase() === 'true';
+const DFS_LOGIN    = Deno.env.get('DFS_LOGIN') || '';
+const DFS_PASSWORD = Deno.env.get('DFS_PASSWORD') || '';
+// Hard per-run cap, so a misconfiguration cannot turn into an unbounded bill.
+const DFS_SERP_MAX_PER_RUN = 2;
+
+const DFS_LOCATION: Record<string, number> = {
+  NG: 2566, KE: 2404, GH: 2288, TZ: 2834, UG: 2800, CM: 2120, SN: 2686,
+  ZM: 2894, ET: 2231, MZ: 2508, ML: 2466, CD: 2180, CI: 2384, BF: 2854,
+};
+
+/** Returns null (not []) on failure, so the caller can tell "Google found
+ *  nothing" from "the call failed" and fall back to DuckDuckGo instead of
+ *  silently losing the keyword for this run. */
+async function searchDfsSerp(
+  sb: any, query: string, locationCode: number, langCode: string, depth = 100,
+): Promise<Array<{ link: string; title: string; snippet: string }> | null> {
+  try {
+    const res = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${DFS_LOGIN}:${DFS_PASSWORD}`),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify([{
+        keyword: query, location_code: locationCode,
+        language_code: langCode || 'en', depth,
+      }]),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) { res.body?.cancel().catch(() => {}); return null; }
+    const body = await res.json();
+    const task = body?.tasks?.[0];
+    const items = task?.result?.[0]?.items;
+    const rows = Array.isArray(items) ? items : [];
+
+    // Cost comes off the response, never estimated — same rule the harvester
+    // uses. Wrapped in try/await rather than `.catch()`: a Supabase query builder
+    // is a thenable WITHOUT .catch, so `.catch?.(…)` short-circuits to undefined,
+    // `then()` is never called, and the request is never actually sent — every
+    // SERP call would go unbilled in dfs_usage while really costing money.
+    try {
+      await sb.from('dfs_usage').insert([{
+        endpoint: '/v3/serp/google/organic/live/advanced',
+        target: query.slice(0, 200),
+        rows_returned: rows.length,
+        cost_usd: Number(body?.cost) || 0,
+        status_code: Number(task?.status_code) || null,
+        error_message: Number(task?.status_code) === 20000
+          ? null : String(task?.status_message || '').slice(0, 200),
+      }]);
+    } catch { /* spend logging must not lose the results we just paid for */ }
+
+    return rows
+      .filter((r: any) => r?.type === 'organic' && typeof r?.url === 'string')
+      .map((r: any) => ({
+        link: r.url,
+        title: String(r.title || ''),
+        snippet: String(r.description || r.snippet || ''),
+      }))
+      .filter((r: any) => r.link.startsWith('http'));
+  } catch { return null; }
+}
+
+// ── Source health / soft-ban detection ─────────────────────────────────────
+// DuckDuckGo never says "you are banned"; it just starts returning thin pages.
+// The last outage was only noticed days later, from falling lead counts. Tracking
+// results-per-request makes the degradation visible while it is still partial,
+// and trips a cool-off before the feed reaches zero.
+const HEALTHY_AVG = 5;      // normal is ~10-12 results per request
+
+async function isThrottled(sb: any, source: string): Promise<Date | null> {
+  try {
+    const { data } = await sb.from('source_health')
+      .select('throttled, throttle_until')
+      .eq('source', source)
+      .order('window_start', { ascending: false })
+      .limit(1).maybeSingle();
+    if (!data?.throttled || !data?.throttle_until) return null;
+    const until = new Date(data.throttle_until);
+    return until.getTime() > Date.now() ? until : null;
+  } catch { return null; }
+}
+
+/** Record the run's yield and, if it looks like a soft ban, park the source for
+ *  45 minutes. Returns true when a throttle was tripped. */
+async function recordHealth(sb: any, source: string, s: DdgSession): Promise<boolean> {
+  if (!s.requests) return false;
+  const avg = s.resultsTotal / s.requests;
+  // Only call it a ban on a run that actually asked enough questions to know.
+  const degraded = s.requests >= 3 && avg < HEALTHY_AVG;
+  const until = degraded ? new Date(Date.now() + 45 * 60 * 1000).toISOString() : null;
+
+  try {
+    await sb.from('source_health').insert([{
+      source,
+      requests: s.requests,
+      results_total: s.resultsTotal,
+      empty_results: s.emptyResponses,
+      avg_results: Number(avg.toFixed(2)),
+      throttled: degraded,
+      throttle_until: until,
+    }]);
+    if (degraded) {
+      await sb.from('error_log').insert([{
+        level: 'warning', service: 'find-and-queue',
+        message: `${source} degraded: ${avg.toFixed(1)} results/request over ${s.requests} requests `
+          + `(${s.emptyResponses} empty) — backing off until ${until}`,
+      }]);
+      await fetch(`${SUPABASE_URL}/functions/v1/send-alert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY,
+                   'Authorization': `Bearer ${SUPABASE_KEY}` },
+        body: JSON.stringify({
+          level: 'warning', service: 'DuckDuckGo',
+          message: `Выдача деградировала: ${avg.toFixed(1)} результатов на запрос `
+            + `(норма ~10-12). Пауза 45 минут — это ранний признак бана, не полный отказ.`,
+        }),
+      }).catch(() => {});
+    }
+  } catch { /* health tracking must never break the run */ }
+  return degraded;
 }
 
 // ── SerpApi (second search source) ──────────────────────────────────────────
@@ -1014,10 +1227,10 @@ Deno.serve(async (req: Request) => {
     // Keywords now live in the DB so their yield can be measured and burnt-out
     // ones retired automatically. The hardcoded preset list stays as a fallback
     // for the window before migration 016 lands.
-    let poolRows: Array<{ id: number; keyword: string }> = [];
+    let poolRows: Array<{ id: number; keyword: string; source_pref?: string; lang?: string }> = [];
     try {
       const { data } = await supabase.from('keywords')
-        .select('id, keyword')
+        .select('id, keyword, source_pref, lang')
         .eq('preset', preset.id).eq('layer', layer).eq('active', true)
         .order('id');
       poolRows = data || [];
@@ -1027,6 +1240,10 @@ Deno.serve(async (req: Request) => {
     // an empty pool there means "nothing to do this tick", not "use layer A keys".
     let keywords: string[];
     let keywordIds = new Map<string, number>();
+    // Which search source each keyword prefers, and its language — both only
+    // exist for DB-backed pools, so the in-code fallback pool stays on DDG.
+    const keywordSource = new Map<string, string>();
+    const keywordLang   = new Map<string, string>();
     if (poolRows.length) {
       const cycle   = Math.floor(slotIndex / (BRANDS.length * allPresets.length));
       const kwStart = (cycle * KW_PER_RUN) % poolRows.length;
@@ -1035,7 +1252,11 @@ Deno.serve(async (req: Request) => {
         picked.push(poolRows[(kwStart + i) % poolRows.length]);
       }
       keywords = [...new Set(picked.map(p => p.keyword))];
-      picked.forEach(p => keywordIds.set(p.keyword, p.id));
+      picked.forEach(p => {
+        keywordIds.set(p.keyword, p.id);
+        if (p.source_pref) keywordSource.set(p.keyword, p.source_pref);
+        if (p.lang) keywordLang.set(p.keyword, p.lang);
+      });
     } else if (layer === 'A' && preset.keywords.length) {
       const kwStart = (Math.floor(slotIndex / (BRANDS.length * allPresets.length)) * KW_PER_RUN) % preset.keywords.length;
       const rawKw   = preset.keywords.slice(kwStart, kwStart + KW_PER_RUN);
@@ -1100,13 +1321,75 @@ Deno.serve(async (req: Request) => {
     const cityPart = layer === 'A' ? cityAppend : '';
     const minusWords = DDG_MINUS + (layer === 'B' ? LAYER_B_MINUS : '');
 
-    const serpBatches = await Promise.all(
-      keywords.map(kw =>
-        searchDuckDuckGo(`${kw}${cityPart} ${minusWords}`, RESULTS_PER_KW, DDG_PAGE)
-          .then(r => { stats.keywords_run++; return { kw, results: r }; })
-          .catch(e => { stats.errors.push(`DDG "${kw}": ${e.message}`); return { kw, results: [] }; }),
-      ),
-    );
+    // Five simultaneous requests is a burst, and a burst is what a bot looks
+    // like. Concurrency 2 with 2-6s of jitter between launches spreads the same
+    // work over the run without reducing it — the goal is to make the CURRENT
+    // rate sustainable, not to search less.
+    // Honour an active cool-off. Hammering a source that has already started
+    // refusing us is exactly how a partial throttle becomes a full ban.
+    const throttledUntil = await isThrottled(supabase, 'ddg');
+    if (throttledUntil) {
+      return new Response(JSON.stringify({
+        ...stats, skipped: true,
+        reason: `DuckDuckGo backing off until ${throttledUntil.toISOString()}`,
+      }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
+    const session = makeSession();
+    const serpBatches: Array<{ kw: string; results: Array<{ link: string; title: string; snippet: string }> }> = [];
+    const DDG_CONCURRENCY = 2;
+
+    // Layer B/C keywords marked source_pref='dataforseo' go to Google instead —
+    // but only when explicitly armed and only a couple per run, since each one
+    // spends money (see DFS_SERP_ENABLED above).
+    const geoCode = String(preset.geo || '').toUpperCase().slice(0, 2);
+    const dfsLocation = DFS_LOCATION[geoCode];
+    const dfsEligible = DFS_SERP_ENABLED && DFS_LOGIN && DFS_PASSWORD && !!dfsLocation;
+    let dfsBudgetLeft = dfsEligible ? DFS_SERP_MAX_PER_RUN : 0;
+    (stats as any).dfs_serp = 0;
+
+    const queue = [...keywords];
+    const runWorker = async () => {
+      while (queue.length) {
+        const kw = queue.shift();
+        if (!kw) break;
+
+        const wantsDfs = keywordSource.get(kw) === 'dataforseo';
+        if (wantsDfs && dfsBudgetLeft > 0) {
+          dfsBudgetLeft--;
+          // No minus-words and no city padding: those are DDG operators, and
+          // layer B/C keys are already exact phrases aimed at Google.
+          const r = await searchDfsSerp(
+            supabase, kw, dfsLocation, keywordLang.get(kw) || 'en');
+          if (r) {
+            stats.keywords_run++;
+            (stats as any).dfs_serp++;
+            serpBatches.push({ kw, results: r });
+            continue;
+          }
+          // null = the call failed. Fall through to DDG rather than dropping the
+          // keyword for this run.
+          stats.errors.push(`DFS SERP "${kw}": failed, falling back to DDG`);
+        }
+
+        await jitter();
+        try {
+          const r = await searchDuckDuckGo(
+            `${kw}${cityPart} ${minusWords}`, RESULTS_PER_KW, DDG_PAGE, session);
+          stats.keywords_run++;
+          serpBatches.push({ kw, results: r });
+        } catch (e: any) {
+          stats.errors.push(`DDG "${kw}": ${e?.message || e}`);
+          serpBatches.push({ kw, results: [] });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: DDG_CONCURRENCY }, runWorker));
+
+    const ddgDegraded = await recordHealth(supabase, 'ddg', session);
+    (stats as any).ddg_avg = session.requests
+      ? Number((session.resultsTotal / session.requests).toFixed(2)) : null;
+    (stats as any).ddg_degraded = ddgDegraded;
 
     // 4b. SerpApi (second source) — same keys via Google surface different sites
     //     than DDG. Paced so 3×250/month isn't burned in a day; rotates accounts

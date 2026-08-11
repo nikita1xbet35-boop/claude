@@ -243,7 +243,8 @@ async function markFailed(item: Record<string, unknown>, errMsg: string, forceSk
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
-  const stats = { processed: 0, sent: 0, failed: 0, skipped: 0, reason: '' };
+  const stats = { processed: 0, sent: 0, failed: 0, skipped: 0, reason: '',
+                  blocked_pipelines: [] as string[] };
 
   try {
     const now = new Date();
@@ -263,21 +264,64 @@ Deno.serve(async (req: Request) => {
     const gmt3DayStart = new Date(`${dateStr}T00:00:00+03:00`);
     const gmt3DayEnd   = new Date(`${dateStr}T23:59:59+03:00`);
 
-    // 4. Fetch pending + retryable-failed queue items due now.
-    //    'failed' items (retry_count < MAX_RETRIES) are included so they get
-    //    a second chance after transient errors (e.g. wrong credentials fixed).
-    const { data: queueItems, error: queueErr } = await supabase
+    // 4. Per-pipeline ceilings. The queue is shared, the budgets are not: the
+    //    DataForSEO funnel has its own daily limit and its own pause switch, and
+    //    enforcing them HERE (at the moment of sending) is what actually caps
+    //    spend — the queue filler's own arithmetic can be outrun by a manual
+    //    enqueue or a second filler run.
+    //
+    //    Blocked pipelines are excluded from the QUERY rather than skipped in the
+    //    loop. The queue is read oldest-first with a hard BATCH_SIZE, so a paused
+    //    pipeline whose items happen to be the oldest would fill the entire
+    //    window every run and starve the other pipeline indefinitely — pausing
+    //    one funnel would silently stop the other.
+    const { data: limitRows } = await supabase.from('pipeline_limits')
+      .select('pipeline, daily_limit, paused');
+    const limits = new Map<string, { limit: number; paused: boolean }>();
+    for (const r of limitRows || []) {
+      limits.set(String(r.pipeline), {
+        limit: Number(r.daily_limit) || 0,
+        paused: !!r.paused,
+      });
+    }
+    const pipelineSentToday: Record<string, number> = {};
+    const blocked: string[] = [];
+    for (const [p, cfg] of limits) {
+      const { count } = await supabase.from('email_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('pipeline', p)
+        .gte('sent_at', gmt3DayStart.toISOString())
+        .lte('sent_at', gmt3DayEnd.toISOString());
+      pipelineSentToday[p] = count ?? 0;
+      if (cfg.paused || (cfg.limit > 0 && (count ?? 0) >= cfg.limit)) blocked.push(p);
+    }
+    stats.blocked_pipelines = blocked;
+
+    // 4b. Fetch pending + retryable-failed queue items due now.
+    //     'failed' items (retry_count < MAX_RETRIES) are included so they get
+    //     a second chance after transient errors (e.g. wrong credentials fixed).
+    let queueQuery = supabase
       .from('send_queue')
       .select('*')
       .in('status', ['pending', 'failed'])
       .lt('retry_count', MAX_RETRIES)
-      .lte('scheduled_at', now.toISOString())
+      .lte('scheduled_at', now.toISOString());
+    if (blocked.length) {
+      // Legacy rows can carry a NULL pipeline; those are 'search' by default and
+      // must survive the filter, which a bare not-in would drop.
+      queueQuery = queueQuery.or(
+        `pipeline.is.null,pipeline.not.in.(${blocked.map(p => `"${p}"`).join(',')})`,
+      );
+    }
+    const { data: queueItems, error: queueErr } = await queueQuery
       .order('scheduled_at', { ascending: true })
       .limit(BATCH_SIZE);
 
     if (queueErr) throw new Error(`send_queue query failed: ${queueErr.message}`);
     if (!queueItems || queueItems.length === 0) {
-      stats.reason = 'no pending items';
+      stats.reason = blocked.length
+        ? `no pending items (blocked: ${blocked.join(', ')})`
+        : 'no pending items';
       return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
@@ -286,6 +330,15 @@ Deno.serve(async (req: Request) => {
     // 5. Process each item
     for (const item of queueItems) {
       stats.processed++;
+
+      const pipeline = (item.pipeline as string) || 'search';
+      const pl = limits.get(pipeline);
+      // Re-check per item: the in-run tally advances as this loop sends, so a
+      // pipeline can reach its ceiling partway through a batch.
+      if (pl && pl.limit > 0 && (pipelineSentToday[pipeline] ?? 0) >= pl.limit) {
+        stats.skipped++;
+        continue;   // ceiling hit; the row waits for tomorrow
+      }
 
       // Unified 1xPartners campaign — every lead (regardless of which brand-search
       // found it) is a valid affiliate target. All sends go through the main account
@@ -484,12 +537,19 @@ Deno.serve(async (req: Request) => {
           sent_at:       sentAt,
           bounced:       false,
           source:        (lead.source as string) || 'seo',
+          // Carried from the queue row so each funnel's daily ceiling and reply
+          // stats are computed over its own sends only.
+          pipeline:      (item.pipeline as string) || 'search',
           ...(gmailMessageId ? { gmail_message_id: gmailMessageId } : {}),
           // P1.4 — which variant/step produced this send, so reply rate can later
           // be reported per variant x geo x step.
           ...(item.variant_key ? { variant_key: item.variant_key } : {}),
           ...(item.step_no ? { sequence_step: item.step_no } : {}),
         }]);
+
+        // Keep the in-run tally honest: BATCH_SIZE items can be processed in one
+        // pass, and without this the ceiling would only be re-read next run.
+        pipelineSentToday[pipeline] = (pipelineSentToday[pipeline] ?? 0) + 1;
 
         const { data: cur } = await supabase.from('api_usage')
           .select('used').eq('service', usageService).single();

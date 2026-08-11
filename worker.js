@@ -525,6 +525,10 @@ export default {
         // Partner bases: per-base auto-send (own template + own daily limit + own
         // toggle). Sends nothing unless a base has sending_enabled = true.
         call('process-partner-queue', {}),
+        // DataForSEO pipeline queue filler. Separate function, disjoint lead set,
+        // own ceiling in pipeline_limits — process-queue drains both queues but
+        // enforces each pipeline's limit and pause switch independently.
+        call('generate-queue-dfs', {}),
       ]);
       return;
     }
@@ -537,10 +541,19 @@ export default {
       // into this proven tick guarantees they run (and detection is now 3x faster).
       //   find-contact-form  — detect + classify contact forms (read-only)
       //   process-form-queue — submit simple forms (armed via FORM_SENDING_ENABLED)
+      //
+      // DataForSEO pipeline stages 2 and 3 ride this tick too. Stage 1
+      // (dfs-harvest) is deliberately NOT scheduled: every call costs real money
+      // and it is meant to run in large, infrequent batches, fired by hand from
+      // the DataForSEO tab.
+      //   dfs-qualify — judges raw domains from the link graph, LLM-batched
+      //   dfs-enrich  — fetches contacts + analytics ids for promoted leads
       await Promise.all([
         call('find-and-queue', {}),
         call('find-contact-form', {}),
         call('process-form-queue', {}),
+        call('dfs-qualify', {}),
+        call('dfs-enrich', {}),
       ]);
       return;
     }
@@ -604,6 +617,11 @@ export default {
         // YouTube base auto-fill — one rotating African GEO per tick, self-capped at
         // 72 searches/day (7200 quota units) so it never burns the 10k/day budget.
         call('youtube-search', { cron: true }),
+        // Salvage pass over the ~4000 qualified leads that came back with no
+        // contact: archive.org snapshots, open WordPress author endpoints, and
+        // footer socials. Rides this slower tick because archive.org is donated
+        // infrastructure and is polled at ~1 req/s out of courtesy.
+        call('recover-contacts', {}),
         // Reply listening (P0.2). Every 7 min matches the 5–10 min target and
         // reuses this tick because the free plan caps cron triggers at 5.
         // Reads INBOX over IMAP, classifies, and drops a Telegram alert on a
