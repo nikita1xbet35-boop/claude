@@ -135,10 +135,14 @@ Deno.serve(async (req: Request) => {
       }), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    // How many were already sent today
+    // How many were already sent today BY THIS PIPELINE.
+    // The DataForSEO module runs its own funnel with its own daily ceiling
+    // (pipeline_limits). Counting its sends here would make this pipeline
+    // throttle itself on somebody else's volume and quietly stop.
     const { count: sentToday } = await supabase
       .from('email_log')
       .select('id', { count: 'exact', head: true })
+      .or('pipeline.eq.search,pipeline.is.null')
       .gte('sent_at', todayMidnightUTC.toISOString())
       .lt('sent_at',  tomorrowMidnightUTC.toISOString());
 
@@ -231,6 +235,9 @@ Deno.serve(async (req: Request) => {
         .not('contact_email', 'is', null)
         .neq('contact_email', '')
         .is('exclude_reason', null)
+        // DataForSEO leads are enqueued by generate-queue-dfs against their own
+        // daily ceiling and their own template — they must not be picked up here.
+        .or('pipeline.eq.search,pipeline.is.null')
         // Newest first: fresh contactable leads must send same-day. Ascending order
         // jammed the 600-row window with old already-emailed/placeholder leads,
         // so generate-queue added 0 new while fresh leads sat beyond the window.
@@ -271,6 +278,7 @@ Deno.serve(async (req: Request) => {
           .in('stage', ['new', 'ready', 'researched', 'followup'])
           .not('contact_email', 'is', null)
           .neq('contact_email', '')
+          .or('pipeline.eq.search,pipeline.is.null')
           .order('created_at', { ascending: true })   // oldest uncontacted first
           .limit(500);
         let backlogAdded = 0;
@@ -317,6 +325,7 @@ Deno.serve(async (req: Request) => {
         scheduled_at:  new Date(cursor).toISOString(),
         status:        'pending',
         source:        l.source,
+        pipeline:      'search',
       });
       cursor += randInterval();
     }

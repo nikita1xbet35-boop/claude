@@ -324,7 +324,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const { data: rows, error } = await supabase.from('tg_outreach_channels')
-      .select('id, channel_url, ai_score, attempts, subscribers')
+      .select('id, channel_url, ai_score, attempts, subscribers, last_post_at')
       .eq('status', 'new')
       .is('owner_contact', null)
       .lt('attempts', MAX_ATTEMPTS)
@@ -375,7 +375,11 @@ Deno.serve(async (req: Request) => {
       const base: Record<string, unknown> = {
         subscribers: page.subscribers ?? ch.subscribers ?? null,
         description: page.description ? page.description.slice(0, 2000) : null,
-        last_post_at: page.lastPostAt,
+        // Falls back to what we already knew, exactly like subscribers above: a
+        // re-run whose preview fetch failed to parse must not erase a freshness
+        // timestamp we successfully read earlier — that would turn a known-live
+        // channel back into "freshness unknown" and disarm the stale filter.
+        last_post_at: page.lastPostAt ?? ch.last_post_at ?? null,
       };
       if (page.name) base.channel_name = page.name.slice(0, 200);
 

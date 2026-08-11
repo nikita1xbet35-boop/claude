@@ -123,6 +123,32 @@ function scoreLead(l: Record<string, any>): Score {
   if (l.search_layer === 'C') { score += 10; reasons.push('найден по футпринту конкурента (слой C)'); }
   else if (l.search_layer === 'B') { score += 5; reasons.push('медиахолдинг/паблишер (слой B)'); }
 
+  // ── DataForSEO pipeline signals ───────────────────────────────────────────
+  // These come off the link graph rather than off page text, which makes them
+  // harder evidence than anything above: a site cannot accidentally link to
+  // three competitor bookmakers.
+  if (l.pipeline === 'dataforseo') {
+    if (l.affiliate_maturity === 'professional') {
+      score += 30; reasons.push('профи-аффилиат: коммерческие анкоры + сравнения + мультибук');
+    } else if (l.affiliate_maturity === 'semi_pro') {
+      score += 12; reasons.push('полупрофи: есть коммерческий анкор или сравнения');
+    }
+
+    const inter = Number(l.dfs_intersect_count) || 0;
+    if (inter >= 3)      { score += 25; reasons.push(`ссылается на ${inter} букмекеров сразу`); }
+    else if (inter === 2) { score += 14; reasons.push('ссылается на 2 букмекеров'); }
+
+    const ps = (l.pro_signals || {}) as Record<string, unknown>;
+    if (ps.multi_bookmaker) { score += 20; reasons.push('мультибук в контенте'); }
+
+    const ck = Number(l.commercial_keywords) || 0;
+    if (ck >= 10)     { score += 15; reasons.push(`${ck} коммерческих ключей в топ-20`); }
+    else if (ck >= 3) { score += 7;  reasons.push(`${ck} коммерческих ключей в топ-20`); }
+
+    const rank = Number(l.dfs_rank) || 0;
+    if (rank >= 30) { score += 10; reasons.push(`вес домена DFS rank ${rank}`); }
+  }
+
   // signals of a real affiliate operation
   if (/affiliate|partner|revshare|rev share|cpa/.test(t)) { score += 8; reasons.push('упоминает партнёрку'); }
   if (l.contact_email_type === 'advertising' || l.contact_email_type === 'admin') {
@@ -148,7 +174,8 @@ Deno.serve(async (req: Request) => {
   try {
     const { data: leads } = await supabase.from('leads')
       .select('id, name, url, summary, type, geo, brand, found_keyword, contact_email_type, email_status, '
-        + 'search_layer, competitor_book, monetization_signal, monetization_evidence, has_partnership_path')
+        + 'search_layer, competitor_book, monetization_signal, monetization_evidence, has_partnership_path, '
+        + 'pipeline, affiliate_maturity, pro_signals, commercial_keywords, dfs_intersect_count, dfs_rank')
       .is('fit_score', null)
       .limit(BATCH);
 
