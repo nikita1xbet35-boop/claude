@@ -249,6 +249,50 @@ const OUR_BRANDS = ['1xbet', '1xcasino', '1xpartners', 'melbet', 'betwinner',
 const SKIP_TLD = ['.uk', '.ua', '.au', '.br', '.us', '.gov', '.edu', '.mil',
   '.ru', '.by', '.kz', '.pl', '.cz', '.nl', '.se', '.no', '.dk', '.fi'];
 
+// ── Machine junk ────────────────────────────────────────────────────────────
+// The first real intersection run put pdfbookee.com and subdomainfinder.io at
+// the TOP of the queue, above every genuine affiliate. That is not bad luck:
+// tooling and scraper sites link out to thousands of domains automatically, so
+// they hit two or three bookmakers by construction — the exact signal the
+// intersection is supposed to prove. The link graph cannot tell them apart, so
+// they have to be named.
+//
+// Substring match on the bare hostname. Each entry is a machine that generates
+// pages ABOUT other sites (SEO/DNS/WHOIS lookups, PDF and APK scrapers, stat
+// farms), never a publisher with an audience of its own.
+const JUNK_PATTERNS = [
+  // SEO / DNS / WHOIS / hosting lookup tools
+  'subdomainfinder', 'subdomain-', 'dnsdumpster', 'dnschecker', 'nslookup',
+  'whois', 'iptrack', 'ip-track', 'iplocation', 'ip-lookup', 'mxtoolbox',
+  'sitechecker', 'urlscan', 'seotool', 'seocheck', 'seoreview', 'seorank',
+  'seoaudit', 'backlinkcheck', 'linkchecker', 'similarweb', 'ahrefs',
+  'semrush', 'majestic', 'statscrop', 'websiteoutlook', 'siteworth',
+  'websitevalue', 'worthofweb', 'trafficestimate', 'rank-checker',
+  'rankchecker', 'domaintools', 'domainbigdata', 'expireddomain', 'hostadvice',
+  'webhosting', 'cpanel', 'sitespeed', 'pagespeed', 'w3snoop', 'urlrate',
+  // Document / file / APK scrapers — pages generated from other people's files
+  'pdfbook', 'pdfdrive', 'pdffiller', 'pdfcoffee', 'ebookdownload', 'docplayer',
+  'slideshare', 'scribd', 'epubdownload', 'freedownload', 'downloadapk',
+  'apkpure', 'apkmirror', 'apkmody', 'apkdone', 'modapk', 'apk-', '-apk.',
+  'crackdownload', 'nulled', 'warez', 'torrent',
+  // Redirect / shortener farms beyond the named ones
+  'shortlink', 'urlshort', 'shorten', 'linkbio', 'link-bio', 'redirect',
+  // Scraped-content farms
+  'freewebsite', 'webstat', 'sitestat', 'domainstat', 'alexa-rank',
+];
+
+/** True when the hostname belongs to a machine rather than a publisher.
+ *  Used on both sides of the pipeline — harvest drops these before they are
+ *  written, qualify drops any that predate this list. */
+function isMachineJunk(domain: string): boolean {
+  const stem = domain.split('.')[0];
+  return JUNK_PATTERNS.some(p => domain.includes(p))
+    // A bare-tool stem like "whois" or "subger" is also caught by the list
+    // above; this second test keeps the check honest when the pattern would
+    // otherwise straddle a dot ("pdf.bookee.com").
+    || JUNK_PATTERNS.some(p => stem.includes(p.replace(/[-.]/g, '')));
+}
+
 /** Normalise to a bare registrable-ish hostname. */
 function normDomain(raw: string): string {
   let d = String(raw || '').trim().toLowerCase();
@@ -265,6 +309,7 @@ function isJunk(domain: string, competitorSet: Set<string>): boolean {
   for (const s of SKIP_EXACT) if (domain.endsWith('.' + s)) return true;
   if (SKIP_TLD.some(t => domain.endsWith(t))) return true;
   if (OUR_BRANDS.some(b => domain.includes(b))) return true;
+  if (isMachineJunk(domain)) return true;
   // The bookmakers themselves, and their local mirrors (bet9ja.ng for bet9ja.com).
   if (competitorSet.has(domain)) return true;
   for (const c of competitorSet) {
