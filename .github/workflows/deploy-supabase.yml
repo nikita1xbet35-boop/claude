@@ -139,6 +139,11 @@ jobs:
             extract-tg-contact
             draft-tg-message
             send-tg-leads
+            dfs-harvest
+            dfs-qualify
+            dfs-enrich
+            generate-queue-dfs
+            recover-contacts
           "
           for fn in $FUNCTIONS; do
             mkdir -p "supabase/functions/$fn"
