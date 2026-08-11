@@ -15,6 +15,17 @@ name: DataForSEO healthcheck
 # tg-diag.yml, so merging it is itself the first run.
 on:
   workflow_dispatch:
+    inputs:
+      harvest:
+        description: 'Run a real harvest after the checks (SPENDS MONEY)'
+        required: false
+        default: 'none'
+        type: choice
+        options: [none, intersect, both]
+      budget:
+        description: 'Hard budget ceiling for that run, USD'
+        required: false
+        default: '0.35'
   push:
     branches: [main]
     paths:
@@ -86,3 +97,35 @@ jobs:
             echo "HTTP $code"
             head -c 500 /tmp/fn.txt; echo; echo
           done
+
+          # ── 7. optional real harvest ──────────────────────────────────────
+          # Only on an explicit dispatch. Defaults to 'none', so neither a push
+          # nor a plain dispatch can spend anything by accident.
+          HARVEST="${{ github.event.inputs.harvest || 'none' }}"
+          BUDGET="${{ github.event.inputs.budget || '0.35' }}"
+          if [ "$HARVEST" = "none" ]; then
+            echo "── 7. harvest: skipped (dispatch with harvest=intersect to run one) ──"
+            exit 0
+          fi
+
+          echo "── 7. HARVEST mode=$HARVEST budget=\$$BUDGET ───────────────"
+          curl -s -m 300 -X POST \
+            "https://$PROJECT.supabase.co/functions/v1/dfs-harvest" \
+            -H "Content-Type: application/json" \
+            -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+            -d "{\"mode\":\"$HARVEST\",\"budget_usd\":$BUDGET,\"rows_per_call\":1000}" \
+            | head -c 2000
+          echo; echo
+
+          echo "── 8. what actually landed ─────────────────────────────────"
+          q "SELECT status, count(*) FROM public.dfs_domains GROUP BY status ORDER BY status;"
+          echo; echo
+          q "SELECT coalesce(sum(cost_usd),0) AS spent, count(*) AS calls FROM public.dfs_usage;"
+          echo; echo
+
+          echo "── 9. sample — highest intersect_count first ───────────────"
+          # The quality check the whole pilot exists for: are these real affiliate
+          # sites, or is the link graph mostly noise? Judge this by eye before
+          # putting any more money in.
+          q "SELECT domain, intersect_count, dfs_rank, spam_score, array_to_string(competitors_list,'|') AS books FROM public.dfs_domains ORDER BY intersect_count DESC, dfs_rank DESC NULLS LAST LIMIT 40;"
+          echo
