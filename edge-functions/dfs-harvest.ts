@@ -147,32 +147,59 @@ async function dfsCall(endpoint: string, payload: unknown, target = ''): Promise
   return out;
 }
 
-/** Call with the sort/filter clauses, and retry once without them if DataForSEO
- *  rejects the field shape.
+/** Call an endpoint, and let the API itself teach us the payload it accepts.
  *
- *  Server-side sorting and filtering are free and keep the paid row count down,
- *  so they are always attempted first. But the field grammar differs per
- *  endpoint — the brief's own domain_intersection example used a bare
- *  "rank,desc" that the live API rejects with `40501 Invalid Field`, which
- *  failed all five calls of the first pilot run. Rather than guess the exact
- *  grammar for each endpoint from a sandbox that cannot reach the API, fall back
- *  to an unadorned request: unsorted, unfiltered rows are worth vastly more than
- *  none, and a rejected task is billed at $0 so the retry is free.
+ *  DataForSEO rejects an unknown parameter with `40501 Invalid Field: 'x'` —
+ *  naming the offender. So instead of guessing the schema one deploy at a time,
+ *  drop exactly the field it named and retry.
  *
- *  `usedFallback` lets the caller apply the dropped filter client-side. */
+ *  This exists because the brief's request examples do not match the live API,
+ *  and that could not be discovered from a sandbox whose network policy blocks
+ *  api.dataforseo.com. Two pilot runs burned on it: the first died on
+ *  `order_by`, and once that was corrected the second died on
+ *  `intersection_mode` — the same guess-and-redeploy loop, one field per round
+ *  trip. Rejected tasks are billed at $0, so converging here inside a single run
+ *  costs nothing but a few seconds.
+ *
+ *  Sort and filter clauses are still sent on the first attempt: server-side
+ *  filtering is free and keeps the paid row count down. `dropped` tells the
+ *  caller which clauses did not survive, so it can apply them client-side. */
+const NEVER_DROP = new Set(['target', 'targets', 'limit', 'offset']);
+const MAX_FIELD_PEELS = 6;
+
 async function dfsCallTolerant(
   endpoint: string,
   base: Record<string, unknown>,
   extras: Record<string, unknown>,
   target = '',
-): Promise<DfsCall & { usedFallback: boolean }> {
-  const first = await dfsCall(endpoint, { ...base, ...extras }, target);
-  if (first.ok || !/invalid field/i.test(first.error)) {
-    return { ...first, usedFallback: false };
+): Promise<DfsCall & { dropped: string[]; attempts: number }> {
+  let payload: Record<string, unknown> = { ...base, ...extras };
+  const dropped: string[] = [];
+  let cost = 0;
+  let last: DfsCall | null = null;
+  let attempts = 0;
+
+  for (let attempt = 0; attempt <= MAX_FIELD_PEELS; attempt++) {
+    const r = await dfsCall(endpoint, payload, target);
+    attempts++;
+    cost += r.cost;
+    last = r;
+    if (r.ok) break;
+
+    const field = r.error.match(/invalid field:\s*'([^']+)'/i)?.[1];
+    // Not a field-shape problem (auth, funds, rate limit) — retrying the same
+    // request differently will not help.
+    if (!field) break;
+    // A required field being called invalid means the shape is wrong in a way
+    // peeling cannot fix; stop rather than send a request that cannot succeed.
+    if (NEVER_DROP.has(field) || !(field in payload)) break;
+
+    const { [field]: _removed, ...rest } = payload;
+    payload = rest;
+    dropped.push(field);
   }
-  const second = await dfsCall(endpoint, base, target);
-  // Cost is the sum of both attempts; the rejected one contributes $0.
-  return { ...second, cost: second.cost + first.cost, usedFallback: second.ok };
+
+  return { ...(last as DfsCall), cost, dropped, attempts };
 }
 
 /** Account balance. Also the credentials smoke test — a wrong API password
@@ -292,8 +319,17 @@ Deno.serve(async (req: Request) => {
     intersections: [] as Array<{ geo: string; targets: string[]; found: number }>,
     broad: [] as Array<{ competitor: string; found: number; offset: number; total: number }>,
     anchors_filled: 0,
+    // Which request fields the API refused, per phase. Worth surfacing rather
+    // than swallowing: it is the difference between "this endpoint's schema
+    // drifted" and "the harvest found nothing", which look identical otherwise.
+    dropped_fields: {} as Record<string, string[]>,
     reason: '',
     error: '',
+  };
+
+  const dropNote = (phase: string, fields: string[]) => {
+    const seen = stats.dropped_fields[phase] || [];
+    stats.dropped_fields[phase] = [...new Set([...seen, ...fields])];
   };
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -430,9 +466,9 @@ Deno.serve(async (req: Request) => {
           order_by: ['1.rank,desc'],
           filters: [['1.rank', '>', MIN_RANK]],
         }, label);
-        stats.calls++;
+        stats.calls += r.attempts;
         stats.spent += r.cost;
-        if (r.usedFallback) (stats as any).intersect_fallback = true;
+        if (r.dropped.length) dropNote('intersect', r.dropped);
 
         if (!r.ok) { stats.reason = 'intersection failed: ' + r.error; continue; }
 
@@ -490,9 +526,9 @@ Deno.serve(async (req: Request) => {
           order_by: ['rank,desc'],
           filters: [['rank', '>', MIN_RANK]],
         }, domain);
-        stats.calls++;
+        stats.calls += r.attempts;
         stats.spent += r.cost;
-        if (r.usedFallback) (stats as any).broad_fallback = true;
+        if (r.dropped.length) dropNote('broad', r.dropped);
         if (!r.ok) { stats.reason = 'referring_domains failed: ' + r.error; continue; }
 
         const rows: UpsertRow[] = r.items.map((it: any) => ({
@@ -547,9 +583,9 @@ Deno.serve(async (req: Request) => {
           filters: [['dofollow', '=', true]],
           order_by: ['rank,desc'],
         }, domain);
-        stats.calls++;
+        stats.calls += r.attempts;
         stats.spent += r.cost;
-        if (r.usedFallback) (stats as any).anchors_fallback = true;
+        if (r.dropped.length) dropNote('anchors', r.dropped);
         if (!r.ok) { stats.reason = 'backlinks failed: ' + r.error; continue; }
 
         const rows: UpsertRow[] = r.items.map((it: any) => ({
@@ -579,7 +615,10 @@ Deno.serve(async (req: Request) => {
       level: 'info', service: 'dfs-harvest',
       message: `mode=${mode} calls=${stats.calls} spent=$${stats.spent.toFixed(4)} `
         + `seen=${stats.rows_seen} junk=${stats.junk_filtered} saved=${stats.saved} `
-        + `anchors=${stats.anchors_filled} balance=$${(stats.balance_after ?? 0).toFixed(4)} ${stats.reason}`,
+        + `anchors=${stats.anchors_filled} balance=$${(stats.balance_after ?? 0).toFixed(4)} `
+        + (Object.keys(stats.dropped_fields).length
+            ? `dropped=${JSON.stringify(stats.dropped_fields)} ` : '')
+        + stats.reason,
     }]));
 
     return json(stats);
