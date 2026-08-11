@@ -42,6 +42,12 @@ const DEADLINE_MS = 110_000;
 // Below this balance the harvester refuses to start — running the account to
 // zero mid-pagination leaves a competitor half-harvested with no way to tell.
 const MIN_BALANCE_USD = 0.10;
+// Ceiling on what a single invocation may authorise, whatever it was asked for.
+// This function is deployed --no-verify-jwt like everything else here, so it is
+// callable by anyone holding the anon key, and the realistic accident is a
+// fat-fingered budget in the UI (500 instead of 5) emptying the account in one
+// call. Raise deliberately if a genuinely larger single run is ever wanted.
+const MAX_BUDGET_PER_RUN = 25;
 // API-side quality floor. rank <= 15 is overwhelmingly scraper junk, and
 // filtering costs nothing.
 const MIN_RANK = 15;
@@ -279,7 +285,10 @@ Deno.serve(async (req: Request) => {
     // `?? 5` rather than `|| 5`: an explicit budget_usd of 0 means "spend
     // nothing", and `||` would turn that into an authorised $5.
     const parsedBudget = Number(body.budget_usd);
-    const budget      = Math.max(0, Number.isFinite(parsedBudget) ? parsedBudget : 5);
+    const budget      = Math.min(
+      MAX_BUDGET_PER_RUN,
+      Math.max(0, Number.isFinite(parsedBudget) ? parsedBudget : 5),
+    );
     const mode        = String(body.mode || 'both');
     const rowsPerCall = Math.min(1000, Math.max(10, Number(body.rows_per_call) || 1000));
     stats.mode = mode;
