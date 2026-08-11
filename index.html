@@ -13106,6 +13106,7 @@ let dfsLoaded    = false;
 let dfsData      = {
   counts: {}, competitors: [], usage: [], spend30: [], queue: [], rejects: [],
   leads: [], limit: null, sentToday: 0, clusters: [], balance: null, estimate: null,
+  intersectState: [],
 };
 
 // ── Мусорные домены ────────────────────────────────────────────────────────
@@ -13187,7 +13188,7 @@ async function loadDFS(){
       countOf(null), countOf('raw'), countOf('qualified'), countOf('promoted'), countOf('rejected'),
     ]);
 
-    const [comps, usage, spend30, queue, rejects, leads, limitRow, clusters] = await Promise.all([
+    const [comps, usage, spend30, queue, rejects, leads, limitRow, clusters, intersectState] = await Promise.all([
       sb.from('dfs_competitors').select('*').order('priority').then(r => r.data || []),
       sb.from('dfs_usage').select('*').order('created_at', { ascending:false }).limit(400)
         .then(r => r.data || []),
@@ -13231,6 +13232,11 @@ async function loadDFS(){
         .then(r => r.data),
       sb.from('owner_clusters').select('*').order('sites_count', { ascending:false }).limit(50)
         .then(r => r.data || []),
+      // Пагинация пересечений, по гео. Раньше запрос на пересечение всегда слал
+      // offset:0 — повторный запуск покупал ту же самую верхушку заново, деньги
+      // списывались, а очередь не прирастала. Это то место, где видно, что
+      // теперь прогон идёт дальше, а не по кругу.
+      sb.from('dfs_intersect_state').select('*').then(r => r.data || []),
     ]);
 
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
@@ -13241,7 +13247,7 @@ async function loadDFS(){
 
     dfsData = {
       counts: { total, raw, qualified, promoted, rejected },
-      competitors: comps, usage, spend30, queue, rejects, leads,
+      competitors: comps, usage, spend30, queue, rejects, leads, intersectState,
       limit: limitRow, sentToday: sentToday || 0, clusters,
       balance: dfsData.balance, estimate: dfsData.estimate,
     };
@@ -13494,6 +13500,24 @@ function dfsRenderHarvest(){
       <td style="padding:7px 8px;font-size:11px;color:${u.error_message?'var(--red)':'var(--text3)'};">${dfsEsc(u.error_message||'ok')}</td>
     </tr>`).join('');
 
+  const intersectRows = (dfsData.intersectState || [])
+    .slice().sort((a,b) => (a.geo||'').localeCompare(b.geo||'')).map(s => {
+      const total = s.total_count;
+      const pct = total ? Math.min(100, Math.round((s.harvested_offset||0)/total*100)) : 0;
+      const done = total != null && (s.harvested_offset||0) >= total;
+      return `<tr style="border-top:1px solid var(--border2);">
+        <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;">${dfsEsc(s.geo)}</td>
+        <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;">${dfsNum(s.harvested_offset||0)} / ${total!=null?dfsNum(total):'?'}</td>
+        <td style="padding:9px 8px;width:130px;">
+          <div style="height:5px;background:var(--bg3);border-radius:3px;overflow:hidden;">
+            <div style="height:100%;width:${pct}%;background:${done?'var(--green)':'var(--accent2)'};"></div>
+          </div>
+        </td>
+        <td style="padding:9px 8px;font-size:11px;color:${done?'var(--green)':'var(--text3)'};">${done?'пройдено до конца':pct+'%'}</td>
+        <td style="padding:9px 8px;font-size:11px;color:var(--text3);">${dfsDate(s.last_harvest_at)}</td>
+      </tr>`;
+    }).join('');
+
   return `
     ${dfsCard('Запустить выгрузку', `
       <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:16px;">
@@ -13546,6 +13570,24 @@ function dfsRenderHarvest(){
               `<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;font-weight:500;">${h}</th>`).join('')}
           </tr></thead>
           <tbody>${rows}</tbody>
+        </table>
+      </div>`)}
+
+    <div style="height:14px;"></div>
+
+    ${dfsCard('Пересечения по гео — куда дошла пагинация', `
+      <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:12px;">
+        Раньше повторный запуск «пересечений» всегда покупал одну и ту же верхнюю страницу заново —
+        деньги списывались, а в очередь ничего нового не попадало. Теперь каждый прогон продолжает
+        с той точки, где остановился прошлый.
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr>
+            ${['GEO','Пройдено','','Статус','Последний прогон'].map(h =>
+              `<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;font-weight:500;">${h}</th>`).join('')}
+          </tr></thead>
+          <tbody>${intersectRows || '<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--text3);font-size:12px;">Пересечения ещё не запускались.</td></tr>'}</tbody>
         </table>
       </div>`)}
 

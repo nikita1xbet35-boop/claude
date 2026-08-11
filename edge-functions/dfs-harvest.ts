@@ -571,11 +571,28 @@ Deno.serve(async (req: Request) => {
         byGeo.get(g)!.push(normDomain(c.domain));
       }
 
+      // Pagination state, one row per geo. Without this the call always sent
+      // offset: 0 — every run, however many times it was pressed, re-bought the
+      // exact same top page by rank. Those rows were already in dfs_domains and
+      // already through dfs-qualify, so the upsert just touched existing rows:
+      // DataForSEO charged for the call and the queue gained nothing new. That
+      // is what a run reporting real spend and zero new domains actually was.
+      const { data: intersectState } = await supabase
+        .from('dfs_intersect_state').select('geo, harvested_offset, total_count');
+      const offsetByGeo = new Map<string, { offset: number; total: number | null }>();
+      for (const s of intersectState || []) {
+        offsetByGeo.set(s.geo, { offset: Number(s.harvested_offset) || 0, total: s.total_count });
+      }
+
       for (const [geo, domains] of byGeo) {
         if (outOfTime()) { stats.reason = 'deadline during intersections'; break; }
         if (!affordable()) { stats.reason = 'budget spent during intersections'; break; }
         // Intersection needs at least two targets to mean anything.
         if (domains.length < 2) continue;
+
+        const st = offsetByGeo.get(geo) || { offset: 0, total: null };
+        // Exhausted: this geo's intersection has already been walked to the end.
+        if (st.total != null && st.offset >= st.total) continue;
 
         // Two targets, not three. A three-way intersection is a much smaller set
         // than a two-way one, and the first successful run returned total_count=0
@@ -591,7 +608,7 @@ Deno.serve(async (req: Request) => {
         const base = {
           targets,
           limit: rowsPerCall,
-          offset: 0,
+          offset: st.offset,
           backlinks_status_type: 'live',
         };
 
@@ -653,6 +670,16 @@ Deno.serve(async (req: Request) => {
         // targets are wrong or the query is.
         stats.intersections.push({ geo, targets: targetList, found: kept,
                                    returned: r.items.length, total: r.totalCount });
+
+        // Advance by what the API returned, not by the limit requested — same
+        // rule as the broad phase: a short page means this geo's intersection
+        // ended, and running the offset past it would skip real rows next time.
+        await quiet(supabase.from('dfs_intersect_state').upsert({
+          geo,
+          harvested_offset: st.offset + r.items.length,
+          total_count: r.totalCount || st.total,
+          last_harvest_at: new Date().toISOString(),
+        }, { onConflict: 'geo' }));
         await sleep(300);
       }
     }
