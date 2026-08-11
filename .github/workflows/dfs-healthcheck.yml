@@ -101,8 +101,22 @@ jobs:
           # ── 7. optional real harvest ──────────────────────────────────────
           # Only on an explicit dispatch. Defaults to 'none', so neither a push
           # nor a plain dispatch can spend anything by accident.
-          HARVEST="${{ github.event.inputs.harvest || 'none' }}"
-          BUDGET="${{ github.event.inputs.budget || '0.35' }}"
+          # A push-triggered run has no dispatch inputs, and this repo's CI token
+          # cannot dispatch with inputs at all. So a push run reads these two
+          # constants instead — set PUSH_HARVEST to 'intersect' in a commit to
+          # fire exactly one harvest on merge, then set it straight back to
+          # 'none'. Leaving it armed would spend money on every unrelated edit to
+          # this file, so treat flipping it as a one-shot.
+          PUSH_HARVEST=intersect
+          PUSH_BUDGET=0.35
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            HARVEST="${{ github.event.inputs.harvest || 'none' }}"
+            BUDGET="${{ github.event.inputs.budget || '0.35' }}"
+          else
+            HARVEST="$PUSH_HARVEST"
+            BUDGET="$PUSH_BUDGET"
+          fi
           if [ "$HARVEST" = "none" ]; then
             echo "── 7. harvest: skipped (dispatch with harvest=intersect to run one) ──"
             exit 0
