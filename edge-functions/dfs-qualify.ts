@@ -36,6 +36,16 @@ const DEADLINE_MS  = 110_000;
 const CLAIM_BATCH  = 120;   // domains pulled per run
 const LLM_BATCH    = 25;    // domains per LLM call
 const MIN_SCORE    = 35;
+// Above this, the domain is in somebody's spam neighbourhood. DataForSEO's
+// spam_score is a 0-100 read on the referring profile; a real affiliate that
+// sells ad space sits in single digits, and writing to a 45 is writing to a PBN.
+const MAX_SPAM     = 30;
+// Link-graph override threshold. Was 2 — which promoted everything, because an
+// intersection built from two targets gives EVERY row a count of exactly 2, so
+// the override fired on all of them and the model's verdict never mattered.
+// At 3 the override means what it was meant to mean: three separate bookmakers
+// is evidence no single anchor string can outweigh.
+const OVERRIDE_INTERSECT = 3;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -66,6 +76,21 @@ We do NOT want: the bookmakers themselves, livescore/stats-only tools, streaming
 sites, forums, link shorteners, social platforms, marketplaces, job boards,
 directories, adult/NSFW sites, news sites that merely mention a bookmaker once,
 and anything with no owned audience.
+
+We especially do NOT want MACHINE-GENERATED sites — pages produced automatically
+ABOUT other websites or files rather than written for readers. These link to many
+bookmakers at once as a side effect of scraping, so the link graph flatters them
+and only you can catch it. Reject on sight, score 0, audience_owner = false:
+- SEO / DNS / WHOIS / IP / hosting lookup and "website worth" tools
+  (subdomainfinder.io, whois-*, *seotool*, statscrop, websiteoutlook)
+- PDF, ebook, document and APK scrapers and download mirrors (pdfbookee.com,
+  docplayer, apkpure, anything "download"/"crack"/"torrent")
+- subtitle, streaming and file-hosting sites
+- URL shorteners, redirect farms, expired-domain and traffic-estimate sites
+- parked domains, template demos and sites with no editorial content
+
+Rule of thumb: if a human editor did not decide to publish the page, it is not a
+partner, no matter how many bookmakers it links to.
 
 For EACH item return one JSON object, keyed back to the item by its "i" index:
 
@@ -202,6 +227,34 @@ interface Row {
 const OUR_GROUP = ['1xbet', '1x bet', 'betwinner', 'melbet', 'megapari',
   'paripesa', '22bet', 'linebet', '1xpartners'];
 
+// ── Machine junk ────────────────────────────────────────────────────────────
+// Mirrors the list in dfs-harvest, which now drops these before they are ever
+// written. Repeated here because the rows already in the table predate it, and
+// because an LLM call costs money that a substring match does not. Kept as a
+// copy rather than an import: edge functions deploy as standalone files.
+const JUNK_PATTERNS = [
+  'subdomainfinder', 'subdomain-', 'dnsdumpster', 'dnschecker', 'nslookup',
+  'whois', 'iptrack', 'ip-track', 'iplocation', 'ip-lookup', 'mxtoolbox',
+  'sitechecker', 'urlscan', 'seotool', 'seocheck', 'seoreview', 'seorank',
+  'seoaudit', 'backlinkcheck', 'linkchecker', 'similarweb', 'ahrefs',
+  'semrush', 'majestic', 'statscrop', 'websiteoutlook', 'siteworth',
+  'websitevalue', 'worthofweb', 'trafficestimate', 'rank-checker',
+  'rankchecker', 'domaintools', 'domainbigdata', 'expireddomain', 'hostadvice',
+  'webhosting', 'cpanel', 'sitespeed', 'pagespeed', 'w3snoop', 'urlrate',
+  'pdfbook', 'pdfdrive', 'pdffiller', 'pdfcoffee', 'ebookdownload', 'docplayer',
+  'slideshare', 'scribd', 'epubdownload', 'freedownload', 'downloadapk',
+  'apkpure', 'apkmirror', 'apkmody', 'apkdone', 'modapk', 'apk-', '-apk.',
+  'crackdownload', 'nulled', 'warez', 'torrent',
+  'shortlink', 'urlshort', 'shorten', 'linkbio', 'link-bio', 'redirect',
+  'freewebsite', 'webstat', 'sitestat', 'domainstat', 'alexa-rank',
+];
+
+function isMachineJunk(domain: string): boolean {
+  const stem = String(domain || '').split('.')[0];
+  return JUNK_PATTERNS.some(p => domain.includes(p))
+      || JUNK_PATTERNS.some(p => stem.includes(p.replace(/[-.]/g, '')));
+}
+
 async function judge(batch: Row[]): Promise<Map<number, Verdict>> {
   const out = new Map<number, Verdict>();
   if (!batch.length) return out;
@@ -260,7 +313,7 @@ Deno.serve(async (req: Request) => {
 
   const stats = {
     claimed: 0, judged: 0, promoted: 0, rejected: 0, unjudged: 0,
-    already_lead: 0, already_emailed: 0,
+    already_lead: 0, already_emailed: 0, junk: 0, spammy: 0,
     llm: ANTHROPIC_KEY ? 'anthropic' : 'groq', reason: '',
   };
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
@@ -328,10 +381,25 @@ Deno.serve(async (req: Request) => {
     const fresh: Row[] = [];
     const preRejected: Array<{ id: number; reason: string }> = [];
     for (const r of rows as Row[]) {
-      if (knownLeads.has(r.domain)) { preRejected.push({ id: r.id, reason: 'already_lead' }); continue; }
+      if (knownLeads.has(r.domain)) {
+        preRejected.push({ id: r.id, reason: 'already_lead' });
+        stats.already_lead++;
+        continue;
+      }
+      // Free rejections, before any token is spent. Both of these were sitting
+      // at the top of the queue after the first real harvest.
+      if (isMachineJunk(r.domain)) {
+        preRejected.push({ id: r.id, reason: 'machine_junk' });
+        stats.junk++;
+        continue;
+      }
+      if (r.spam_score != null && r.spam_score > MAX_SPAM) {
+        preRejected.push({ id: r.id, reason: 'spam_score' });
+        stats.spammy++;
+        continue;
+      }
       fresh.push(r);
     }
-    stats.already_lead = preRejected.length;
 
     for (const p of preRejected) {
       await quiet(supabase.from('dfs_domains')
@@ -340,7 +408,7 @@ Deno.serve(async (req: Request) => {
     }
     stats.rejected += preRejected.length;
 
-    if (!fresh.length) { stats.reason = 'all claimed domains already leads'; return json(stats); }
+    if (!fresh.length) { stats.reason = 'nothing left after free filters'; return json(stats); }
 
     // Hard all-time dedup: never approach an address that was ever emailed.
     const { data: sent } = await supabase.from('email_log').select('email');
@@ -391,10 +459,13 @@ Deno.serve(async (req: Request) => {
         if (!v.relevant)                 { await reject('irrelevant'); continue; }
         if (emailed.has(row.domain))     { stats.already_emailed++; await reject('already_emailed'); continue; }
 
-        // A domain linking to 2+ books gets in even on a weak score: the link
-        // graph is harder evidence than a model's read of one anchor string.
+        // The link graph can outweigh a weak score, but only from three
+        // bookmakers up — and never against an explicit "this is a machine"
+        // verdict, which is how pdfbookee.com (four books!) reached the top of
+        // the queue. The override raises a borderline score; it does not
+        // resurrect a rejection.
         const qualifies = v.score >= MIN_SCORE
-          || row.intersect_count >= 2
+          || row.intersect_count >= OVERRIDE_INTERSECT
           || v.affiliate_maturity === 'professional';
         if (!qualifies) { await reject('low_score'); continue; }
 
@@ -452,7 +523,8 @@ Deno.serve(async (req: Request) => {
       level: 'info', service: 'dfs-qualify',
       message: `llm=${stats.llm} claimed=${stats.claimed} judged=${stats.judged} `
         + `promoted=${stats.promoted} rejected=${stats.rejected} unjudged=${stats.unjudged} `
-        + `already_lead=${stats.already_lead} ${stats.reason}`,
+        + `already_lead=${stats.already_lead} junk=${stats.junk} spammy=${stats.spammy} `
+        + `${stats.reason}`,
     }]));
 
     return json(stats);

@@ -13104,9 +13104,55 @@ function tgoCopyDraft(id){
 let dfsScreen    = 'overview';
 let dfsLoaded    = false;
 let dfsData      = {
-  counts: {}, competitors: [], usage: [], spend30: [], queue: [], leads: [],
-  limit: null, sentToday: 0, clusters: [], balance: null, estimate: null,
+  counts: {}, competitors: [], usage: [], spend30: [], queue: [], rejects: [],
+  leads: [], limit: null, sentToday: 0, clusters: [], balance: null, estimate: null,
 };
+
+// ── Мусорные домены ────────────────────────────────────────────────────────
+// Копия списка из dfs-harvest/dfs-qualify. Здесь он нужен, чтобы подсветить в
+// очереди то, что фильтр отсеет на следующем проходе, и дать отклонить пачку
+// вручную, не дожидаясь квалификатора.
+const DFS_JUNK_PATTERNS = [
+  'subdomainfinder','subdomain-','dnsdumpster','dnschecker','nslookup',
+  'whois','iptrack','ip-track','iplocation','ip-lookup','mxtoolbox',
+  'sitechecker','urlscan','seotool','seocheck','seoreview','seorank',
+  'seoaudit','backlinkcheck','linkchecker','similarweb','ahrefs',
+  'semrush','majestic','statscrop','websiteoutlook','siteworth',
+  'websitevalue','worthofweb','trafficestimate','rank-checker',
+  'rankchecker','domaintools','domainbigdata','expireddomain','hostadvice',
+  'webhosting','cpanel','sitespeed','pagespeed','w3snoop','urlrate',
+  'pdfbook','pdfdrive','pdffiller','pdfcoffee','ebookdownload','docplayer',
+  'slideshare','scribd','epubdownload','freedownload','downloadapk',
+  'apkpure','apkmirror','apkmody','apkdone','modapk','apk-','-apk.',
+  'crackdownload','nulled','warez','torrent',
+  'shortlink','urlshort','shorten','linkbio','link-bio','redirect',
+  'freewebsite','webstat','sitestat','domainstat','alexa-rank',
+];
+const DFS_MAX_SPAM = 30;
+
+function dfsIsJunk(row){
+  const d = String(row.domain || '').toLowerCase();
+  const stem = d.split('.')[0];
+  if(DFS_JUNK_PATTERNS.some(p => d.includes(p))) return 'машина, а не издание';
+  if(DFS_JUNK_PATTERNS.some(p => stem.includes(p.replace(/[-.]/g,'')))) return 'машина, а не издание';
+  if((row.spam_score || 0) > DFS_MAX_SPAM) return 'спам ' + row.spam_score;
+  return null;
+}
+
+const DFS_REJECT_LABEL = {
+  machine_junk: 'машина (SEO/PDF/APK-скрапер)',
+  spam_score:   'высокий спам-скор',
+  our_brand:    'уже наш бренд',
+  operator:     'сам букмекер',
+  geo_excluded: 'не наше гео',
+  no_audience:  'нет своей аудитории',
+  irrelevant:   'не по теме',
+  low_score:    'низкая оценка',
+  already_lead: 'уже в базе лидов',
+  already_emailed: 'уже писали',
+  manual:       'отклонено вручную',
+};
+const dfsRejectLabel = s => DFS_REJECT_LABEL[s] || (s || 'без причины');
 
 const dfsEsc = s => String(s ?? '').replace(/[&<>"']/g, c =>
   ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -13141,7 +13187,7 @@ async function loadDFS(){
       countOf(null), countOf('raw'), countOf('qualified'), countOf('promoted'), countOf('rejected'),
     ]);
 
-    const [comps, usage, spend30, queue, leads, limitRow, clusters] = await Promise.all([
+    const [comps, usage, spend30, queue, rejects, leads, limitRow, clusters] = await Promise.all([
       sb.from('dfs_competitors').select('*').order('priority').then(r => r.data || []),
       sb.from('dfs_usage').select('*').order('created_at', { ascending:false }).limit(400)
         .then(r => r.data || []),
@@ -13167,6 +13213,13 @@ async function loadDFS(){
         .order('intersect_count', { ascending:false })
         .order('dfs_rank', { ascending:false, nullsFirst:false })
         .limit(200).then(r => r.data || []),
+      // Отклонённые. Без них вкладка врала: 75 добытых доменов превращались в
+      // 27 в очереди, и куда делись остальные 48 — нигде не было видно.
+      sb.from('dfs_domains')
+        .select('id, domain, reject_reason, intersect_count, dfs_rank, spam_score, qualified_at')
+        .eq('status', 'rejected')
+        .order('qualified_at', { ascending:false, nullsFirst:false })
+        .limit(2000).then(r => r.data || []),
       sb.from('leads')
         .select('id, name, url, contact_email, contact_source, geo, lang, type, fit_score, score, stage, '
               + 'affiliate_maturity, pro_signals, commercial_keywords, dfs_intersect_count, dfs_rank, '
@@ -13188,7 +13241,7 @@ async function loadDFS(){
 
     dfsData = {
       counts: { total, raw, qualified, promoted, rejected },
-      competitors: comps, usage, spend30, queue, leads,
+      competitors: comps, usage, spend30, queue, rejects, leads,
       limit: limitRow, sentToday: sentToday || 0, clusters,
       balance: dfsData.balance, estimate: dfsData.estimate,
     };
@@ -13290,24 +13343,47 @@ function dfsRenderOverview(){
 
   const lowBalance = dfsData.balance != null && dfsData.balance < 5;
 
+  // Первая ступень раскрыта явно. Иначе воронка показывает «добыто 75», очередь
+  // показывает 27, и разницу приходится искать самому.
   const funnel = [
-    ['Добыто доменов', c.total || 0,       'var(--accent2)', 'queue'],
-    ['Квалифицировано', c.promoted || 0,   'var(--blue)',    'leads'],
-    ['С контактами',   withContact,        'var(--purple)',  'leads'],
-    ['Отправлено',     dfsData.sentToday,  'var(--amber)',   'send'],
+    ['Добыто доменов', c.total || 0,       'var(--accent2)', 'queue',
+      `${dfsNum(c.raw||0)} в очереди · ${dfsNum(c.rejected||0)} отклонено`],
+    ['Квалифицировано', c.promoted || 0,   'var(--blue)',    'leads', ''],
+    ['С контактами',   withContact,        'var(--purple)',  'leads', ''],
+    ['Отправлено',     dfsData.sentToday,  'var(--amber)',   'send',  ''],
   ];
 
   const funnelHtml = `
     <div style="display:flex;align-items:stretch;gap:0;flex-wrap:wrap;">
-      ${funnel.map(([label,val,color,screen],i) => `
+      ${funnel.map(([label,val,color,screen,note],i) => `
         <div onclick="dfsGo('${screen}')" style="flex:1;min-width:130px;cursor:pointer;padding:6px 10px;">
           <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">${label}</div>
           <div style="font-size:26px;font-family:var(--font-mono);color:${color};">${dfsNum(val)}</div>
-          ${i>0 && funnel[i-1][1] ? `<div style="font-size:10px;color:var(--text3);margin-top:3px;">${Math.round(val/funnel[i-1][1]*100)}% от пред.</div>` : '<div style="height:14px;"></div>'}
+          ${note ? `<div style="font-size:10px;color:var(--text3);margin-top:3px;">${note}</div>`
+            : i>0 && funnel[i-1][1] ? `<div style="font-size:10px;color:var(--text3);margin-top:3px;">${Math.round(val/funnel[i-1][1]*100)}% от пред.</div>`
+            : '<div style="height:14px;"></div>'}
         </div>
         ${i < funnel.length-1 ? '<div style="align-self:center;color:var(--text3);font-size:16px;padding:0 4px;">→</div>' : ''}
       `).join('')}
     </div>`;
+
+  // Разбор отказов. Пока квалификатор не пропустил ни одного домена, это
+  // единственное место, где видно почему.
+  const reasonCount = {};
+  (dfsData.rejects || []).forEach(r => {
+    const k = r.reject_reason || 'unknown';
+    reasonCount[k] = (reasonCount[k] || 0) + 1;
+  });
+  const reasonRows = Object.entries(reasonCount).sort((a,b) => b[1]-a[1]).map(([k,n]) => {
+    const pct = dfsData.rejects.length ? Math.round(n/dfsData.rejects.length*100) : 0;
+    return `<div style="display:flex;align-items:center;gap:12px;padding:7px 0;border-top:1px solid var(--border2);">
+      <span style="font-size:12px;color:var(--text2);flex:1;">${dfsEsc(dfsRejectLabel(k))}</span>
+      <div style="width:140px;height:5px;background:var(--bg3);border-radius:3px;overflow:hidden;">
+        <div style="height:100%;width:${pct}%;background:var(--text3);"></div>
+      </div>
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--text2);width:52px;text-align:right;">${dfsNum(n)}</span>
+    </div>`;
+  }).join('');
 
   // Продуктивность доноров: сколько лидов вышло с каждого конкурента.
   // По ней и правятся приоритеты — чьи ссылки дают партнёров, а чьи шум.
@@ -13340,15 +13416,12 @@ function dfsRenderOverview(){
 
   const bigClusters = dfsData.clusters.filter(cl => (cl.sites_count||0) >= 2);
 
+  // Баланс показывается цифрой, а не красной плашкой во весь экран. $5 — это не
+  // порог остановки: харвестер работает до $0.10, и каждый прогон всё равно
+  // ограничен своим бюджетом. Плашка сообщала об опасности, которой нет.
   return `
-    ${lowBalance ? `<div style="background:var(--red-bg);border:1px solid var(--red);border-radius:12px;padding:14px 18px;margin-bottom:16px;font-size:13px;color:var(--red);">
-      🔴 Баланс DataForSEO ${dfsMoney(dfsData.balance)} — меньше $5, пора пополнять.
-      Выгрузка при этом продолжает работать: она останавливается только ниже $0.10,
-      и каждый прогон в любом случае не тратит больше своего бюджета.
-    </div>` : ''}
-
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
-      ${dfsKpi('💰','Баланс', dfsData.balance!=null?dfsMoney(dfsData.balance):'—', lowBalance?'var(--red)':'var(--green)',
+      ${dfsKpi('💰','Баланс', dfsData.balance!=null?dfsMoney(dfsData.balance):'—', lowBalance?'var(--amber)':'var(--green)',
         daysLeft!=null ? `хватит на ~${daysLeft} дн. при текущем темпе` : 'темп ещё не набран')}
       ${dfsKpi('▾','Потрачено сегодня', dfsMoney(today), 'var(--text)', `за 7 дней ${dfsMoney(week)}`)}
       ${dfsKpi('▾','За 30 дней', dfsMoney(month), 'var(--text)', `${dfsData.usage.length} вызовов в логе`)}
@@ -13356,6 +13429,16 @@ function dfsRenderOverview(){
     </div>
 
     ${dfsCard('Воронка модуля', funnelHtml)}
+
+    ${reasonRows ? `<div style="height:14px;"></div>` + dfsCard(
+      `Почему отклонено — ${dfsNum(dfsData.counts.rejected||0)} доменов`, `
+      <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:10px;">
+        Отсев идёт в два слоя: бесплатный (машинные сайты, спам-скор, дубли) и платный —
+        оценка модели по домену, анкору и заголовку. Если здесь почти всё в одной причине,
+        значит перекручен именно этот фильтр, а не источник.
+        ${dfsData.rejects.length >= 2000 ? '<br>Показаны последние 2000 отказов.' : ''}
+      </div>
+      ${reasonRows}`) : ''}
 
     <div style="height:14px;"></div>
 
@@ -13553,12 +13636,16 @@ async function dfsRunHarvest(){
 
 // ── Экран 3: очередь квалификации ──────────────────────────────────────────
 function dfsRenderQueue(){
+  const junkIds = dfsData.queue.filter(r => dfsIsJunk(r)).map(r => r.id);
+
   const rows = dfsData.queue.map(r => {
     const comps = (r.competitors_list || []).join(', ');
     const ic = r.intersect_count || 1;
-    return `<tr style="border-top:1px solid var(--border2);">
+    const junk = dfsIsJunk(r);
+    return `<tr style="border-top:1px solid var(--border2);${junk?'opacity:.5;':''}">
       <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;">
-        <a href="https://${dfsEsc(r.domain)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent2);text-decoration:none;">${dfsEsc(r.domain)}</a>
+        <a href="https://${dfsEsc(r.domain)}" target="_blank" rel="noopener noreferrer" style="color:${junk?'var(--text3)':'var(--accent2)'};text-decoration:${junk?'line-through':'none'};">${dfsEsc(r.domain)}</a>
+        ${junk ? `<span style="margin-left:7px;font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:5px;border:1px solid var(--red);color:var(--red);">${dfsEsc(junk)}</span>` : ''}
       </td>
       <td style="padding:9px 8px;text-align:center;">
         <span style="font-family:var(--font-mono);font-size:13px;color:${ic>=3?'var(--green)':ic>=2?'var(--amber)':'var(--text3)'};">${ic}</span>
@@ -13574,12 +13661,35 @@ function dfsRenderQueue(){
     </tr>`;
   }).join('');
 
+  // Отклонённые — тем же экраном. Домены не исчезают в никуда: видно и сколько,
+  // и за что, и можно вернуть в очередь, если фильтр перестарался.
+  const rejRows = (dfsData.rejects || []).slice(0, 200).map(r => `
+    <tr style="border-top:1px solid var(--border2);">
+      <td style="padding:8px;font-family:var(--font-mono);font-size:12px;color:var(--text3);">${dfsEsc(r.domain)}</td>
+      <td style="padding:8px;font-size:11px;color:var(--text2);">${dfsEsc(dfsRejectLabel(r.reject_reason))}</td>
+      <td style="padding:8px;text-align:center;font-family:var(--font-mono);font-size:12px;color:var(--text3);">${r.intersect_count || '—'}</td>
+      <td style="padding:8px;font-family:var(--font-mono);font-size:12px;color:var(--text3);">${r.dfs_rank ?? '—'}</td>
+      <td style="padding:8px;font-size:11px;color:var(--text3);">${dfsDate(r.qualified_at)}</td>
+      <td style="padding:8px;">
+        <button onclick="dfsRestoreDomain(${r.id})" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text3);font-size:11px;cursor:pointer;">Вернуть</button>
+      </td>
+    </tr>`).join('');
+
   return dfsCard(`Очередь квалификации — ${dfsNum(dfsData.counts.raw||0)} в статусе raw`, `
     <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:14px;">
       Порядок — по числу букмекеров, на которых ссылается домен, затем по весу.
       Ссылка сразу на трёх — сигнал сильнее любой оценки текста: случайно так не бывает.
       Квалификатор разбирает очередь сам, каждые 3 минуты. Показаны первые 200.
+      <br>Перечёркнутые строки — машинные сайты (SEO- и WHOIS-сервисы, PDF- и APK-скраперы)
+      и домены со спам-скором выше ${DFS_MAX_SPAM}. Они ссылаются на всех букмекеров сразу
+      автоматически, поэтому и лезут в верх списка. Квалификатор отсеет их сам и бесплатно.
     </div>
+    ${junkIds.length ? `<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <button onclick="dfsRejectJunk()" style="padding:8px 16px;border-radius:8px;border:1px solid var(--red);background:transparent;color:var(--red);font-size:12px;font-family:var(--font-mono);cursor:pointer;">
+        Отклонить мусор — ${junkIds.length} шт.
+      </button>
+      <span style="font-size:11px;color:var(--text3);">не обязательно: следующий проход квалификатора сделает то же самое</span>
+    </div>` : ''}
     <div style="overflow-x:auto;max-height:620px;overflow-y:auto;">
       <table style="width:100%;border-collapse:collapse;">
         <thead style="position:sticky;top:0;background:var(--bg);z-index:1;"><tr>
@@ -13588,7 +13698,46 @@ function dfsRenderQueue(){
         </tr></thead>
         <tbody>${rows || '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3);font-size:13px;">Очередь пуста — запустите выгрузку на вкладке «Харвестер».</td></tr>'}</tbody>
       </table>
-    </div>`);
+    </div>`)
+  + (rejRows ? `<div style="height:14px;"></div>` + dfsCard(
+      `Отклонённые — ${dfsNum(dfsData.counts.rejected||0)}`, `
+      <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:14px;">
+        Здесь всё, что не дошло до лидов. Разбивка по причинам — на «Обзоре». Показаны последние 200.
+      </div>
+      <div style="overflow-x:auto;max-height:460px;overflow-y:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead style="position:sticky;top:0;background:var(--bg);z-index:1;"><tr>
+            ${['Домен','Причина','×букм','Rank','Когда',''].map(h =>
+              `<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;font-weight:500;">${h}</th>`).join('')}
+          </tr></thead>
+          <tbody>${rejRows}</tbody>
+        </table>
+      </div>`) : '');
+}
+
+/** Отклонить разом всё, что помечено как машинный мусор. */
+async function dfsRejectJunk(){
+  const ids = dfsData.queue.filter(r => dfsIsJunk(r)).map(r => r.id);
+  if(!ids.length) return;
+  if(!confirm(`Отклонить ${ids.length} домен(ов), помеченных как мусор?`)) return;
+  try {
+    const { error } = await sb.from('dfs_domains')
+      .update({ status:'rejected', reject_reason:'machine_junk', qualified_at:new Date().toISOString() })
+      .in('id', ids);
+    if(error) throw error;
+    loadDFS();
+  } catch(e){ showError('Не удалось отклонить пачку: ' + (e.message || e)); }
+}
+
+/** Вернуть отклонённый домен в очередь — фильтр тоже может ошибаться. */
+async function dfsRestoreDomain(id){
+  try {
+    const { error } = await sb.from('dfs_domains')
+      .update({ status:'raw', reject_reason:null, qualified_at:null, claimed_at:null })
+      .eq('id', id);
+    if(error) throw error;
+    loadDFS();
+  } catch(e){ showError('Не удалось вернуть: ' + (e.message || e)); }
 }
 
 async function dfsRejectDomain(id){

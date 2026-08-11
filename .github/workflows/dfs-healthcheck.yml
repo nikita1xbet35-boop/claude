@@ -69,6 +69,11 @@ jobs:
           echo "── 4. pipeline state ───────────────────────────────────────"
           q "SELECT status, count(*) FROM public.dfs_domains GROUP BY status ORDER BY status;"
           echo; echo
+          # Where the harvested domains actually went. A funnel that ends in zero
+          # leads is either a bad source or one over-tight filter, and only this
+          # breakdown tells the two apart.
+          q "SELECT coalesce(reject_reason,'—') AS reason, count(*) FROM public.dfs_domains WHERE status='rejected' GROUP BY 1 ORDER BY 2 DESC;"
+          echo; echo
           q "SELECT coalesce(sum(cost_usd),0) AS spent_total, count(*) AS calls FROM public.dfs_usage;"
           echo; echo
 
@@ -145,4 +150,4 @@ jobs:
           q "SELECT domain, intersect_count, dfs_rank, spam_score, array_to_string(competitors_list,'|') AS books FROM public.dfs_domains ORDER BY intersect_count DESC, dfs_rank DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: pilot harvest 2026-08-11f (fixed extraction, against deploy 130)
+# ping: junk filter + reject visibility 2026-08-11g (no spend, PUSH_HARVEST=none)
