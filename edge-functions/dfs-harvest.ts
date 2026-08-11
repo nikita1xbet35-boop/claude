@@ -147,6 +147,34 @@ async function dfsCall(endpoint: string, payload: unknown, target = ''): Promise
   return out;
 }
 
+/** Call with the sort/filter clauses, and retry once without them if DataForSEO
+ *  rejects the field shape.
+ *
+ *  Server-side sorting and filtering are free and keep the paid row count down,
+ *  so they are always attempted first. But the field grammar differs per
+ *  endpoint — the brief's own domain_intersection example used a bare
+ *  "rank,desc" that the live API rejects with `40501 Invalid Field`, which
+ *  failed all five calls of the first pilot run. Rather than guess the exact
+ *  grammar for each endpoint from a sandbox that cannot reach the API, fall back
+ *  to an unadorned request: unsorted, unfiltered rows are worth vastly more than
+ *  none, and a rejected task is billed at $0 so the retry is free.
+ *
+ *  `usedFallback` lets the caller apply the dropped filter client-side. */
+async function dfsCallTolerant(
+  endpoint: string,
+  base: Record<string, unknown>,
+  extras: Record<string, unknown>,
+  target = '',
+): Promise<DfsCall & { usedFallback: boolean }> {
+  const first = await dfsCall(endpoint, { ...base, ...extras }, target);
+  if (first.ok || !/invalid field/i.test(first.error)) {
+    return { ...first, usedFallback: false };
+  }
+  const second = await dfsCall(endpoint, base, target);
+  // Cost is the sum of both attempts; the rejected one contributes $0.
+  return { ...second, cost: second.cost + first.cost, usedFallback: second.ok };
+}
+
 /** Account balance. Also the credentials smoke test — a wrong API password
  *  (people paste the dashboard password, which is a different secret) surfaces
  *  here as a 401 rather than as a mysteriously empty harvest. */
@@ -378,17 +406,34 @@ Deno.serve(async (req: Request) => {
         const targets: Record<string, string> = {};
         targetList.forEach((d, i) => { targets[String(i + 1)] = d; });
 
-        const r = await dfsCall('/v3/backlinks/domain_intersection/live', {
+        const label = geo + ':' + targetList.join('+');
+        const base = {
           targets,
           limit: rowsPerCall,
           offset: 0,
           intersection_mode: 'intersect',
           backlinks_status_type: 'live',
-          order_by: ['rank,desc'],
-          filters: [['rank', '>', MIN_RANK]],
-        }, geo + ':' + targetList.join('+'));
+        };
+
+        // domain_intersection returns one sub-object PER TARGET, so its sortable
+        // and filterable fields are namespaced by target index — a bare
+        // "rank,desc" (as in the brief's example) is rejected outright with
+        // `40501 Invalid Field: 'order_by'`, which is how the first pilot run
+        // failed all five calls.
+        //
+        // The namespaced form is tried first because server-side filtering is
+        // free and keeps paid rows down. If the API still rejects the shape, the
+        // call is retried bare rather than abandoned: unordered, unfiltered rows
+        // are worth far more than none, and a rejected task costs $0, so the
+        // retry is free.
+        const r = await dfsCallTolerant('/v3/backlinks/domain_intersection/live', base, {
+          order_by: ['1.rank,desc'],
+          filters: [['1.rank', '>', MIN_RANK]],
+        }, label);
         stats.calls++;
         stats.spent += r.cost;
+        if (r.usedFallback) (stats as any).intersect_fallback = true;
+
         if (!r.ok) { stats.reason = 'intersection failed: ' + r.error; continue; }
 
         // Every domain here links to all targets, so it is emitted once per
@@ -397,6 +442,11 @@ Deno.serve(async (req: Request) => {
         for (const it of r.items) {
           const domain = normDomain(it?.domain || it?.target || '');
           if (!domain) continue;
+          // Enforce the rank floor here too. On the fallback path above the API
+          // applied no filter, so without this the bare retry would quietly pull
+          // in the scraper junk the floor exists to keep out.
+          const rank = num(it?.rank);
+          if (rank !== null && rank <= MIN_RANK) { stats.junk_filtered++; continue; }
           for (const comp of targetList) {
             rows.push({
               domain, source: 'intersection', competitor: comp,
@@ -428,7 +478,7 @@ Deno.serve(async (req: Request) => {
         // Exhausted: pagination already passed the profile's size.
         if (c.total_ref_domains && offset >= c.total_ref_domains) continue;
 
-        const r = await dfsCall('/v3/backlinks/referring_domains/live', {
+        const r = await dfsCallTolerant('/v3/backlinks/referring_domains/live', {
           target: domain,
           limit: rowsPerCall,
           offset,
@@ -436,11 +486,13 @@ Deno.serve(async (req: Request) => {
           backlinks_status_type: 'live',
           include_subdomains: true,
           exclude_internal_backlinks: true,
+        }, {
           order_by: ['rank,desc'],
           filters: [['rank', '>', MIN_RANK]],
         }, domain);
         stats.calls++;
         stats.spent += r.cost;
+        if (r.usedFallback) (stats as any).broad_fallback = true;
         if (!r.ok) { stats.reason = 'referring_domains failed: ' + r.error; continue; }
 
         const rows: UpsertRow[] = r.items.map((it: any) => ({
@@ -453,7 +505,10 @@ Deno.serve(async (req: Request) => {
           referring_pages: num(it?.referring_pages),
           anchor: null, page_title: null,
           first_seen: str(it?.first_seen, 40),
-        })).filter((x: UpsertRow) => x.domain);
+        })).filter((x: UpsertRow) => x.domain
+          // Same reason as the intersection phase: on the fallback path the API
+          // applied no rank filter, so enforce the floor here.
+          && !(x.dfs_rank !== null && x.dfs_rank <= MIN_RANK));
 
         const kept = await ingest(rows);
         stats.broad.push({
@@ -483,16 +538,18 @@ Deno.serve(async (req: Request) => {
         if (!affordable()) { stats.reason = 'budget spent during anchor pass'; break; }
 
         const domain = normDomain(c.domain);
-        const r = await dfsCall('/v3/backlinks/backlinks/live', {
+        const r = await dfsCallTolerant('/v3/backlinks/backlinks/live', {
           target: domain,
           limit: rowsPerCall,
           mode: 'one_per_domain',       // one link per donor — don't pay for dupes
           backlinks_status_type: 'live',
+        }, {
           filters: [['dofollow', '=', true]],
           order_by: ['rank,desc'],
         }, domain);
         stats.calls++;
         stats.spent += r.cost;
+        if (r.usedFallback) (stats as any).anchors_fallback = true;
         if (!r.ok) { stats.reason = 'backlinks failed: ' + r.error; continue; }
 
         const rows: UpsertRow[] = r.items.map((it: any) => ({
