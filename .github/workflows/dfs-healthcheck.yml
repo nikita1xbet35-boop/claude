@@ -143,3 +143,5 @@ jobs:
           # putting any more money in.
           q "SELECT domain, intersect_count, dfs_rank, spam_score, array_to_string(competitors_list,'|') AS books FROM public.dfs_domains ORDER BY intersect_count DESC, dfs_rank DESC NULLS LAST LIMIT 40;"
           echo
+
+# ping: pilot harvest 2026-08-11 (retry with the fixed intersection shape)
