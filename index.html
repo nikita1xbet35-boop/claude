@@ -13342,7 +13342,9 @@ function dfsRenderOverview(){
 
   return `
     ${lowBalance ? `<div style="background:var(--red-bg);border:1px solid var(--red);border-radius:12px;padding:14px 18px;margin-bottom:16px;font-size:13px;color:var(--red);">
-      🔴 Баланс DataForSEO ${dfsMoney(dfsData.balance)} — ниже $5. Выгрузка остановится.
+      🔴 Баланс DataForSEO ${dfsMoney(dfsData.balance)} — меньше $5, пора пополнять.
+      Выгрузка при этом продолжает работать: она останавливается только ниже $0.10,
+      и каждый прогон в любом случае не тратит больше своего бюджета.
     </div>` : ''}
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
