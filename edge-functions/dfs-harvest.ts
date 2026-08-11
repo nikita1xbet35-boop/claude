@@ -51,6 +51,10 @@ const MAX_BUDGET_PER_RUN = 25;
 // API-side quality floor. rank <= 15 is overwhelmingly scraper junk, and
 // filtering costs nothing.
 const MIN_RANK = 15;
+// How many competitor books a domain must link to for the intersection phase.
+// Two, not three: a three-way intersection is a far smaller set, and the first
+// successful run came back with total_count=0 at three targets across every geo.
+const INTERSECT_TARGETS = 2;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -316,7 +320,7 @@ Deno.serve(async (req: Request) => {
     rows_seen: 0,
     junk_filtered: 0,
     saved: 0,
-    intersections: [] as Array<{ geo: string; targets: string[]; found: number }>,
+    intersections: [] as Array<{ geo: string; targets: string[]; found: number; returned: number; total: number }>,
     broad: [] as Array<{ competitor: string; found: number; offset: number; total: number }>,
     anchors_filled: 0,
     // Which request fields the API refused, per phase. Worth surfacing rather
@@ -438,7 +442,13 @@ Deno.serve(async (req: Request) => {
         // Intersection needs at least two targets to mean anything.
         if (domains.length < 2) continue;
 
-        const targetList = domains.slice(0, 3); // already priority-ordered
+        // Two targets, not three. A three-way intersection is a much smaller set
+        // than a two-way one, and the first successful run returned total_count=0
+        // for all three geos at three targets — including Nigeria, where
+        // bet9ja + sportybet + betking must have affiliates in common. Linking to
+        // two competitor books is already a signal nothing but an affiliate
+        // produces, and it keeps the set large enough to be worth paying for.
+        const targetList = domains.slice(0, INTERSECT_TARGETS); // priority-ordered
         const targets: Record<string, string> = {};
         targetList.forEach((d, i) => { targets[String(i + 1)] = d; });
 
@@ -447,24 +457,18 @@ Deno.serve(async (req: Request) => {
           targets,
           limit: rowsPerCall,
           offset: 0,
-          intersection_mode: 'intersect',
           backlinks_status_type: 'live',
         };
 
-        // domain_intersection returns one sub-object PER TARGET, so its sortable
-        // and filterable fields are namespaced by target index — a bare
-        // "rank,desc" (as in the brief's example) is rejected outright with
-        // `40501 Invalid Field: 'order_by'`, which is how the first pilot run
-        // failed all five calls.
-        //
-        // The namespaced form is tried first because server-side filtering is
-        // free and keeps paid rows down. If the API still rejects the shape, the
-        // call is retried bare rather than abandoned: unordered, unfiltered rows
-        // are worth far more than none, and a rejected task costs $0, so the
-        // retry is free.
+        // No server-side `filters` here any more. It was accepted (so the
+        // namespaced "1.rank" path is valid) yet the call still returned nothing,
+        // which leaves the filter as the prime suspect for silently excluding
+        // everything — a filter that matches nothing and a filter on a
+        // misunderstood field look identical from outside. The MIN_RANK floor is
+        // applied client-side below regardless, so dropping it costs a few
+        // paid junk rows, not correctness.
         const r = await dfsCallTolerant('/v3/backlinks/domain_intersection/live', base, {
           order_by: ['1.rank,desc'],
-          filters: [['1.rank', '>', MIN_RANK]],
         }, label);
         stats.calls += r.attempts;
         stats.spent += r.cost;
@@ -496,7 +500,13 @@ Deno.serve(async (req: Request) => {
           }
         }
         const kept = await ingest(rows);
-        stats.intersections.push({ geo, targets: targetList, found: kept });
+        // total_count is what the API says the intersection HOLDS, before our
+        // limit and before any client-side filtering. Reporting it separates
+        // "the intersection is genuinely empty" from "we filtered it away" —
+        // indistinguishable otherwise, and the difference decides whether the
+        // targets are wrong or the query is.
+        stats.intersections.push({ geo, targets: targetList, found: kept,
+                                   returned: r.items.length, total: r.totalCount });
         await sleep(300);
       }
     }
