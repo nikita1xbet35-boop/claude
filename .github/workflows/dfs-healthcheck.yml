@@ -127,18 +127,23 @@ jobs:
           fi
           if [ "$HARVEST" = "none" ]; then
             echo "── 7. harvest: skipped (dispatch with harvest=intersect to run one) ──"
-            exit 0
+          else
+            echo "── 7. HARVEST mode=$HARVEST budget=\$$BUDGET ───────────────"
+            curl -s -m 300 -X POST \
+              "https://$PROJECT.supabase.co/functions/v1/dfs-harvest" \
+              -H "Content-Type: application/json" \
+              -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+              -d "{\"mode\":\"$HARVEST\",\"budget_usd\":$BUDGET,\"rows_per_call\":${PUSH_ROWS:-1000}}" \
+              | head -c 2000
+            echo; echo
           fi
 
-          echo "── 7. HARVEST mode=$HARVEST budget=\$$BUDGET ───────────────"
-          curl -s -m 300 -X POST \
-            "https://$PROJECT.supabase.co/functions/v1/dfs-harvest" \
-            -H "Content-Type: application/json" \
-            -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
-            -d "{\"mode\":\"$HARVEST\",\"budget_usd\":$BUDGET,\"rows_per_call\":${PUSH_ROWS:-1000}}" \
-            | head -c 2000
-          echo; echo
-
+          # Sections 8/9/9b are free SQL reads — they used to sit behind an
+          # `exit 0` that only ran when a paid harvest fired, which silently
+          # skipped every quality check on every harvest=none (i.e. free) run.
+          # A whole "verify the sample" cycle was wasted rediscovering this: the
+          # push completed, cost nothing, and reported nothing because the
+          # script had already exited three lines above section 8.
           echo "── 8. what actually landed ─────────────────────────────────"
           q "SELECT status, count(*) FROM public.dfs_domains GROUP BY status ORDER BY status;"
           echo; echo
@@ -160,4 +165,4 @@ jobs:
           q "SELECT domain, source, keyword_cluster, round(etv) AS etv, median_position, round(relevance,2) AS relevance FROM public.dfs_domains WHERE source IN ('serp_competitors','competitors_domain') ORDER BY etv DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: disarm after v7.1 pilot ($0.06, 88 saved from KE+CM, NG/GH returned 0) — free etv-sorted sample added
+# ping: sections 8/9/9b were unreachable on harvest=none (dead exit 0) — fixed, still no spend
