@@ -825,35 +825,47 @@ let groqKeyIdx = 0;
 // analysis. Returns parsed JSON content, or null only when every key failed.
 async function groqChat(body: Record<string, unknown>): Promise<string | null> {
   const n = GROQ_KEYS.length;
-  for (let i = 0; i < n; i++) {
-    const idx = (groqKeyIdx + i) % n;
-    try {
-      groqCount++;
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (res.status === 429 || res.status >= 500) {
-        // Rate-limited or transient on this key — immediately try the next one.
-        groqLastError = `HTTP ${res.status} (key ${idx + 1})`;
-        res.body?.cancel().catch(() => {});
-        continue;
+  // Two rounds over the keys, with a pause between them. One round was not
+  // enough: a run was logged as `found=20 analyzed=0 saved=0 groqCalls=6
+  // groqErr="HTTP 429 (key 1)"` — twenty URLs searched for, paid for in DDG
+  // rate-limit budget, then discarded because all three keys happened to be
+  // over their per-minute cap in the same instant. The keys are shared with
+  // the rest of the pipeline, so simultaneous 429s are normal and a second or
+  // two later they are fine again. Losing a whole run's material to that is
+  // the expensive outcome; a 2s wait is the cheap one.
+  for (let round = 0; round < 2; round++) {
+    if (round) await new Promise(r => setTimeout(r, 2000));
+    for (let i = 0; i < n; i++) {
+      const idx = (groqKeyIdx + i) % n;
+      try {
+        groqCount++;
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (res.status === 429 || res.status >= 500) {
+          // Rate-limited or transient on this key — immediately try the next one.
+          groqLastError = `HTTP ${res.status} (key ${idx + 1}, round ${round + 1})`;
+          res.body?.cancel().catch(() => {});
+          continue;
+        }
+        if (!res.ok) {
+          groqLastError = `HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`;
+          return null; // a real error (bad request/auth) — next key won't help
+        }
+        const d = await res.json();
+        groqKeyIdx = (idx + 1) % n; // next call starts on the following key
+        return d?.choices?.[0]?.message?.content || '';
+      } catch (e: any) {
+        groqLastError = e?.message || 'fetch error';
+        // try the next key
       }
-      if (!res.ok) {
-        groqLastError = `HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`;
-        return null; // a real error (bad request/auth) — next key won't help
-      }
-      const d = await res.json();
-      groqKeyIdx = (idx + 1) % n; // next call starts on the following key
-      return d?.choices?.[0]?.message?.content || '';
-    } catch (e: any) {
-      groqLastError = e?.message || 'fetch error';
-      // try the next key
     }
   }
-  // All keys were rate-limited/erroring — advance the cursor and skip this batch.
+  // Every key was rate-limited or erroring across both rounds — advance the
+  // cursor and skip this batch.
   groqKeyIdx = (groqKeyIdx + 1) % n;
   return null;
 }
@@ -1246,7 +1258,17 @@ Deno.serve(async (req: Request) => {
     const keywordLang   = new Map<string, string>();
     if (poolRows.length) {
       const cycle   = Math.floor(slotIndex / (BRANDS.length * allPresets.length));
-      const kwStart = (cycle * KW_PER_RUN) % poolRows.length;
+      // Window start advances by KW_PER_RUN, PLUS one extra position per full
+      // sweep of the pool. Without that `+ sweeps` the stride and the pool size
+      // share a divisor whenever the pool is a multiple of KW_PER_RUN — a pool
+      // of 25 with a stride of 5 only ever starts at 0,5,10,15,20, which is
+      // harmless while every keyword still lands inside some window, but stops
+      // being harmless the moment the pool is not an exact multiple: a pool of
+      // 22 would leave positions 20-21 reachable only as the tail of a window
+      // and never as its head. Shifting by one each sweep makes every start
+      // position eventually reachable for any pool size.
+      const sweeps  = Math.floor((cycle * KW_PER_RUN) / poolRows.length);
+      const kwStart = (cycle * KW_PER_RUN + sweeps) % poolRows.length;
       const picked: Array<{ id: number; keyword: string }> = [];
       for (let i = 0; i < Math.min(KW_PER_RUN, poolRows.length); i++) {
         picked.push(poolRows[(kwStart + i) % poolRows.length]);
@@ -1307,11 +1329,20 @@ Deno.serve(async (req: Request) => {
 
     // 4. Run ALL keyword searches in PARALLEL on DDG.
     //    visitNum = how many full preset-cycles have passed for this preset.
-    //    Page cycles 1→2→3 per visit. City rotates after every 3 visits (full page cycle).
-    //    This means: base keywords × pages 1-3, then city-A × pages 1-3, city-B × pages 1-3…
+    //    Page cycles 2→3→4 per visit. City rotates after every 3 visits (full page cycle).
+    //    This means: base keywords × pages 2-4, then city-A × pages 2-4, city-B × pages 2-4…
     //    so every run hits a genuinely different slice of results.
+    //
+    //    Page 1 is deliberately skipped. Measured over 24h of real runs:
+    //      page 1 — 370 results → 3 saved (0.8%)
+    //      page 2 — 334 results → 20 saved (6.0%)
+    //      page 3 — 305 results → 10 saved (3.3%)
+    //    Page one is where every scraper looks first, so by the time we get
+    //    there its domains are already in our base and the dedup throws the
+    //    whole page away. It was consuming a third of all runs (23 of 55) to
+    //    produce three leads.
     const visitNum   = Math.floor(slotIndex / (BRANDS.length * allPresets.length));
-    const DDG_PAGE   = (visitNum % 3) + 1; // 1, 2, 3 cycling per visit
+    const DDG_PAGE   = (visitNum % 3) + 2; // 2, 3, 4 cycling per visit
     const cityList   = PRESET_CITIES[preset.id] || [];
     const cityIdx    = Math.floor(visitNum / 3) % (cityList.length + 1); // +1 for base (no city)
     const cityAppend = cityIdx < cityList.length ? ' ' + cityList[cityIdx] : '';
