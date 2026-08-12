@@ -83,11 +83,18 @@ const MIN_RANK = 15;
 const INTERSECT_TARGETS = 2;
 
 // ── v7.1 constants ──────────────────────────────────────────────────────────
-// relevance is 0-1, how well the domain's profile matches the keyword cluster.
-// The filter is not optional: without it the top of every cluster is Wikipedia,
-// Facebook and whichever national newspaper happened to rank for one query out
-// of two hundred.
-const MIN_RELEVANCE = 0.5;
+// The brief specified a `relevance` field, 0-1. The live API does not return
+// one — the first real call's logged raw item has no such key at all, only
+// `rating` (0-100). Sending `filters: [['relevance', ...]]` was therefore
+// filtering on a field that does not exist: the API silently rejected it as
+// invalid (dropped_fields showed it every time), so NEITHER the server-side
+// filter NOR the client-side backstop ever ran — trustpilot.com,
+// municipiocamargo.com and futbol24.com rode straight into the queue at the
+// top of the first real run's ETV ranking. `rating` is the closest analogue
+// this endpoint actually exposes; kept as a 0-100 threshold rather than
+// rescaled to 0-1 to match what the API sends, so a raw item log line can be
+// compared against this constant directly.
+const MIN_RATING = 50;
 // serp_competitors accepts up to 200 keywords per request; our clusters are
 // 5-14 keys, so one cluster is always one call.
 const SERP_KEYWORDS_MAX = 200;
@@ -308,6 +315,13 @@ const SKIP_EXACT = new Set([
   'quora.com', 'telegram.org', 't.me', 'whatsapp.com', 'disqus.com',
   'livescore.com', 'flashscore.com', 'sofascore.com', 'espn.com', 'bbc.com',
   'cnn.com', 'yahoo.com', 'msn.com', 'github.com', 'issuu.com', 'scribd.com',
+  // Named after the first real serp_competitors run: the rating filter (see
+  // MIN_RATING) was silently a no-op because of the field-name bug documented
+  // there, so these two rode straight to the top of the queue by ETV. Trustpilot
+  // ranks for "X review" across every geo and every vertical — a generalist by
+  // construction, never an affiliate. futbol24.com is a livescore aggregator,
+  // same category as the ones already above.
+  'trustpilot.com', 'futbol24.com',
 ]);
 // Our own group — a site already pushing these is occupied, not a prospect.
 const OUR_BRANDS = ['1xbet', '1xcasino', '1xpartners', 'melbet', 'betwinner',
@@ -789,9 +803,9 @@ Deno.serve(async (req: Request) => {
     // answers with the domains that rank across them, their median position,
     // their estimated traffic and how much of the cluster each one covers.
     //
-    // relevance > 0.5 is applied server-side and is the load-bearing filter:
-    // it is what keeps Wikipedia and the national newspapers out of a list that
-    // is supposed to be affiliates.
+    // rating > 50 is applied server-side (see MIN_RATING) and is the
+    // load-bearing filter: it is what keeps Trustpilot and a random municipal
+    // site out of a list that is supposed to be affiliates.
     if (want('serp')) {
       const serpCost = await measuredCost('/v3/dataforseo_labs/google/serp_competitors/live');
       const { data: clusters } = await supabase.from('dfs_keyword_clusters')
@@ -813,7 +827,7 @@ Deno.serve(async (req: Request) => {
           limit: SERP_LIMIT,
         }, {
           order_by: ['etv,desc'],
-          filters: [['relevance', '>', MIN_RELEVANCE]],
+          filters: [['rating', '>', MIN_RATING]],
         }, c.geo);
         stats.calls += r.attempts;
         stats.spent += r.cost;
@@ -835,11 +849,14 @@ Deno.serve(async (req: Request) => {
         for (const it of r.items) {
           const domain = labsDomain(it);
           if (!domain) { stats.unparsed_items++; continue; }
-          const rel = labsNum(it, 'relevance');
+          const rel = labsNum(it, 'rating', 'relevance');
           // The server-side filter may have been peeled off as an invalid
           // field; enforce it here so a dropped clause cannot silently flood
-          // the queue with generalists.
-          if (rel !== null && rel <= MIN_RELEVANCE) { stats.junk_filtered++; continue; }
+          // the queue with generalists. This is the check that was silently
+          // never running: rel was always null with the old field name, so
+          // trustpilot.com and a random municipal site outranked every real
+          // affiliate on the first live run.
+          if (rel !== null && rel <= MIN_RATING) { stats.junk_filtered++; continue; }
           rows.push({
             domain,
             source: 'serp_competitors',
@@ -994,7 +1011,10 @@ Deno.serve(async (req: Request) => {
             etv: labsNum(it, 'etv'),
             median_position: labsNum(it, 'median_position', 'avg_position'),
             visibility: labsNum(it, 'visibility'),
-            relevance: labsNum(it, 'relevance'),
+            // Unverified for this endpoint specifically — competitors_domain's
+            // response shape has not had a raw item logged yet. 'rating' first
+            // since that is what serp_competitors actually sends.
+            relevance: labsNum(it, 'rating', 'relevance'),
             keywords_matched: labsNum(it, 'count', 'keywords_count'),
           });
         }
