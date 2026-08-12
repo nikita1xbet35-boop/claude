@@ -152,4 +152,4 @@ jobs:
           q "SELECT domain, intersect_count, dfs_rank, spam_score, array_to_string(competitors_list,'|') AS books FROM public.dfs_domains ORDER BY intersect_count DESC, dfs_rank DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: read llm_error from dfs-qualify warning logs after error-logging deploy (61a8941)
+# ping: verify judged>0 after the 413 fix (9d17710) — no spend
