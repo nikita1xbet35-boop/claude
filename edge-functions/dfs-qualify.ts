@@ -141,12 +141,19 @@ Return ONLY JSON shaped {"results":[...]}. No prose, no markdown.`;
 
 let groqKeyIdx = 0;
 
+// Last reason judge() returned nothing. A queue that claims rows and gives
+// back zero verdicts every single tick is invisible without this: the caller
+// only saw `unjudged`, never WHY — invalid key, rate limit, or a model Groq
+// has since deprecated all look identical from the outside. Surfaced into
+// error_log below, at zero extra cost since a failed call is a free one.
+let lastLlmError = '';
+
 /** Groq with per-key rotation and a second pass after a pause. The keys are
  *  shared with find-and-queue, which keeps them near their per-minute cap, so
  *  all three can be 429 at the same instant and be fine a second later. */
 async function groqChat(user: string): Promise<string | null> {
   const n = GROQ_KEYS.length;
-  if (!n) return null;
+  if (!n) { lastLlmError = 'no GROQ key configured'; return null; }
   const body = {
     model: 'llama-3.1-8b-instant',
     messages: [
@@ -157,6 +164,7 @@ async function groqChat(user: string): Promise<string | null> {
     max_tokens: 8000,
     response_format: { type: 'json_object' },
   };
+  let sawRateLimit = false;
   for (let round = 0; round < 2; round++) {
     if (round) await sleep(2000);
     for (let i = 0; i < n; i++) {
@@ -168,15 +176,27 @@ async function groqChat(user: string): Promise<string | null> {
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(30_000),
         });
-        if (res.status === 429 || res.status >= 500) { res.body?.cancel().catch(() => {}); continue; }
-        if (!res.ok) { res.body?.cancel().catch(() => {}); return null; }
+        if (res.status === 429 || res.status >= 500) {
+          sawRateLimit = true;
+          lastLlmError = `groq key#${idx} HTTP ${res.status}`;
+          res.body?.cancel().catch(() => {});
+          continue;
+        }
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          lastLlmError = `groq key#${idx} HTTP ${res.status}: ${text.slice(0, 200)}`;
+          return null;
+        }
         const d = await res.json();
         groqKeyIdx = (idx + 1) % n;
         return d?.choices?.[0]?.message?.content || '';
-      } catch { /* next key */ }
+      } catch (e: any) {
+        lastLlmError = `groq key#${idx} network error: ${String(e?.message || e).slice(0, 200)}`;
+      }
     }
   }
   groqKeyIdx = (groqKeyIdx + 1) % n;
+  if (!lastLlmError) lastLlmError = sawRateLimit ? 'groq: all keys rate-limited/5xx after retry' : 'groq: unknown failure';
   return null;
 }
 
@@ -519,11 +539,18 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // unjudged>0 with judged=0 is a queue that LOOKS stuck but is actually the
+    // LLM call failing every single tick — invisible without this, since the
+    // row-level retry silently puts everything back to 'raw'. Bumping the
+    // level to warning when nothing at all got judged makes it show up in any
+    // error-log filter set to skip routine info noise.
+    const llmFailing = stats.claimed > 0 && stats.judged === 0 && stats.unjudged > 0;
     await quiet(supabase.from('error_log').insert([{
-      level: 'info', service: 'dfs-qualify',
+      level: llmFailing ? 'warning' : 'info', service: 'dfs-qualify',
       message: `llm=${stats.llm} claimed=${stats.claimed} judged=${stats.judged} `
         + `promoted=${stats.promoted} rejected=${stats.rejected} unjudged=${stats.unjudged} `
         + `already_lead=${stats.already_lead} junk=${stats.junk} spammy=${stats.spammy} `
+        + (llmFailing ? `llm_error="${lastLlmError}" ` : '')
         + `${stats.reason}`,
     }]));
 
