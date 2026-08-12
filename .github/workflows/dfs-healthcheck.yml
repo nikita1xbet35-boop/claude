@@ -114,7 +114,7 @@ jobs:
           # fire exactly one harvest on merge, then set it straight back to
           # 'none'. Leaving it armed would spend money on every unrelated edit to
           # this file, so treat flipping it as a one-shot.
-          PUSH_HARVEST=ranked
+          PUSH_HARVEST=none
           PUSH_BUDGET=0.15
           PUSH_ROWS=100
 
@@ -163,6 +163,15 @@ jobs:
           # so section 9's ORDER BY hides them entirely. This is where the new
           # method's actual output is judged by eye.
           q "SELECT domain, source, keyword_cluster, round(etv) AS etv, median_position, round(relevance,2) AS relevance FROM public.dfs_domains WHERE source IN ('serp_competitors','competitors_domain') ORDER BY etv DESC NULLS LAST LIMIT 40;"
+          echo; echo
+
+          echo "── 9c. ranked_keywords results — qualified domains, highest volume first ─"
+          # Step R's actual output: commercial_keywords / total_search_volume /
+          # top3_keywords per domain. This is the number the whole rework exists
+          # to produce — a domain "ranking for 500 keys" with no volume behind
+          # them is worth nothing, so total_search_volume is what is judged here,
+          # not any count.
+          q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: qualify the 88 KE/CM domains via ranked_keywords, $0.15, against rating-filter fix (b88df63)
+# ping: results from the $0.15 ranked_keywords run — read commercial_keywords/total_search_volume per domain, disarm
