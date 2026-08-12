@@ -34,7 +34,13 @@ const GROQ_KEYS = [
 
 const DEADLINE_MS  = 110_000;
 const CLAIM_BATCH  = 120;   // domains pulled per run
-const LLM_BATCH    = 25;    // domains per LLM call
+// 25, not the original number: every single Groq call was failing with HTTP
+// 413 "request too large" — not a rate limit, a hard per-request cap that
+// retrying or rotating keys cannot get around. 25 domains × ~200 output
+// tokens/verdict plus max_tokens:8000 was pushing the request over Groq's
+// free-tier per-request ceiling on every batch, so nothing was EVER judged.
+// Smaller batch, smaller ceiling — both moved together below.
+const LLM_BATCH    = 15;    // domains per LLM call
 const MIN_SCORE    = 35;
 // Above this, the domain is in somebody's spam neighbourhood. DataForSEO's
 // spam_score is a 0-100 read on the referring profile; a real affiliate that
@@ -161,7 +167,12 @@ async function groqChat(user: string): Promise<string | null> {
       { role: 'user', content: user },
     ],
     temperature: 0.1,
-    max_tokens: 8000,
+    // 8000 was the actual cause of the HTTP 413s below — a 25-item batch
+    // asking for up to 8000 completion tokens sat over Groq's free-tier
+    // per-request ceiling on every single call, not just under load. 15 items
+    // at ~200 tokens/verdict comes to ~3000; 4096 leaves real headroom without
+    // being big enough to trip the same wall again.
+    max_tokens: 4096,
     response_format: { type: 'json_object' },
   };
   let sawRateLimit = false;
