@@ -150,4 +150,4 @@ jobs:
           q "SELECT domain, intersect_count, dfs_rank, spam_score, array_to_string(competitors_list,'|') AS books FROM public.dfs_domains ORDER BY intersect_count DESC, dfs_rank DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: disarm after $0.177 pagination-fix test — 53 new raw domains landed (run 31582148019)
+# ping: read-only diagnostic — queue stuck at 37, 0 promoted, no spend (harvest=none)
