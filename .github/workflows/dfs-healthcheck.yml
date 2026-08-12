@@ -78,7 +78,9 @@ jobs:
           echo; echo
 
           echo "── 5. recent stage logs (are the crons running?) ───────────"
-          q "SELECT service, level, left(message,150) AS message, created_at FROM public.error_log WHERE service LIKE 'dfs-%' OR service='recover-contacts' OR service='generate-queue-dfs' ORDER BY created_at DESC LIMIT 12;"
+          # 400, not 150: an llm_error snippet ("groq key#0 HTTP 413: {...")
+          # was getting cut off mid-JSON, right where the actual reason lives.
+          q "SELECT service, level, left(message,400) AS message, created_at FROM public.error_log WHERE service LIKE 'dfs-%' OR service='recover-contacts' OR service='generate-queue-dfs' ORDER BY created_at DESC LIMIT 12;"
           echo; echo
 
           echo "── 6. functions reachable + DataForSEO credentials ─────────"
