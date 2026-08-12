@@ -306,10 +306,27 @@ async function extractContact(
   return acc;
 }
 
-// ── Analytics ids → owner clustering ───────────────────────────────────────
-// AdSense (ca-pub-) is the strongest of the three: it is a billing account, so
-// sharing one is sharing a payee. GA identifies a property, GTM only a
-// container — both are routinely shared by agencies, hence the ranking.
+// ── Owner fingerprints → clustering ────────────────────────────────────────
+// The goal is not a site, it is an OWNER with a portfolio of 15-30 sites: one
+// deal instead of thirty cold emails.
+//
+// Strength order matters, because one owner must not end up split across an
+// AdSense cluster and a GTM cluster:
+//   1. bookmaker ref-id — the same affiliate ID on two sites is the same
+//      affiliate account. For our specific question this is the best signal
+//      there is, and we already parse outbound links.
+//   2. AdSense ca-pub — a billing account, so sharing one is sharing a payee.
+//   3. UA / Facebook Pixel / Yandex Metrica — property-level, rarely shared.
+//   4. GA4 G- and GTM — issued per data stream / container and routinely
+//      shared by agencies, so they cluster weakly.
+//
+// Honest limits, worth stating because the method is often oversold:
+// Universal Analytics was switched off in July 2023, so UA- only appears on old
+// or abandoned sites. GA4 has no sequential numbering, which is why the G- id
+// says less than the UA- one did. And competent SEOs deliberately scrub these —
+// separate accounts, separate registrars, separate hosting. This catches the
+// middle of the market and the people not hiding; it is a supplementary tool,
+// not the backbone.
 function extractAnalyticsIds(html: string): string[] {
   const ids = new Set<string>();
   const pats: RegExp[] = [
@@ -322,12 +339,56 @@ function extractAnalyticsIds(html: string): string[] {
     const found = html.match(re) || [];
     for (const f of found) ids.add(f.toUpperCase().replace('CA-PUB-', 'ca-pub-'));
   }
-  return [...ids].slice(0, 12);
+  // Facebook Pixel and Yandex Metrica, both initialised through a call rather
+  // than appearing as a bare token, so they need their own capture.
+  const fb = html.matchAll(/fbq\(\s*['"]init['"]\s*,\s*['"](\d{13,17})['"]/g);
+  for (const m of fb) ids.add('FBQ-' + m[1]);
+  const ym = html.matchAll(/ym\(\s*(\d{7,9})\s*,/g);
+  for (const m of ym) ids.add('YM-' + m[1]);
+
+  return [...ids].slice(0, 16);
+}
+
+/** Affiliate ids carried in outbound links to bookmakers. Two sites pushing the
+ *  same affiliate id are the same affiliate account — for this program that is
+ *  a harder link than any analytics tag, and it is the one thing nobody scrubs,
+ *  because scrubbing it would stop them getting paid. */
+function extractRefIds(html: string): string[] {
+  const out = new Set<string>();
+  // Only inside links that point at a bookmaker: `tag=` and `refcode=` are
+  // common enough elsewhere that scanning the whole page would cluster
+  // unrelated sites together.
+  const links = html.matchAll(/https?:\/\/[^\s"'<>]{5,300}/g);
+  const BOOKS = /(bet9ja|sportybet|betking|nairabet|betway|betpawa|premierbet|premier-bet|1win|betclic|betika|sportpesa|odibets|mozzartbet|fortebet|soccabet|msport|betano|parimatch|helabet|melbet|22bet)/i;
+  for (const m of links) {
+    const url = m[0];
+    if (!BOOKS.test(url)) continue;
+    const id = url.match(/[?&](?:site|tag|refcode|ref|btag|affid|aff_id|sub_id|clickid)=([A-Za-z0-9_\-]{3,40})/i);
+    if (id) out.add('REF-' + id[1].toLowerCase());
+    if (out.size >= 6) break;
+  }
+  return [...out];
+}
+
+/** UA-12345678-23 → 23. The suffix is the property's sequence number inside the
+ *  account, so it is a direct lower bound on how many sites the owner runs —
+ *  no inference required, and visible even on a single page. */
+function uaPortfolioHint(ids: string[]): number | null {
+  let max = 0;
+  for (const id of ids) {
+    const m = id.match(/^UA-\d{4,12}-(\d{1,4})$/i);
+    if (m) max = Math.max(max, Number(m[1]) || 0);
+  }
+  return max > 1 ? max : null;
 }
 
 const idType = (id: string): string =>
-  id.startsWith('ca-pub-') ? 'adsense'
+  id.startsWith('REF-')    ? 'bookmaker_ref'
+  : id.startsWith('ca-pub-') ? 'adsense'
+  : id.startsWith('FBQ-')  ? 'fb_pixel'
+  : id.startsWith('YM-')   ? 'yandex_metrica'
   : id.startsWith('GTM-')  ? 'gtm'
+  : id.startsWith('UA-')   ? 'ga_ua'
   : 'ga';
 
 /** Attach the lead to an owner cluster, creating it if new, and refresh the
@@ -336,7 +397,18 @@ const idType = (id: string): string =>
 async function clusterOwner(leadId: number, ids: string[]): Promise<number | null> {
   if (!ids.length) return null;
   const ranked = [...ids].sort((a, b) => {
-    const w = (x: string) => x.startsWith('ca-pub-') ? 0 : x.startsWith('GTM-') ? 2 : 1;
+    // Same ordering as the comment on extractAnalyticsIds: a shared payout
+    // account beats a shared tag manager by a wide margin, and picking the
+    // strongest available id is what stops one owner being split across two
+    // clusters keyed on two different ids from the same page.
+    const w = (x: string) =>
+      x.startsWith('REF-')     ? 0
+      : x.startsWith('ca-pub-') ? 1
+      : x.startsWith('UA-')     ? 2
+      : x.startsWith('FBQ-')    ? 3
+      : x.startsWith('YM-')     ? 4
+      : x.startsWith('GTM-')    ? 6
+      : 5;
     return w(a) - w(b);
   });
   const key = ranked[0];
@@ -362,10 +434,15 @@ async function clusterOwner(leadId: number, ids: string[]): Promise<number | nul
 
   await quiet(supabase.from('leads').update({ owner_cluster_id: clusterId }).eq('id', leadId));
 
-  const { count } = await supabase.from('leads')
-    .select('id', { count: 'exact', head: true }).eq('owner_cluster_id', clusterId);
+  // Portfolio size AND what the portfolio is worth. A cluster of twenty hobby
+  // blogs and a cluster of five properties holding real commercial volume are
+  // different propositions, and the interface sorts on the second number.
+  const { data: members, count } = await supabase.from('leads')
+    .select('total_search_volume', { count: 'exact' }).eq('owner_cluster_id', clusterId);
+  const totalVolume = (members || [])
+    .reduce((s: number, r: any) => s + (Number(r.total_search_volume) || 0), 0);
   await quiet(supabase.from('owner_clusters')
-    .update({ sites_count: count ?? 1 }).eq('id', clusterId));
+    .update({ sites_count: count ?? 1, total_search_volume: totalVolume }).eq('id', clusterId));
 
   return clusterId;
 }
@@ -386,10 +463,25 @@ async function dfsBalance(): Promise<number> {
   } catch { return 0; }
 }
 
-/** Commercial keywords the domain ranks for in the top 20. This is the money
- *  question: informational long-tail is a hobby blog, commercial terms mean
- *  somebody paid for that position. */
-async function rankedCommercial(domain: string, locationCode: number): Promise<number | null> {
+/** Commercial keywords the domain holds in the TOP 10, and the search volume
+ *  behind them.
+ *
+ *  v7.1: the filters moved into the request and the position window tightened
+ *  from 20 to 10. Both matter. A position in the 11-20 band earns almost
+ *  nothing, and a keyword with no search volume earns nothing at all — a site
+ *  "ranking for 500 keys" with no traffic is a PBN node or a set of positions
+ *  that are really 15-50. Filtering API-side is free, so an unqualified domain
+ *  now comes back as an empty result instead of 100 paid rows we then discard.
+ *
+ *  This is the same measurement dfs-harvest's ranked phase makes; it runs here
+ *  too because a lead promoted from the older backlinks path never passed
+ *  through that phase and would otherwise have no volume figure at all. */
+const RANKED_MAX_POSITION = 11;   // rank_group < 11
+const RANKED_MIN_VOLUME   = 100;  // search_volume > 100
+
+interface RankedResult { commercial: number; volume: number; top3: number; }
+
+async function rankedCommercial(domain: string, locationCode: number): Promise<RankedResult | null> {
   try {
     const res = await fetch('https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live', {
       method: 'POST',
@@ -398,8 +490,13 @@ async function rankedCommercial(domain: string, locationCode: number): Promise<n
         target: domain,
         location_code: locationCode,
         language_code: 'en',
-        limit: 100,
-        order_by: ['ranked_serp_element.serp_item.rank_group,asc'],
+        limit: 200,
+        filters: [
+          ['ranked_serp_element.serp_item.rank_group', '<', RANKED_MAX_POSITION],
+          'and',
+          ['keyword_data.keyword_info.search_volume', '>', RANKED_MIN_VOLUME],
+        ],
+        order_by: ['keyword_data.keyword_info.search_volume,desc'],
       }]),
       signal: AbortSignal.timeout(45_000),
     });
@@ -419,13 +516,18 @@ async function rankedCommercial(domain: string, locationCode: number): Promise<n
     }]));
 
     if (!Array.isArray(items)) return null;
-    let n = 0;
+    let commercial = 0, volume = 0, top3 = 0;
     for (const it of items) {
-      const kw = String(it?.keyword_data?.keyword || '');
       const pos = Number(it?.ranked_serp_element?.serp_item?.rank_group) || 999;
-      if (pos <= 20 && COMMERCIAL_RE.test(kw)) n++;
+      const vol = Number(it?.keyword_data?.keyword_info?.search_volume) || 0;
+      // Belt and braces: if the API ignored or rejected the filter clause we
+      // would otherwise count the very rows the filter exists to exclude.
+      if (pos >= RANKED_MAX_POSITION || vol <= RANKED_MIN_VOLUME) continue;
+      commercial++;
+      volume += vol;
+      if (pos <= 3) top3++;
     }
-    return n;
+    return { commercial, volume, top3 };
   } catch { return null; }
 }
 
@@ -442,7 +544,8 @@ Deno.serve(async (req: Request) => {
   jinaCount = 0;
   const stats = {
     processed: 0, with_email: 0, with_any_contact: 0, no_contact: 0,
-    analytics_found: 0, clustered: 0, ranked_checked: 0, reason: '',
+    analytics_found: 0, clustered: 0, ranked_checked: 0,
+    portfolio_hints: 0, reason: '',
   };
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -460,7 +563,7 @@ Deno.serve(async (req: Request) => {
     // would let whichever function ran first permanently hide the lead from the
     // other.
     const { data: leads } = await supabase.from('leads')
-      .select('id, url, domain_normalized, geo, contact_email, affiliate_maturity')
+      .select('id, url, domain_normalized, geo, contact_email, affiliate_maturity, total_search_volume')
       .eq('pipeline', 'dataforseo')
       .is('enriched_at', null)
       .order('id', { ascending: true })
@@ -516,27 +619,42 @@ Deno.serve(async (req: Request) => {
           stats.no_contact++;
         }
 
-        const ids = extractAnalyticsIds(html);
+        // Analytics tags plus the bookmaker ref-ids from outbound links. The
+        // ref-ids are the reason this is worth doing at all for our question:
+        // the same affiliate id on two sites is one payout account.
+        const ids = [...extractAnalyticsIds(html), ...extractRefIds(html)];
         if (ids.length) {
           patch.analytics_ids = ids;
           stats.analytics_found++;
+          const hint = uaPortfolioHint(ids);
+          if (hint) {
+            patch.ua_portfolio_hint = hint;
+            stats.portfolio_hints++;
+          }
         }
 
         // ranked_keywords only for leads that are actually reachable — paying
         // to profile a site nobody can contact is money for nothing.
         const geo = String(lead.geo || '').toUpperCase().slice(0, 2);
         const loc = LOCATION_CODES[geo];
-        if (rankedBudgetLeft > 0 && loc && (contact.email || contact.telegram)) {
-          const n = await rankedCommercial(lead.domain_normalized || origin.replace(/^https?:\/\//, ''), loc);
+        // Skip leads the harvest phase already profiled — paying twice for the
+        // same measurement is how a qualification step turns into a money leak.
+        if (rankedBudgetLeft > 0 && loc && (contact.email || contact.telegram)
+            && lead.total_search_volume === null) {
+          const r = await rankedCommercial(lead.domain_normalized || origin.replace(/^https?:\/\//, ''), loc);
           rankedBudgetLeft--;
           stats.ranked_checked++;
-          if (n !== null) {
-            patch.commercial_keywords = n;
-            // 10+ commercial terms in the top 20 is a paid-for SEO position —
-            // promote the maturity verdict the qualifier could only guess at
-            // from a single anchor string.
-            if (n >= 10 && lead.affiliate_maturity !== 'professional') {
+          if (r !== null) {
+            patch.commercial_keywords = r.commercial;
+            patch.total_search_volume = r.volume;
+            patch.top3_keywords       = r.top3;
+            // Same thresholds as dfs-harvest and dfs-qualify (v7.1 §2 step 2),
+            // so a lead's maturity does not depend on which stage happened to
+            // measure it.
+            if (r.commercial >= 15 && r.volume >= 10_000) {
               patch.affiliate_maturity = 'professional';
+            } else if (r.commercial >= 5 && lead.affiliate_maturity === 'hobby') {
+              patch.affiliate_maturity = 'semi_pro';
             }
           }
         }
@@ -558,6 +676,7 @@ Deno.serve(async (req: Request) => {
       message: `processed=${stats.processed} email=${stats.with_email} `
         + `any=${stats.with_any_contact} none=${stats.no_contact} `
         + `analytics=${stats.analytics_found} clustered=${stats.clustered} `
+        + `portfolio=${stats.portfolio_hints} `
         + `ranked=${stats.ranked_checked} jina=${jinaCount} ${stats.reason}`,
     }]));
 

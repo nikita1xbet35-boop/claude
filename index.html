@@ -13102,11 +13102,12 @@ function tgoCopyDraft(id){
 // ═══════════════════════════════════════════════════════════════════════════
 
 let dfsScreen    = 'overview';
+let dfsLeadFilter = 'all';
 let dfsLoaded    = false;
 let dfsData      = {
   counts: {}, competitors: [], usage: [], spend30: [], queue: [], rejects: [],
   leads: [], limit: null, sentToday: 0, clusters: [], balance: null, estimate: null,
-  intersectState: [],
+  intersectState: [], keywordClusters: [],
 };
 
 // ── Мусорные домены ────────────────────────────────────────────────────────
@@ -13139,6 +13140,28 @@ function dfsIsJunk(row){
   if((row.spam_score || 0) > DFS_MAX_SPAM) return 'спам ' + row.spam_score;
   return null;
 }
+
+// Каким методом найден домен. Порядок силы доказательства сверху вниз:
+// владение коммерческой выдачей → конкурент найденного профи → анкор ссылки →
+// просто ссылка. Цветом подсвечены первые два: ради них вся переделка v7.1.
+const DFS_SOURCE_LABEL = {
+  serp_competitors:   { label: 'выдача',      color: 'var(--green)'   },
+  competitors_domain: { label: 'похожий',     color: 'var(--blue)'    },
+  anchor_match:       { label: 'анкор',       color: 'var(--amber)'   },
+  intersection:       { label: 'пересечение', color: 'var(--text3)'   },
+  referring_domains:  { label: 'ссылка',      color: 'var(--text3)'   },
+};
+
+// Чем связаны сайты внутри портфеля — по силе доказательства.
+const DFS_KEY_TYPE = {
+  bookmaker_ref:  'один реф-ID букмекера — гарантированно один владелец',
+  adsense:        'общий рекламный аккаунт AdSense — общий получатель денег',
+  ga_ua:          'общий аккаунт Universal Analytics',
+  fb_pixel:       'общий Facebook Pixel',
+  yandex_metrica: 'общий счётчик Яндекс.Метрики',
+  ga:             'общий поток данных GA4 — сигнал слабее',
+  gtm:            'общий контейнер GTM — часто общий у агентства, не у владельца',
+};
 
 const DFS_REJECT_LABEL = {
   machine_junk: 'машина (SEO/PDF/APK-скрапер)',
@@ -13188,7 +13211,8 @@ async function loadDFS(){
       countOf(null), countOf('raw'), countOf('qualified'), countOf('promoted'), countOf('rejected'),
     ]);
 
-    const [comps, usage, spend30, queue, rejects, leads, limitRow, clusters, intersectState] = await Promise.all([
+    const [comps, usage, spend30, queue, rejects, leads, limitRow, clusters, intersectState,
+           keywordClusters] = await Promise.all([
       sb.from('dfs_competitors').select('*').order('priority').then(r => r.data || []),
       sb.from('dfs_usage').select('*').order('created_at', { ascending:false }).limit(400)
         .then(r => r.data || []),
@@ -13209,8 +13233,11 @@ async function loadDFS(){
         return out;
       })(),
       sb.from('dfs_domains')
-        .select('id, domain, competitors_list, intersect_count, dfs_rank, spam_score, anchor, page_title, status, discovered_at')
+        .select('id, domain, competitors_list, intersect_count, dfs_rank, spam_score, anchor, page_title, '
+              + 'status, discovered_at, source, keyword_cluster, etv, median_position, relevance, '
+              + 'commercial_keywords, total_search_volume, top3_keywords, rank_checked_at')
         .eq('status', 'raw')
+        .order('etv', { ascending:false, nullsFirst:false })
         .order('intersect_count', { ascending:false })
         .order('dfs_rank', { ascending:false, nullsFirst:false })
         .limit(200).then(r => r.data || []),
@@ -13224,7 +13251,8 @@ async function loadDFS(){
       sb.from('leads')
         .select('id, name, url, contact_email, contact_source, geo, lang, type, fit_score, score, stage, '
               + 'affiliate_maturity, pro_signals, commercial_keywords, dfs_intersect_count, dfs_rank, '
-              + 'dfs_spam_score, dfs_competitors, owner_cluster_id, analytics_ids, created_at')
+              + 'dfs_spam_score, dfs_competitors, owner_cluster_id, analytics_ids, created_at, '
+              + 'total_search_volume, top3_keywords, ua_portfolio_hint, dfs_etv, dfs_median_position, dfs_source')
         .eq('pipeline', 'dataforseo')
         .order('fit_score', { ascending:false, nullsFirst:false })
         .limit(1000).then(r => r.data || []),
@@ -13237,6 +13265,8 @@ async function loadDFS(){
       // списывались, а очередь не прирастала. Это то место, где видно, что
       // теперь прогон идёт дальше, а не по кругу.
       sb.from('dfs_intersect_state').select('*').then(r => r.data || []),
+      // Кластеры коммерческих ключей — основной вход добычи v7.1.
+      sb.from('dfs_keyword_clusters').select('*').order('priority').then(r => r.data || []),
     ]);
 
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
@@ -13247,7 +13277,7 @@ async function loadDFS(){
 
     dfsData = {
       counts: { total, raw, qualified, promoted, rejected },
-      competitors: comps, usage, spend30, queue, rejects, leads, intersectState,
+      competitors: comps, usage, spend30, queue, rejects, leads, intersectState, keywordClusters,
       limit: limitRow, sentToday: sentToday || 0, clusters,
       balance: dfsData.balance, estimate: dfsData.estimate,
     };
@@ -13466,7 +13496,9 @@ function dfsRenderOverview(){
       ${bigClusters.slice(0,12).map(cl => `
         <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--border2);">
           <span style="font-family:var(--font-mono);font-size:11px;color:var(--text3);flex:1;">${dfsEsc(cl.cluster_key)}</span>
-          <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);">${dfsEsc(cl.key_type||'')}</span>
+          <span style="font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:5px;border:1px solid var(--border2);color:var(--text3);"
+                title="${dfsEsc(DFS_KEY_TYPE[cl.key_type] || cl.key_type || '')}">${dfsEsc(cl.key_type||'')}</span>
+          ${cl.total_search_volume ? `<span style="font-family:var(--font-mono);font-size:11px;color:var(--blue);">${dfsNum(cl.total_search_volume)}/мес</span>` : ''}
           <span style="font-family:var(--font-mono);font-size:13px;color:${(cl.sites_count||0)>=5?'var(--green)':'var(--text2)'};">${cl.sites_count} сайт(ов)</span>
         </div>`).join('')}`) : ''}
   `;
@@ -13500,6 +13532,22 @@ function dfsRenderHarvest(){
       <td style="padding:7px 8px;font-size:11px;color:${u.error_message?'var(--red)':'var(--text3)'};">${dfsEsc(u.error_message||'ok')}</td>
     </tr>`).join('');
 
+  const clusterRows = (dfsData.keywordClusters || []).map(c => `
+    <tr style="border-top:1px solid var(--border2);${c.active?'':'opacity:.45;'}">
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;">${dfsEsc(c.geo)}</td>
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:11px;color:var(--text3);">${c.location_code} / ${dfsEsc(c.language_code)}</td>
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:var(--text2);">${(c.keywords||[]).length}</td>
+      <td style="padding:9px 8px;font-size:11px;color:var(--text3);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+          title="${dfsEsc((c.keywords||[]).join(' · '))}">${dfsEsc((c.keywords||[]).slice(0,4).join(' · '))}${(c.keywords||[]).length>4?' …':''}</td>
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:var(--text3);">${c.priority}</td>
+      <td style="padding:9px 8px;font-size:11px;color:var(--text3);">${dfsDate(c.last_run_at)}</td>
+      <td style="padding:9px 8px;">
+        <button onclick="dfsToggleCluster(${c.id}, ${!c.active})" style="padding:4px 10px;border-radius:6px;font-size:11px;font-family:var(--font-mono);cursor:pointer;
+          border:1px solid ${c.active?'var(--green)':'var(--border2)'};
+          background:transparent;color:${c.active?'var(--green)':'var(--text3)'};">${c.active?'вкл':'выкл'}</button>
+      </td>
+    </tr>`).join('');
+
   const intersectRows = (dfsData.intersectState || [])
     .slice().sort((a,b) => (a.geo||'').localeCompare(b.geo||'')).map(s => {
       const total = s.total_count;
@@ -13522,20 +13570,26 @@ function dfsRenderHarvest(){
     ${dfsCard('Запустить выгрузку', `
       <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:16px;">
         Харвестер не висит на кроне — каждый вызов стоит денег, и смысл в редких больших партиях.
-        <b style="color:var(--text2);">Пересечения</b> дают самое чистое ядро: домен, который ссылается сразу
-        на трёх букмекеров, — почти наверняка аффилиат-обзорник. <b style="color:var(--text2);">Широкая</b> — объём.
-        <b style="color:var(--text2);">Анкоры</b> дописывают текст ссылки, по нему квалификатор судит без загрузки страницы.
+        <br><b style="color:var(--text2);">Основной режим</b> задаёт вопрос напрямую: «вот 200 коммерческих
+        запросов — покажи, кто владеет этой выдачей». Мусор по таким запросам не ранжируется в принципе,
+        поэтому отсев делает Google, а не мы. Дальше найденные домены проверяются на частотность ключей
+        и по каждому профи подтягиваются его конкуренты — каждая хорошая находка приводит ещё несколько.
+        <br><b style="color:var(--text2);">Ссылочные режимы</b> оставлены, но понижены: прогон на $1 по ним
+        дал 30 доменов, и все 30 отклонены как «нет своей аудитории». У букмекера в профиле ссылок ~95% шума.
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
         <div>
           <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-bottom:5px;">Режим</div>
           <select id="dfs-mode" onchange="dfsEstimate()" style="width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--font-mono);font-size:12px;padding:8px;border-radius:6px;outline:none;">
-            <option value="intersect">Только пересечения (чистое ядро)</option>
-            <option value="both" selected>Пересечения + широкая</option>
-            <option value="broad">Только широкая</option>
-            <option value="anchors">Только анкоры</option>
-            <option value="all">Всё (пересечения + широкая + анкоры)</option>
+            <option value="pipeline" selected>Основной: выдача → квалификация → размножение</option>
+            <option value="serp">Только выдача (кто в топе по коммерции)</option>
+            <option value="ranked">Только квалификация (частотность ключей)</option>
+            <option value="similar">Только размножение (похожие на профи)</option>
+            <option value="anchors">Ссылки по анкорам (вторичный)</option>
+            <option value="intersect">Пересечения ссылок (старый метод)</option>
+            <option value="broad">Широкая по ссылкам (старый метод)</option>
+            <option value="all">Всё сразу</option>
           </select>
         </div>
         <div>
@@ -13562,7 +13616,27 @@ function dfsRenderHarvest(){
 
     <div style="height:14px;"></div>
 
-    ${dfsCard('Доноры', `
+    ${dfsCard('Кластеры коммерческих ключей — основной вход', `
+      <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:12px;">
+        Один кластер — один запрос к API — один ответ «кто владеет этой выдачей». Принцип отбора ключа:
+        если за позицию по этому запросу в SEO платят деньги, ключ наш. «Как вывести выигрыш» и
+        «правила ставок» — мимо, там хобби-блоги.
+        <br>Ключи правятся прямо в базе (<code style="font-family:var(--font-mono);color:var(--text2);">dfs_keyword_clusters</code>)
+        без деплоя функции — это то, что чинится по результатам.
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr>
+            ${['GEO','location / язык','Ключей','Примеры','Приор.','Последний прогон',''].map(h =>
+              `<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;font-weight:500;">${h}</th>`).join('')}
+          </tr></thead>
+          <tbody>${clusterRows || '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text3);font-size:12px;">Кластеры не заведены — применить миграцию 027.</td></tr>'}</tbody>
+        </table>
+      </div>`)}
+
+    <div style="height:14px;"></div>
+
+    ${dfsCard('Доноры для ссылочных режимов', `
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;">
           <thead><tr>
@@ -13607,14 +13681,25 @@ function dfsRenderHarvest(){
 }
 
 function dfsEstimateText(est){
-  const mode = (document.getElementById('dfs-mode')||{}).value || 'both';
-  const m = est[mode] || est.both;
+  const mode = (document.getElementById('dfs-mode')||{}).value || 'pipeline';
+  const m = est[mode] || est.pipeline || est.both;
   if(!m) return 'Оценка недоступна.';
   const bal = est.balance;
+
+  // Labs-эндпоинты тарифицируются иначе, чем backlinks, и их цена берётся не из
+  // формулы, а из среднего по факту списаний этого аккаунта. Пока ни одного
+  // вызова не было — цену честно не показываем, вместо того чтобы выдумать её.
+  if(m.cost == null || m.cost_known === false){
+    return `Режим «${mode}»: ~${m.calls} вызов(ов) · <span style="color:var(--text3);">`
+      + `цена появится после первого вызова — тариф Labs берётся из фактических списаний, а не из формулы</span>`
+      + (bal != null ? ` · баланс ${dfsMoney(bal)}` : '');
+  }
+
   const over = bal != null && m.cost > bal;
-  return `Режим «${mode}»: ~${m.calls} вызов(ов) × ${dfsMoney(est.cost_per_call)} = `
+  return `Режим «${mode}»: ~${m.calls} вызов(ов) = `
     + `<b style="color:${over?'var(--red)':'var(--amber)'};">${dfsMoney(m.cost)}</b>`
     + (bal != null ? ` · баланс ${dfsMoney(bal)}` : '')
+    + (est.rank_pending ? ` · ждут квалификации: ${dfsNum(est.rank_pending)}` : '')
     + (over ? ' · <span style="color:var(--red);">не хватит, прогон остановится по бюджету</span>' : '');
 }
 
@@ -13622,17 +13707,28 @@ function dfsEstimate(){
   const el = document.getElementById('dfs-estimate');
   if(!el) return;
   const rows = Number((document.getElementById('dfs-rows')||{}).value) || 1000;
-  // Стоимость детерминирована ($0.024 за вызов + $0.000036 за строку),
-  // поэтому пересчёт под другое число строк делается на месте, без запроса.
-  if(dfsData.estimate){
-    const perCall = 0.024 + rows * 0.000036;
-    const scaled = { ...dfsData.estimate, cost_per_call: perCall };
-    ['intersect','broad','anchors','both','all'].forEach(k => {
-      if(dfsData.estimate[k]) scaled[k] = { calls: dfsData.estimate[k].calls,
-        cost: dfsData.estimate[k].calls * perCall };
-    });
-    el.innerHTML = dfsEstimateText(scaled);
-  }
+  if(!dfsData.estimate) return;
+  // Пересчёт «строк на вызов» касается только backlinks-режимов: там цена
+  // детерминирована ($0.024 за вызов + $0.000036 за строку). У Labs-режимов
+  // (выдача, квалификация, размножение) другой тариф и своя цена с сервера —
+  // масштабировать её этим ползунком было бы враньём.
+  const perCall = 0.024 + rows * 0.000036;
+  const scaled = { ...dfsData.estimate, cost_per_call: perCall };
+  ['intersect','broad','anchors','both'].forEach(k => {
+    if(dfsData.estimate[k]) scaled[k] = { calls: dfsData.estimate[k].calls,
+      cost: dfsData.estimate[k].calls * perCall, cost_known: true };
+  });
+  el.innerHTML = dfsEstimateText(scaled);
+}
+
+async function dfsToggleCluster(id, active){
+  try {
+    const { error } = await sb.from('dfs_keyword_clusters').update({ active }).eq('id', id);
+    if(error) throw error;
+    const c = (dfsData.keywordClusters||[]).find(x => x.id === id);
+    if(c) c.active = active;
+    renderDFS();
+  } catch(e){ showError('Не удалось переключить кластер: ' + (e.message || e)); }
 }
 
 async function dfsToggleCompetitor(id, active){
@@ -13664,9 +13760,17 @@ async function dfsRunHarvest(){
     });
     const d = await res.json();
     if(d.error) throw new Error(d.error);
-    if(out) out.innerHTML = `<span style="color:var(--green);">Готово:</span> `
-      + `вызовов ${d.calls}, потрачено ${dfsMoney(d.spent)}, строк получено ${dfsNum(d.rows_seen)}, `
-      + `мусор отсеян ${dfsNum(d.junk_filtered)}, сохранено ${dfsNum(d.saved)}`
+    const parts = [
+      `вызовов ${d.calls}`,
+      `потрачено ${dfsMoney(d.spent)}`,
+      `строк получено ${dfsNum(d.rows_seen)}`,
+      `мусор отсеян ${dfsNum(d.junk_filtered)}`,
+      `сохранено ${dfsNum(d.saved)}`,
+    ];
+    if(d.serp_saved)          parts.push(`из выдачи ${dfsNum(d.serp_saved)}`);
+    if(d.ranked_checked)      parts.push(`проверено на частотность ${dfsNum(d.ranked_checked)}`);
+    if(d.ranked_professional) parts.push(`<b style="color:var(--green);">профи найдено ${dfsNum(d.ranked_professional)}</b>`);
+    if(out) out.innerHTML = `<span style="color:var(--green);">Готово:</span> ` + parts.join(', ')
       + (d.reason ? ` · <span style="color:var(--text3);">${dfsEsc(d.reason)}</span>` : '');
     loadDFS();
   } catch(e){
@@ -13682,21 +13786,31 @@ function dfsRenderQueue(){
 
   const rows = dfsData.queue.map(r => {
     const comps = (r.competitors_list || []).join(', ');
-    const ic = r.intersect_count || 1;
+    const ic = r.intersect_count || 0;
     const junk = dfsIsJunk(r);
+    const src = DFS_SOURCE_LABEL[r.source] || { label: r.source || '—', color: 'var(--text3)' };
+    const vol = r.total_search_volume;
     return `<tr style="border-top:1px solid var(--border2);${junk?'opacity:.5;':''}">
       <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;">
         <a href="https://${dfsEsc(r.domain)}" target="_blank" rel="noopener noreferrer" style="color:${junk?'var(--text3)':'var(--accent2)'};text-decoration:${junk?'line-through':'none'};">${dfsEsc(r.domain)}</a>
         ${junk ? `<span style="margin-left:7px;font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:5px;border:1px solid var(--red);color:var(--red);">${dfsEsc(junk)}</span>` : ''}
       </td>
-      <td style="padding:9px 8px;text-align:center;">
-        <span style="font-family:var(--font-mono);font-size:13px;color:${ic>=3?'var(--green)':ic>=2?'var(--amber)':'var(--text3)'};">${ic}</span>
+      <td style="padding:9px 8px;">
+        <span style="font-size:10px;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;border:1px solid ${src.color};color:${src.color};">${dfsEsc(src.label)}</span>
       </td>
-      <td style="padding:9px 8px;font-size:11px;color:var(--text3);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${dfsEsc(comps)}">${dfsEsc(comps||'—')}</td>
-      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:var(--text2);">${r.dfs_rank ?? '—'}</td>
+      <td style="padding:9px 8px;font-size:11px;color:var(--text3);">${dfsEsc(r.keyword_cluster||'—')}</td>
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:${(r.etv||0)>=100?'var(--green)':'var(--text2)'};">${r.etv!=null?dfsNum(Math.round(r.etv)):'—'}</td>
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:${(vol||0)>=10000?'var(--green)':(vol||0)>=1000?'var(--amber)':'var(--text3)'};"
+          title="суммарная частотность коммерческих ключей в топ-10">
+        ${vol!=null?dfsNum(vol):(r.rank_checked_at?'0':'—')}
+      </td>
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:var(--text2);">${r.commercial_keywords ?? '—'}</td>
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:${(r.median_position||99)<=5?'var(--green)':'var(--text3)'};">${r.median_position ?? '—'}</td>
+      <td style="padding:9px 8px;text-align:center;">
+        <span style="font-family:var(--font-mono);font-size:12px;color:${ic>=3?'var(--green)':ic>=2?'var(--amber)':'var(--text3)'};" title="${dfsEsc(comps)}">${ic||'—'}</span>
+      </td>
       <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:${(r.spam_score||0)>30?'var(--red)':'var(--text3)'};">${r.spam_score ?? '—'}</td>
-      <td style="padding:9px 8px;font-size:11px;color:var(--text2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${dfsEsc(r.anchor||'')}">${dfsEsc(r.anchor||'—')}</td>
-      <td style="padding:9px 8px;font-size:11px;color:var(--text3);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${dfsEsc(r.page_title||'')}">${dfsEsc(r.page_title||'—')}</td>
+      <td style="padding:9px 8px;font-size:11px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${dfsEsc(r.anchor||'')}">${dfsEsc(r.anchor||'—')}</td>
       <td style="padding:9px 8px;white-space:nowrap;">
         <button onclick="dfsRejectDomain(${r.id})" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text3);font-size:11px;cursor:pointer;">Отклонить</button>
       </td>
@@ -13719,12 +13833,13 @@ function dfsRenderQueue(){
 
   return dfsCard(`Очередь квалификации — ${dfsNum(dfsData.counts.raw||0)} в статусе raw`, `
     <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:14px;">
-      Порядок — по числу букмекеров, на которых ссылается домен, затем по весу.
-      Ссылка сразу на трёх — сигнал сильнее любой оценки текста: случайно так не бывает.
+      Порядок — по оценке трафика с коммерческой выдачи (ETV), а не по числу ссылок.
+      Позиция без частотности ничего не стоит: «в топе по 500 ключам» без трафика — это
+      либо нулевые ключи, либо позиции 15-50, либо PBN-нода. Поэтому главная колонка — частотность.
       Квалификатор разбирает очередь сам, каждые 3 минуты. Показаны первые 200.
-      <br>Перечёркнутые строки — машинные сайты (SEO- и WHOIS-сервисы, PDF- и APK-скраперы)
-      и домены со спам-скором выше ${DFS_MAX_SPAM}. Они ссылаются на всех букмекеров сразу
-      автоматически, поэтому и лезут в верх списка. Квалификатор отсеет их сам и бесплатно.
+      <br>Прочерк в частотности значит «ещё не проверяли» — запустите режим «квалификация»
+      на вкладке «Харвестер». Перечёркнутые строки — машинные сайты (SEO- и WHOIS-сервисы,
+      PDF- и APK-скраперы) и домены со спам-скором выше ${DFS_MAX_SPAM}.
     </div>
     ${junkIds.length ? `<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
       <button onclick="dfsRejectJunk()" style="padding:8px 16px;border-radius:8px;border:1px solid var(--red);background:transparent;color:var(--red);font-size:12px;font-family:var(--font-mono);cursor:pointer;">
@@ -13735,10 +13850,10 @@ function dfsRenderQueue(){
     <div style="overflow-x:auto;max-height:620px;overflow-y:auto;">
       <table style="width:100%;border-collapse:collapse;">
         <thead style="position:sticky;top:0;background:var(--bg);z-index:1;"><tr>
-          ${['Домен','×букм','Конкуренты','Rank','Спам','Анкор','Заголовок страницы',''].map(h =>
+          ${['Домен','Источник','GEO','ETV','Частотность','Ключей','Медиана','×букм','Спам','Анкор',''].map(h =>
             `<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;font-weight:500;">${h}</th>`).join('')}
         </tr></thead>
-        <tbody>${rows || '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--text3);font-size:13px;">Очередь пуста — запустите выгрузку на вкладке «Харвестер».</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="11" style="padding:40px;text-align:center;color:var(--text3);font-size:13px;">Очередь пуста — запустите выгрузку на вкладке «Харвестер».</td></tr>'}</tbody>
       </table>
     </div>`)
   + (rejRows ? `<div style="height:14px;"></div>` + dfsCard(
@@ -13797,7 +13912,13 @@ async function dfsRejectDomain(id){
 
 // ── Экран 4: лиды пайплайна ────────────────────────────────────────────────
 function dfsRenderLeads(){
-  const leads = dfsData.leads;
+  const all = dfsData.leads;
+  // Фильтр «только профи» из ТЗ: список для работы руками, а не для статистики.
+  const leads = dfsLeadFilter === 'professional'
+    ? all.filter(l => l.affiliate_maturity === 'professional')
+    : dfsLeadFilter === 'with_volume'
+    ? all.filter(l => (l.total_search_volume || 0) > 0)
+    : all;
   const clusterById = {};
   dfsData.clusters.forEach(c => { clusterById[c.id] = c; });
 
@@ -13819,9 +13940,13 @@ function dfsRenderLeads(){
         <span style="font-size:10px;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;border:1px solid ${m.color};color:${m.color};">${m.label}</span>
       </td>
       <td style="padding:9px 8px;font-family:var(--font-mono);font-size:13px;color:${(l.fit_score||0)>=70?'var(--green)':'var(--text2)'};">${l.fit_score ?? '—'}</td>
-      <td style="padding:9px 8px;text-align:center;font-family:var(--font-mono);font-size:12px;color:${ic>=3?'var(--green)':ic>=2?'var(--amber)':'var(--text3)'};">${ic||'—'}</td>
-      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:var(--text3);">${l.dfs_rank ?? '—'}</td>
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:${(l.total_search_volume||0)>=10000?'var(--green)':(l.total_search_volume||0)>=1000?'var(--amber)':'var(--text3)'};"
+          title="суммарная частотность коммерческих ключей в топ-10 — главная метрика ценности лида">
+        ${l.total_search_volume!=null?dfsNum(l.total_search_volume):'—'}
+      </td>
       <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:var(--text2);">${l.commercial_keywords ?? '—'}</td>
+      <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;color:${(l.top3_keywords||0)>=5?'var(--green)':'var(--text3)'};">${l.top3_keywords ?? '—'}</td>
+      <td style="padding:9px 8px;text-align:center;font-family:var(--font-mono);font-size:12px;color:${ic>=3?'var(--green)':ic>=2?'var(--amber)':'var(--text3)'};">${ic||'—'}</td>
       <td style="padding:9px 8px;font-size:11px;color:var(--text3);">${dfsEsc(sig||'—')}</td>
       <td style="padding:9px 8px;font-size:11px;color:var(--text3);">${dfsEsc(l.geo||'—')}${l.lang?' / '+dfsEsc(l.lang):''}</td>
       <td style="padding:9px 8px;font-size:11px;">
@@ -13835,28 +13960,45 @@ function dfsRenderLeads(){
     </tr>`;
   }).join('');
 
-  const pro = leads.filter(l => l.affiliate_maturity === 'professional').length;
-  const withEmail = leads.filter(l => l.contact_email).length;
+  const pro = all.filter(l => l.affiliate_maturity === 'professional').length;
+  const withEmail = all.filter(l => l.contact_email).length;
+  const totalVolume = all.reduce((s,l) => s + (Number(l.total_search_volume)||0), 0);
+
+  const filterBtn = (k, label) => `
+    <button onclick="dfsSetLeadFilter('${k}')" style="padding:6px 13px;border-radius:8px;font-size:11px;font-family:var(--font-mono);cursor:pointer;
+      border:1px solid ${dfsLeadFilter===k?'var(--accent)':'var(--border2)'};
+      background:${dfsLeadFilter===k?'var(--accent)':'var(--bg)'};
+      color:${dfsLeadFilter===k?'#fff':'var(--text2)'};">${label}</button>`;
 
   return `
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
-      ${dfsKpi('◎','Лидов пайплайна', dfsNum(leads.length), 'var(--accent2)', 'pipeline = dataforseo')}
-      ${dfsKpi('★','Профи-аффилиатов', dfsNum(pro), 'var(--green)', leads.length?Math.round(pro/leads.length*100)+'% базы':'—')}
-      ${dfsKpi('✉','С email', dfsNum(withEmail), 'var(--purple)', leads.length?Math.round(withEmail/leads.length*100)+'% базы':'—')}
-      ${dfsKpi('⧉','Портфелей 5+', dfsNum(dfsData.clusters.filter(c=>(c.sites_count||0)>=5).length), 'var(--amber)', 'один владелец — одна сделка')}
+      ${dfsKpi('◎','Лидов пайплайна', dfsNum(all.length), 'var(--accent2)', 'pipeline = dataforseo')}
+      ${dfsKpi('★','Профи-аффилиатов', dfsNum(pro), 'var(--green)', all.length?Math.round(pro/all.length*100)+'% базы':'—')}
+      ${dfsKpi('⇗','Частотность базы', dfsNum(totalVolume), 'var(--blue)', 'суммарно ключей в топ-10 /мес')}
+      ${dfsKpi('✉','С email', dfsNum(withEmail), 'var(--purple)', all.length?Math.round(withEmail/all.length*100)+'% базы':'—')}
     </div>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+      ${filterBtn('all','Все')}
+      ${filterBtn('professional','Только профи')}
+      ${filterBtn('with_volume','С частотностью')}
+      <span style="font-size:11px;color:var(--text3);">показано ${dfsNum(leads.length)} из ${dfsNum(all.length)}</span>
+    </div>
+
     ${dfsCard('Лиды — по убыванию fit_score', `
       <div style="overflow-x:auto;max-height:620px;overflow-y:auto;">
         <table style="width:100%;border-collapse:collapse;">
           <thead style="position:sticky;top:0;background:var(--bg);z-index:1;"><tr>
-            ${['Сайт','Зрелость','fit','×букм','Rank','Ком. ключи','Признаки профи','GEO','Контакт','Владелец'].map(h =>
+            ${['Сайт','Зрелость','fit','Частотность','Ключей','Топ-3','×букм','Признаки профи','GEO','Контакт','Владелец'].map(h =>
               `<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.5px;font-weight:500;">${h}</th>`).join('')}
           </tr></thead>
-          <tbody>${rows || '<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text3);font-size:13px;">Лидов пока нет — квалификатор наполнит их из очереди.</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="11" style="padding:40px;text-align:center;color:var(--text3);font-size:13px;">Лидов пока нет — квалификатор наполнит их из очереди.</td></tr>'}</tbody>
         </table>
       </div>`)}
   `;
 }
+
+function dfsSetLeadFilter(k){ dfsLeadFilter = k; renderDFS(); }
 
 const DFS_CONTACT_LABEL = {
   none: 'не найден', unreachable: 'сайт недоступен', social: 'только соцсети',

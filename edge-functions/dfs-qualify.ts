@@ -142,6 +142,19 @@ RULES for "affiliate_maturity":
 - professional: commercial anchor + comparison content + multi_bookmaker
 - semi_pro: commercial anchor OR comparison content
 - hobby: neither
+(When an item carries commercial_keywords_top10, that number decides maturity
+instead — it is measured, not inferred. Your value is only used when it is absent.)
+
+WEIGHING THE EVIDENCE:
+- "found_by: ranks in Google top for commercial betting queries" is the STRONGEST
+  signal available. Paid-for positions on "best betting sites nigeria" are held
+  by professional affiliates almost by definition — nobody else competes there.
+  Such a domain is audience_owner = true unless it is plainly an operator, a
+  news giant, or one of the machine sites above.
+- A high est_traffic_from_those_queries with a low median_position is a real
+  business. Treat it as far better evidence than any anchor text.
+- Absence of an anchor means nothing for these domains: they were found in the
+  SERP, not in a link graph, so there is no anchor to have.
 
 Return ONLY JSON shaped {"results":[...]}. No prose, no markdown.`;
 
@@ -250,6 +263,28 @@ interface Row {
   id: number; domain: string; anchor: string | null; page_title: string | null;
   seed_competitor: string | null; intersect_count: number; dfs_rank: number | null;
   spam_score: number | null; competitors_list: string[] | null;
+  // v7.1 — SERP ownership. These outrank everything above: they say the domain
+  // is in the top of Google for queries people pay to rank for, which no anchor
+  // string can establish.
+  source: string | null; keyword_cluster: string | null;
+  etv: number | null; median_position: number | null; relevance: number | null;
+  commercial_keywords: number | null; total_search_volume: number | null;
+  top3_keywords: number | null; rank_checked_at: string | null;
+}
+
+// v7.1 §2 step 2. Deliberately not a judgement call — these are the numbers the
+// API returned, and the LLM does not get to overrule them upward.
+const PRO_MIN_KEYWORDS  = 15;
+const PRO_MIN_VOLUME    = 10_000;
+const SEMI_MIN_KEYWORDS = 5;
+
+function maturityOf(r: Row): string | null {
+  const ck = Number(r.commercial_keywords ?? NaN);
+  const sv = Number(r.total_search_volume ?? 0);
+  if (!Number.isFinite(ck)) return null;          // never profiled — unknown
+  if (ck >= PRO_MIN_KEYWORDS && sv >= PRO_MIN_VOLUME) return 'professional';
+  if (ck >= SEMI_MIN_KEYWORDS) return 'semi_pro';
+  return 'hobby';
 }
 
 // Deterministic own-brand backstop. The model is asked for our_brand, but a
@@ -290,14 +325,28 @@ async function judge(batch: Row[]): Promise<Map<number, Verdict>> {
   const out = new Map<number, Verdict>();
   if (!batch.length) return out;
 
-  const user = batch.map((r, i) =>
-    `${i}. domain: ${r.domain}\n`
-    + `   anchor: ${(r.anchor || '—').slice(0, 200)}\n`
-    + `   page_title: ${(r.page_title || '—').slice(0, 200)}\n`
-    + `   links_to: ${(r.competitors_list || [r.seed_competitor]).filter(Boolean).join(', ') || '—'}`
-    + ` (${r.intersect_count} bookmaker${r.intersect_count === 1 ? '' : 's'})\n`
-    + `   dfs_rank: ${r.dfs_rank ?? '—'}`,
-  ).join('\n\n');
+  const user = batch.map((r, i) => {
+    const lines = [`${i}. domain: ${r.domain}`];
+    // SERP evidence first when we have it — it is the strongest thing in the
+    // prompt, and burying it under an anchor string invites the model to judge
+    // on the anchor.
+    if (r.source === 'serp_competitors' || r.source === 'competitors_domain') {
+      lines.push(`   found_by: ranks in Google top for commercial betting queries (${r.keyword_cluster || '—'})`);
+      if (r.median_position !== null) lines.push(`   median_position: ${r.median_position}`);
+      if (r.etv !== null)             lines.push(`   est_traffic_from_those_queries: ${Math.round(r.etv)}`);
+    }
+    if (r.commercial_keywords !== null) {
+      lines.push(`   commercial_keywords_top10: ${r.commercial_keywords}`
+        + ` (total monthly search volume ${r.total_search_volume ?? 0}`
+        + `, ${r.top3_keywords ?? 0} of them in top-3)`);
+    }
+    lines.push(`   anchor: ${(r.anchor || '—').slice(0, 200)}`);
+    lines.push(`   page_title: ${(r.page_title || '—').slice(0, 200)}`);
+    lines.push(`   links_to: ${(r.competitors_list || [r.seed_competitor]).filter(Boolean).join(', ') || '—'}`
+      + ` (${r.intersect_count} bookmaker${r.intersect_count === 1 ? '' : 's'})`);
+    lines.push(`   dfs_rank: ${r.dfs_rank ?? '—'}`);
+    return lines.join('\n');
+  }).join('\n\n');
 
   const raw = ANTHROPIC_KEY ? await anthropicChat(user) : await groqChat(user);
   if (!raw) return out;
@@ -381,11 +430,17 @@ Deno.serve(async (req: Request) => {
       .eq('status', 'qualifying')
       .lt('claimed_at', staleCutoff));
 
-    // Best material first: linking to several books at once is the strongest
-    // affiliate signal there is, so the LLM budget goes there before anywhere.
+    // Best material first — and in v7.1 "best" means estimated traffic from the
+    // commercial SERP, not link count. A domain that owns the queries people pay
+    // to rank for is a different class of evidence from one that once linked to
+    // a book, so etv leads the sort and intersect_count is only the tie-break
+    // for older backlinks rows that have no etv at all.
     const { data: rows } = await supabase.from('dfs_domains')
-      .select('id, domain, anchor, page_title, seed_competitor, intersect_count, dfs_rank, spam_score, competitors_list')
+      .select('id, domain, anchor, page_title, seed_competitor, intersect_count, dfs_rank, '
+            + 'spam_score, competitors_list, source, keyword_cluster, etv, median_position, '
+            + 'relevance, commercial_keywords, total_search_volume, top3_keywords, rank_checked_at')
       .eq('status', 'raw')
+      .order('etv', { ascending: false, nullsFirst: false })
       .order('intersect_count', { ascending: false })
       .order('dfs_rank', { ascending: false, nullsFirst: false })
       .limit(CLAIM_BATCH);
@@ -483,12 +538,32 @@ Deno.serve(async (req: Request) => {
           }).eq('id', row.id));
         };
 
+        // Measured SERP ownership, computed BEFORE the model's soft rejections
+        // are applied. A domain holding 15+ commercial keywords in the top 10
+        // with real search volume behind them is a professional affiliate
+        // whatever a single anchor string suggested — that is the entire
+        // premise of the v7.1 rework, and it only means anything if the
+        // measurement can overrule the guess.
+        const measured = maturityOf(row);
+        const provenBySerp = measured === 'professional' || measured === 'semi_pro';
+
+        // Hard rejections stay absolute: no amount of traffic makes a bookmaker
+        // a prospect, and approaching a site another manager already owns is a
+        // real-money mistake regardless of how good the site is.
         if (v.our_brand)                 { await reject('our_brand'); continue; }
         if (v.is_operator)               { await reject('operator'); continue; }
         if (v.geo_excluded)              { await reject('geo_excluded'); continue; }
-        if (!v.audience_owner)           { await reject('no_audience'); continue; }
-        if (!v.relevant)                 { await reject('irrelevant'); continue; }
         if (emailed.has(row.domain))     { stats.already_emailed++; await reject('already_emailed'); continue; }
+
+        // Soft rejections are the model's opinion about whether the site owns
+        // an audience. Against a measured top-10 position on commercial queries
+        // that opinion loses: today's run rejected all 30 domains as
+        // "no_audience", which is exactly the judgement this data exists to
+        // replace.
+        if (!provenBySerp) {
+          if (!v.audience_owner)         { await reject('no_audience'); continue; }
+          if (!v.relevant)               { await reject('irrelevant'); continue; }
+        }
 
         // The link graph can outweigh a weak score, but only from three
         // bookmakers up — and never against an explicit "this is a machine"
@@ -497,6 +572,8 @@ Deno.serve(async (req: Request) => {
         // resurrect a rejection.
         const qualifies = v.score >= MIN_SCORE
           || row.intersect_count >= OVERRIDE_INTERSECT
+          || measured === 'professional'
+          || measured === 'semi_pro'
           || v.affiliate_maturity === 'professional';
         if (!qualifies) { await reject('low_score'); continue; }
 
@@ -509,16 +586,16 @@ Deno.serve(async (req: Request) => {
           source: 'dataforseo',
           dfs_domain_id: row.id,
           domain_normalized: row.domain,
-          geo: v.geo || null,
           lang: v.lang || null,
           type: v.type,
           score: v.score,
           summary: v.summary || null,
-          priority: v.affiliate_maturity === 'professional' ? 'High'
-                  : v.affiliate_maturity === 'semi_pro' ? 'Medium' : 'Low',
-          audience_owner: v.audience_owner,
+          // Measured maturity wins over the guessed one wherever we have it.
+          priority: (measured || v.affiliate_maturity) === 'professional' ? 'High'
+                  : (measured || v.affiliate_maturity) === 'semi_pro' ? 'Medium' : 'Low',
+          audience_owner: provenBySerp ? true : v.audience_owner,
           monetization_signal: v.monetization_signal,
-          affiliate_maturity: v.affiliate_maturity,
+          affiliate_maturity: measured || v.affiliate_maturity,
           pro_signals: v.pro_signals,
           // Link-graph evidence, snapshotted onto the lead: score-leads weights
           // it and the lead card shows it, and neither should have to join back
@@ -528,6 +605,19 @@ Deno.serve(async (req: Request) => {
           dfs_spam_score: row.spam_score,
           dfs_competitors: row.competitors_list || (row.seed_competitor ? [row.seed_competitor] : null),
           competitor_book: (row.competitors_list || [])[0] || row.seed_competitor || null,
+          // v7.1 — SERP ownership, carried onto the lead for the same reason.
+          // total_search_volume is the headline number: it is what makes one
+          // lead worth more than another, and the send queue orders on it.
+          commercial_keywords: row.commercial_keywords,
+          total_search_volume: row.total_search_volume,
+          top3_keywords: row.top3_keywords,
+          dfs_etv: row.etv,
+          dfs_median_position: row.median_position,
+          dfs_source: row.source,
+          // The market the domain was actually found in beats the model's guess
+          // at a geo from a domain name.
+          geo: row.keyword_cluster && row.keyword_cluster !== 'AFRICA'
+            ? row.keyword_cluster : (v.geo || null),
         };
 
         const { error: insErr } = await supabase.from('leads').insert([leadData]);
