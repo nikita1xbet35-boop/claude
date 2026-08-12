@@ -2,27 +2,53 @@
 // ════════════════════════════════════════════════════════════════════════════
 // Stage 1 of the DataForSEO pipeline: HARVEST.
 //
-// Pulls the backlink profiles of competitor bookmakers and dumps the referring
-// domains into dfs_domains as raw material. Analyses nothing, fetches no pages,
-// contacts nobody — that is dfs-qualify's and dfs-enrich's job. This function
-// exists to turn money into rows as cheaply as possible.
+// Turns money into candidate domains as cheaply as possible. Analyses nothing,
+// fetches no pages, contacts nobody — that is dfs-qualify's and dfs-enrich's job.
 //
-// WHY BACKLINKS AND NOT KEYWORDS
-// A site that links to Bet9ja is an affiliate by construction: an SEO affiliate
-// cannot earn without sending traffic to a book. The keyword pipeline can only
-// ever see ~5 400 URLs (150 keywords × 12 results × 3 pages) and has already
-// found all of them. bet9ja.com alone has 18 115 referring domains.
+// WHY THIS WAS REWRITTEN (v7.1)
+// The original method pulled the backlink profiles of competitor bookmakers on
+// the reasoning that whoever links to a book is an affiliate. It does not hold
+// up. bet9ja.com has 18 115 referring domains and maybe 3-5% are live
+// affiliates; the rest are shorteners, scrapers, directories, comment spam,
+// forum profiles and one-off news mentions. Our own pilot said the same thing
+// in numbers: 30 domains from the intersection reached the qualifier and all 30
+// came back no_audience.
+//
+// A backlink is indirect evidence — "this site once placed a link". There is
+// direct evidence available: who is in the top of the SERP for commercial
+// queries RIGHT NOW. So the question is inverted. Not "take every link the book
+// has and try to filter it", but "here are 200 commercial queries — show me who
+// owns this SERP". Junk does not rank for commercial queries at all, which
+// moves the filtering to Google's side instead of ours.
+//
+// THE PIPELINE
+//   S. serp_competitors   → who owns the commercial SERP        (PRIMARY INPUT)
+//   R. ranked_keywords    → qualify: how many commercial keys in the top 10,
+//                           and at what search volume                (FILTER)
+//   C. competitors_domain → multiply: peers of every professional found
+//   A. backlinks-by-anchor→ secondary volume, filtered on anchor text
+//   I/B. intersection + broad referring domains — the v7 method, demoted
+//
+// Positions without search volume are worthless: a site "ranking for 500 keys"
+// with no traffic means either the keys have no volume, the positions are
+// really 15-50, or it is a PBN node built not to receive traffic. None of the
+// three is a prospect, which is why step R filters on search_volume > 100 API-
+// side and the queue sorts on etv rather than on any count of anything.
 //
 // RUN IT MANUALLY (or weekly), NOT ON THE 3-MINUTE CRON. Every call costs real
 // money and the whole point is large, infrequent batches.
 //
-// Cost model, confirmed against the live API:
+// Cost model for the backlinks endpoints, confirmed against the live API:
 //   $0.024 per request + $0.000036 per row  →  1000 rows = $0.06
-// Filtering and sorting are free on DataForSEO's side, so `rank > 15` is applied
-// in the request and junk is never paid for.
+// The Labs endpoints (serp_competitors, ranked_keywords, competitors_domain)
+// are tariffed differently, so nothing here estimates them from a formula: the
+// estimate averages what THIS account was actually charged, read from dfs_usage,
+// and says "unknown" until the first real call has happened.
 //
 // Body params (all optional):
-//   { budget_usd: 5, mode: 'intersect'|'broad'|'anchors'|'both'|'all',
+//   { budget_usd: 5,
+//     mode: 'pipeline'|'serp'|'ranked'|'similar'|'anchors'|'intersect'|'broad'
+//           |'both'|'all',
 //     rows_per_call: 1000, estimate_only: false }
 //
 // Deploy: supabase functions deploy dfs-harvest --no-verify-jwt
@@ -55,6 +81,48 @@ const MIN_RANK = 15;
 // Two, not three: a three-way intersection is a far smaller set, and the first
 // successful run came back with total_count=0 at three targets across every geo.
 const INTERSECT_TARGETS = 2;
+
+// ── v7.1 constants ──────────────────────────────────────────────────────────
+// relevance is 0-1, how well the domain's profile matches the keyword cluster.
+// The filter is not optional: without it the top of every cluster is Wikipedia,
+// Facebook and whichever national newspaper happened to rank for one query out
+// of two hundred.
+const MIN_RELEVANCE = 0.5;
+// serp_competitors accepts up to 200 keywords per request; our clusters are
+// 5-14 keys, so one cluster is always one call.
+const SERP_KEYWORDS_MAX = 200;
+// Rows per Labs call. Deliberately not rows_per_call: that parameter is tuned
+// for backlinks (1000 rows at $0.000036 each) and the Labs tariff is different.
+// 100 competitors per SERP is already past the point where relevance decays.
+const SERP_LIMIT    = 100;
+const SIMILAR_LIMIT = 50;
+// ranked_keywords is per-domain, so an unbounded loop would spend the whole
+// budget on qualification and never harvest. These cap a single invocation;
+// the budget check caps it again.
+const RANKED_PER_RUN  = 25;
+const SIMILAR_PER_RUN = 8;
+// Top-10 only, and only keys with real volume. Both filters run API-side and
+// are free — we pay only for rows that already passed them.
+const RANKED_MAX_POSITION  = 11;   // rank_group < 11
+const RANKED_MIN_VOLUME    = 100;  // search_volume > 100
+
+// Classification thresholds (v7.1 §2 step 2).
+const PRO_MIN_KEYWORDS = 15;
+const PRO_MIN_VOLUME   = 10_000;
+const SEMI_MIN_KEYWORDS = 5;
+
+// Anchor patterns for the demoted backlinks phase. "Bet9ja promo code" is an
+// affiliate link; the company name or a bare URL is a news mention. Filtering
+// on anchor happens API-side and is free, so we pay only for rows that already
+// look like affiliate placements — the single biggest change to that phase.
+const ANCHOR_PATTERNS = [
+  '%promo code%', '%bonus code%', '%review%', '%sign up%',
+  '%registration%', '%best betting%', '%code promo%', '%avis%',
+  '%bonus%', '%offer%', '%comparatif%', '%análise%',
+];
+// Anchor calls per competitor per run. Without a cap, 18 competitors × 12
+// patterns is 216 calls in one invocation.
+const ANCHOR_PATTERNS_PER_RUN = 3;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -436,6 +504,56 @@ async function flush(rows: UpsertRow[]): Promise<number> {
   return saved;
 }
 
+/** Rows from the Labs endpoints, which carry SERP-ownership metrics instead of
+ *  a competitor and a link count. Separate RPC for a separate shape — see the
+ *  note on dfs_upsert_serp_domains in migration 027. */
+interface SerpRow {
+  domain: string; source: string; keyword_cluster: string | null;
+  etv: number | null; median_position: number | null;
+  visibility: number | null; relevance: number | null;
+  keywords_matched: number | null;
+}
+
+async function flushSerp(rows: SerpRow[]): Promise<number> {
+  if (!rows.length) return 0;
+  let saved = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { data, error } = await supabase.rpc('dfs_upsert_serp_domains', { p_rows: chunk });
+    if (error) throw new Error('serp upsert: ' + error.message);
+    saved += Number(data) || 0;
+  }
+  return saved;
+}
+
+/** Read a domain-ish field out of a Labs item.
+ *
+ *  serp_competitors returns `domain`; competitors_domain nests its metrics
+ *  under `metrics.organic` and names the field `domain` as well, but neither
+ *  shape is documented from here (the docs host is blocked by the same egress
+ *  policy as the API), so both are probed rather than assumed. */
+function labsDomain(it: any): string {
+  for (const k of ['domain', 'target', 'domain_from']) {
+    const v = it?.[k];
+    if (typeof v === 'string' && v.includes('.')) return normDomain(v);
+  }
+  return '';
+}
+
+/** Pull a metric that may sit at the top level or inside metrics.organic. */
+function labsNum(it: any, ...keys: string[]): number | null {
+  const organic = it?.metrics?.organic ?? it?.metrics ?? null;
+  for (const k of keys) {
+    const direct = num(it?.[k]);
+    if (direct !== null) return direct;
+    if (organic) {
+      const nested = num(organic?.[k]);
+      if (nested !== null) return nested;
+    }
+  }
+  return null;
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -453,6 +571,14 @@ Deno.serve(async (req: Request) => {
     // response shape moved again — the failure that cost three runs to spot.
     unparsed_items: 0,
     saved: 0,
+    // v7.1 phases, reported separately: the whole point of the rework is being
+    // able to see which SOURCE produced the domains, not just how many landed.
+    serp: [] as Array<{ geo: string; keywords: number; returned: number; kept: number }>,
+    serp_saved: 0,
+    ranked_checked: 0,
+    ranked_professional: 0,
+    similar: [] as Array<{ seed: string; returned: number; kept: number }>,
+    anchors: [] as Array<{ competitor: string; pattern: string; returned: number; kept: number }>,
     intersections: [] as Array<{ geo: string; targets: string[]; found: number; returned: number; total: number }>,
     broad: [] as Array<{ competitor: string; found: number; offset: number; total: number }>,
     anchors_filled: 0,
@@ -492,9 +618,27 @@ Deno.serve(async (req: Request) => {
       MAX_BUDGET_PER_RUN,
       Math.max(0, Number.isFinite(parsedBudget) ? parsedBudget : 5),
     );
-    const mode        = String(body.mode || 'both');
+    const mode        = String(body.mode || 'pipeline');
     const rowsPerCall = Math.min(1000, Math.max(10, Number(body.rows_per_call) || 1000));
     stats.mode = mode;
+
+    // Which phases this mode runs. 'pipeline' is the v7.1 default and
+    // deliberately excludes the backlinks phases: they are what produced a
+    // queue of 30 domains that were all rejected, and re-running them by
+    // default would keep paying for that.
+    const PHASES: Record<string, string[]> = {
+      pipeline:  ['serp', 'ranked', 'similar'],
+      serp:      ['serp'],
+      ranked:    ['ranked'],
+      similar:   ['similar'],
+      anchors:   ['anchors'],
+      intersect: ['intersect'],
+      broad:     ['broad'],
+      both:      ['intersect', 'broad'],          // v7 meaning, kept for old callers
+      all:       ['serp', 'ranked', 'similar', 'anchors', 'intersect', 'broad'],
+    };
+    const phases = new Set(PHASES[mode] || PHASES.pipeline);
+    const want = (p: string) => phases.has(p);
 
     // Cost is deterministic, so the UI can be told the price before spending it.
     // The estimate also carries the live balance: the operator needs both
@@ -509,6 +653,39 @@ Deno.serve(async (req: Request) => {
       for (const c of comps || []) geoCount.set(c.geo, (geoCount.get(c.geo) || 0) + 1);
       const intersectCalls = [...geoCount.values()].filter(n => n >= 2).length;
       const broadCalls = (comps || []).length;
+
+      const { count: clusterCount } = await supabase.from('dfs_keyword_clusters')
+        .select('id', { count: 'exact', head: true }).eq('active', true);
+      const { count: rankPending } = await supabase.from('dfs_domains')
+        .select('id', { count: 'exact', head: true })
+        .in('source', ['serp_competitors', 'competitors_domain'])
+        .is('rank_checked_at', null);
+
+      // What the Labs endpoints actually cost THIS account. Their tariff is not
+      // the backlinks formula and is not documented from here, so the estimate
+      // is measured rather than derived — and honestly reports null until the
+      // first real call has been billed.
+      const labsAvg = async (endpoint: string): Promise<number | null> => {
+        const { data } = await supabase.from('dfs_usage')
+          .select('cost_usd').eq('endpoint', endpoint).gt('cost_usd', 0)
+          .order('created_at', { ascending: false }).limit(50);
+        if (!data?.length) return null;
+        const sum = data.reduce((s: number, r: any) => s + (Number(r.cost_usd) || 0), 0);
+        return sum / data.length;
+      };
+      const serpAvg    = await labsAvg('/v3/dataforseo_labs/google/serp_competitors/live');
+      const rankedAvg  = await labsAvg('/v3/dataforseo_labs/google/ranked_keywords/live');
+      const similarAvg = await labsAvg('/v3/dataforseo_labs/google/competitors_domain/live');
+
+      const est = (calls: number, per: number | null) => ({
+        calls,
+        cost: per === null ? null : Number((calls * per).toFixed(4)),
+        cost_known: per !== null,
+      });
+      const serpCalls    = clusterCount || 0;
+      const rankedCalls  = Math.min(rankPending || 0, RANKED_PER_RUN);
+      const similarCalls = SIMILAR_PER_RUN;
+
       const bal = await dfsBalance();
       return json({
         estimate_only: true,
@@ -516,13 +693,30 @@ Deno.serve(async (req: Request) => {
         balance_error: bal.ok ? null : bal.error,
         rows_per_call: rowsPerCall,
         cost_per_call: Number(perCall.toFixed(6)),
-        intersect: { calls: intersectCalls, cost: Number((intersectCalls * perCall).toFixed(4)) },
-        broad:     { calls: broadCalls,     cost: Number((broadCalls * perCall).toFixed(4)) },
-        anchors:   { calls: broadCalls,     cost: Number((broadCalls * perCall).toFixed(4)) },
+        // v7.1 primary path
+        serp:     est(serpCalls, serpAvg),
+        ranked:   est(rankedCalls, rankedAvg),
+        similar:  est(similarCalls, similarAvg),
+        pipeline: {
+          calls: serpCalls + rankedCalls + similarCalls,
+          cost: [serpAvg, rankedAvg, similarAvg].every(v => v !== null)
+            ? Number((serpCalls * serpAvg! + rankedCalls * rankedAvg!
+                    + similarCalls * similarAvg!).toFixed(4))
+            : null,
+          cost_known: [serpAvg, rankedAvg, similarAvg].every(v => v !== null),
+        },
+        rank_pending: rankPending || 0,
+        // v7 backlinks path, priced by the confirmed formula
+        intersect: { calls: intersectCalls, cost: Number((intersectCalls * perCall).toFixed(4)), cost_known: true },
+        broad:     { calls: broadCalls,     cost: Number((broadCalls * perCall).toFixed(4)), cost_known: true },
+        anchors:   { calls: broadCalls * ANCHOR_PATTERNS_PER_RUN,
+                     cost: Number((broadCalls * ANCHOR_PATTERNS_PER_RUN * perCall).toFixed(4)),
+                     cost_known: true },
         both:      { calls: intersectCalls + broadCalls,
-                     cost: Number(((intersectCalls + broadCalls) * perCall).toFixed(4)) },
-        all:       { calls: intersectCalls + broadCalls * 2,
-                     cost: Number(((intersectCalls + broadCalls * 2) * perCall).toFixed(4)) },
+                     cost: Number(((intersectCalls + broadCalls) * perCall).toFixed(4)), cost_known: true },
+        all:       { calls: serpCalls + rankedCalls + similarCalls
+                          + intersectCalls + broadCalls * (1 + ANCHOR_PATTERNS_PER_RUN),
+                     cost: null, cost_known: false },
       });
     }
 
@@ -537,10 +731,26 @@ Deno.serve(async (req: Request) => {
 
     // Effective budget: never plan to spend more than the account actually has.
     const cap = Math.min(budget, bal.balance - MIN_BALANCE_USD);
-    const affordable = () => stats.spent + perCall <= cap;
+    // The guard takes the price of the NEXT call, because the backlinks formula
+    // and the Labs tariff differ by enough that one number for both would
+    // either stop the run early or overshoot the budget. Unknown Labs prices
+    // are guessed high on purpose: overshooting spends real money, stopping
+    // early only costs a run.
+    const LABS_COST_GUESS = 0.05;
+    const affordable = (estimate = perCall) => stats.spent + estimate <= cap;
+
+    /** Average of what this account was actually billed for an endpoint. */
+    const measuredCost = async (endpoint: string): Promise<number> => {
+      const { data } = await supabase.from('dfs_usage')
+        .select('cost_usd').eq('endpoint', endpoint).gt('cost_usd', 0)
+        .order('created_at', { ascending: false }).limit(50);
+      if (!data?.length) return LABS_COST_GUESS;
+      const sum = data.reduce((s: number, r: any) => s + (Number(r.cost_usd) || 0), 0);
+      return Math.max(sum / data.length, 0.001);
+    };
 
     const { data: competitors } = await supabase.from('dfs_competitors')
-      .select('id, domain, geo, priority, harvested_offset, total_ref_domains')
+      .select('id, domain, geo, priority, harvested_offset, total_ref_domains, anchor_cursor')
       .eq('active', true)
       .order('priority', { ascending: true });
     if (!competitors?.length) { stats.reason = 'no active competitors'; return json(stats); }
@@ -559,11 +769,247 @@ Deno.serve(async (req: Request) => {
       return clean.length;
     };
 
+    /** Shared post-processing for the Labs phases. Same junk gate as the
+     *  backlinks path — the books themselves, our own group and the machine
+     *  sites all rank for commercial queries too. */
+    const ingestSerp = async (rows: SerpRow[]): Promise<number> => {
+      stats.rows_seen += rows.length;
+      const clean = rows.filter(r => {
+        if (isJunk(r.domain, competitorSet)) { stats.junk_filtered++; return false; }
+        return true;
+      });
+      const saved = await flushSerp(clean);
+      stats.serp_saved += saved;
+      stats.saved += saved;
+      return clean.length;
+    };
+
+    // ── Phase S: serp_competitors — who owns the commercial SERP ──────────
+    // The primary input. One cluster of commercial keywords per call; the API
+    // answers with the domains that rank across them, their median position,
+    // their estimated traffic and how much of the cluster each one covers.
+    //
+    // relevance > 0.5 is applied server-side and is the load-bearing filter:
+    // it is what keeps Wikipedia and the national newspapers out of a list that
+    // is supposed to be affiliates.
+    if (want('serp')) {
+      const serpCost = await measuredCost('/v3/dataforseo_labs/google/serp_competitors/live');
+      const { data: clusters } = await supabase.from('dfs_keyword_clusters')
+        .select('id, geo, location_code, language_code, keywords')
+        .eq('active', true)
+        .order('priority', { ascending: true });
+
+      for (const c of clusters || []) {
+        if (outOfTime())          { stats.reason = 'deadline during serp'; break; }
+        if (!affordable(serpCost)) { stats.reason = 'budget spent during serp'; break; }
+
+        const keywords = (c.keywords || []).slice(0, SERP_KEYWORDS_MAX);
+        if (!keywords.length) continue;
+
+        const r = await dfsCallTolerant('/v3/dataforseo_labs/google/serp_competitors/live', {
+          keywords,
+          location_code: c.location_code,
+          language_code: c.language_code,
+          limit: SERP_LIMIT,
+        }, {
+          order_by: ['etv,desc'],
+          filters: [['relevance', '>', MIN_RELEVANCE]],
+        }, c.geo);
+        stats.calls += r.attempts;
+        stats.spent += r.cost;
+        if (r.dropped.length) dropNote('serp', r.dropped);
+        if (!r.ok) { stats.reason = 'serp_competitors failed: ' + r.error; continue; }
+
+        // One raw item, once per run — the only durable record of this
+        // endpoint's actual shape, for the same reason the intersection phase
+        // keeps one.
+        if (!sampleLogged && r.items.length) {
+          sampleLogged = true;
+          await quiet(supabase.from('error_log').insert([{
+            level: 'info', service: 'dfs-harvest',
+            message: 'RAW serp_competitors item: ' + JSON.stringify(r.items[0]).slice(0, 1800),
+          }]));
+        }
+
+        const rows: SerpRow[] = [];
+        for (const it of r.items) {
+          const domain = labsDomain(it);
+          if (!domain) { stats.unparsed_items++; continue; }
+          const rel = labsNum(it, 'relevance');
+          // The server-side filter may have been peeled off as an invalid
+          // field; enforce it here so a dropped clause cannot silently flood
+          // the queue with generalists.
+          if (rel !== null && rel <= MIN_RELEVANCE) { stats.junk_filtered++; continue; }
+          rows.push({
+            domain,
+            source: 'serp_competitors',
+            keyword_cluster: c.geo,
+            etv: labsNum(it, 'etv'),
+            median_position: labsNum(it, 'median_position', 'avg_position'),
+            visibility: labsNum(it, 'visibility'),
+            relevance: rel,
+            keywords_matched: labsNum(it, 'keywords_count', 'count'),
+          });
+        }
+
+        const kept = await ingestSerp(rows);
+        stats.serp.push({ geo: c.geo, keywords: keywords.length, returned: r.items.length, kept });
+        await quiet(supabase.from('dfs_keyword_clusters').update({
+          last_run_at: new Date().toISOString(), domains_found: kept,
+        }).eq('id', c.id));
+        await sleep(300);
+      }
+    }
+
+    // ── Phase R: ranked_keywords — the qualification filter ───────────────
+    // For domains that came out of the SERP phases. Asks the only question
+    // that separates a real property from a PBN node: how many commercial
+    // keywords does it hold in the top 10, and do those keywords have any
+    // search volume at all.
+    //
+    // Both filters are API-side and free, so a domain ranking for 500 zero-
+    // volume keys comes back with an empty result rather than 500 paid rows.
+    if (want('ranked')) {
+      const rankedCost = await measuredCost('/v3/dataforseo_labs/google/ranked_keywords/live');
+      const { data: pending } = await supabase.from('dfs_domains')
+        .select('id, domain, keyword_cluster')
+        .in('source', ['serp_competitors', 'competitors_domain'])
+        .is('rank_checked_at', null)
+        .neq('status', 'rejected')
+        .order('etv', { ascending: false, nullsFirst: false })
+        .limit(RANKED_PER_RUN);
+
+      // Cluster geo → location/language, so a domain is profiled in the market
+      // it was found in rather than in a default one.
+      const { data: clusterRows } = await supabase.from('dfs_keyword_clusters')
+        .select('geo, location_code, language_code');
+      const clusterBy = new Map<string, { loc: number; lang: string }>();
+      for (const c of clusterRows || []) {
+        clusterBy.set(c.geo, { loc: c.location_code, lang: c.language_code });
+      }
+
+      for (const d of pending || []) {
+        if (outOfTime())              { stats.reason = 'deadline during ranked'; break; }
+        if (!affordable(rankedCost))  { stats.reason = 'budget spent during ranked'; break; }
+
+        const cl = clusterBy.get(String(d.keyword_cluster || '')) || { loc: 2566, lang: 'en' };
+        const r = await dfsCallTolerant('/v3/dataforseo_labs/google/ranked_keywords/live', {
+          target: d.domain,
+          location_code: cl.loc,
+          language_code: cl.lang,
+          limit: 200,
+        }, {
+          filters: [
+            ['ranked_serp_element.serp_item.rank_group', '<', RANKED_MAX_POSITION],
+            'and',
+            ['keyword_data.keyword_info.search_volume', '>', RANKED_MIN_VOLUME],
+          ],
+          order_by: ['keyword_data.keyword_info.search_volume,desc'],
+        }, d.domain);
+        stats.calls += r.attempts;
+        stats.spent += r.cost;
+        if (r.dropped.length) dropNote('ranked', r.dropped);
+        if (!r.ok) { stats.reason = 'ranked_keywords failed: ' + r.error; continue; }
+
+        // If the server-side filters were peeled, apply them here — otherwise
+        // a domain with 200 zero-volume keys would score as a professional.
+        const filtersDropped = r.dropped.includes('filters');
+        let commercial = 0, volume = 0, top3 = 0;
+        for (const it of r.items) {
+          const pos = num(it?.ranked_serp_element?.serp_item?.rank_group);
+          const vol = num(it?.keyword_data?.keyword_info?.search_volume);
+          if (filtersDropped) {
+            if (pos === null || pos >= RANKED_MAX_POSITION) continue;
+            if (vol === null || vol <= RANKED_MIN_VOLUME)   continue;
+          }
+          commercial++;
+          volume += vol ?? 0;
+          if (pos !== null && pos <= 3) top3++;
+        }
+
+        stats.ranked_checked++;
+        if (commercial >= PRO_MIN_KEYWORDS && volume >= PRO_MIN_VOLUME) stats.ranked_professional++;
+
+        await quiet(supabase.from('dfs_domains').update({
+          commercial_keywords: commercial,
+          total_search_volume: volume,
+          top3_keywords: top3,
+          rank_checked_at: new Date().toISOString(),
+        }).eq('id', d.id));
+        await sleep(300);
+      }
+    }
+
+    // ── Phase C: competitors_domain — multiply what worked ────────────────
+    // Every professional found is a seed: the domains competing with it for the
+    // same SERP are, by construction, the same kind of business. This is the
+    // self-sustaining half of the pipeline — each good find brings several more.
+    if (want('similar')) {
+      const similarCost = await measuredCost('/v3/dataforseo_labs/google/competitors_domain/live');
+      const { data: seeds } = await supabase.from('dfs_domains')
+        .select('id, domain, keyword_cluster, commercial_keywords, total_search_volume')
+        .gte('commercial_keywords', PRO_MIN_KEYWORDS)
+        .gte('total_search_volume', PRO_MIN_VOLUME)
+        .is('similar_pulled_at', null)
+        .order('total_search_volume', { ascending: false })
+        .limit(SIMILAR_PER_RUN);
+
+      const { data: clusterRows2 } = await supabase.from('dfs_keyword_clusters')
+        .select('geo, location_code, language_code');
+      const clusterBy2 = new Map<string, { loc: number; lang: string }>();
+      for (const c of clusterRows2 || []) {
+        clusterBy2.set(c.geo, { loc: c.location_code, lang: c.language_code });
+      }
+
+      for (const s of seeds || []) {
+        if (outOfTime())               { stats.reason = 'deadline during similar'; break; }
+        if (!affordable(similarCost))  { stats.reason = 'budget spent during similar'; break; }
+
+        const cl = clusterBy2.get(String(s.keyword_cluster || '')) || { loc: 2566, lang: 'en' };
+        const r = await dfsCallTolerant('/v3/dataforseo_labs/google/competitors_domain/live', {
+          target: s.domain,
+          location_code: cl.loc,
+          language_code: cl.lang,
+          limit: SIMILAR_LIMIT,
+        }, {
+          order_by: ['metrics.organic.etv,desc'],
+        }, s.domain);
+        stats.calls += r.attempts;
+        stats.spent += r.cost;
+        if (r.dropped.length) dropNote('similar', r.dropped);
+        // Mark the seed regardless of outcome: a seed with no peers is an
+        // answer, and retrying it every run would pay for that answer twice.
+        await quiet(supabase.from('dfs_domains')
+          .update({ similar_pulled_at: new Date().toISOString() }).eq('id', s.id));
+        if (!r.ok) { stats.reason = 'competitors_domain failed: ' + r.error; continue; }
+
+        const rows: SerpRow[] = [];
+        for (const it of r.items) {
+          const domain = labsDomain(it);
+          if (!domain || domain === s.domain) { if (!domain) stats.unparsed_items++; continue; }
+          rows.push({
+            domain,
+            source: 'competitors_domain',
+            keyword_cluster: s.keyword_cluster || null,
+            etv: labsNum(it, 'etv'),
+            median_position: labsNum(it, 'median_position', 'avg_position'),
+            visibility: labsNum(it, 'visibility'),
+            relevance: labsNum(it, 'relevance'),
+            keywords_matched: labsNum(it, 'count', 'keywords_count'),
+          });
+        }
+
+        const kept = await ingestSerp(rows);
+        stats.similar.push({ seed: s.domain, returned: r.items.length, kept });
+        await sleep(300);
+      }
+    }
+
     // ── Phase A: intersections ────────────────────────────────────────────
     // The highest-precision signal available. A news site mentions one book
     // once; only an affiliate review site links to three at the same time.
     // Run WITHIN a geo — a Nigeria×Kenya intersection returns near-nothing.
-    if (mode === 'intersect' || mode === 'both' || mode === 'all') {
+    if (want('intersect')) {
       const byGeo = new Map<string, string[]>();
       for (const c of competitors) {
         const g = c.geo || '—';
@@ -687,7 +1133,7 @@ Deno.serve(async (req: Request) => {
     // ── Phase B: broad referring-domain pull ──────────────────────────────
     // Volume. Resumes from harvested_offset so successive runs walk deeper
     // instead of re-buying the same first page.
-    if (mode === 'broad' || mode === 'both' || mode === 'all') {
+    if (want('broad')) {
       for (const c of competitors) {
         if (outOfTime()) { stats.reason = 'deadline during broad pull'; break; }
         if (!affordable()) { stats.reason = 'budget spent during broad pull'; break; }
@@ -747,47 +1193,88 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // ── Phase C: anchors ──────────────────────────────────────────────────
-    // The anchor text is what lets dfs-qualify judge a domain WITHOUT fetching
-    // its page: "Bet9ja promo code" settles the question on its own. That is
-    // the difference between qualifying 100k domains and qualifying 100.
-    if (mode === 'anchors' || mode === 'both' || mode === 'all') {
+    // ── Phase A2: backlinks, filtered on ANCHOR TEXT ──────────────────────
+    // The v7 version of this phase asked for every dofollow link the book had
+    // and sorted by rank. That is how the queue filled with scrapers: rank
+    // measures the linking domain's authority, and a high-authority news site
+    // linking once is still not an affiliate.
+    //
+    // The affiliate signal is in the anchor, not the domain. "Bet9ja promo
+    // code" is an affiliate placement; the company name or a bare URL is a
+    // mention. So each pattern is now its own request with an API-side
+    // `anchor like` filter, and filters are free — we pay only for rows that
+    // already read as affiliate placements.
+    //
+    // One pattern per call means 12 calls per competitor, so each competitor
+    // keeps a cursor and a run advances it by ANCHOR_PATTERNS_PER_RUN. Without
+    // the cursor every run would re-buy '%promo code%' and never reach the rest
+    // — the same bug the intersection phase had with offset: 0.
+    if (want('anchors')) {
       for (const c of competitors) {
         if (outOfTime()) { stats.reason = 'deadline during anchor pass'; break; }
         if (!affordable()) { stats.reason = 'budget spent during anchor pass'; break; }
 
         const domain = normDomain(c.domain);
-        const r = await dfsCallTolerant('/v3/backlinks/backlinks/live', {
-          target: domain,
-          limit: rowsPerCall,
-          mode: 'one_per_domain',       // one link per donor — don't pay for dupes
-          backlinks_status_type: 'live',
-        }, {
-          filters: [['dofollow', '=', true]],
-          order_by: ['rank,desc'],
-        }, domain);
-        stats.calls += r.attempts;
-        stats.spent += r.cost;
-        if (r.dropped.length) dropNote('anchors', r.dropped);
-        if (!r.ok) { stats.reason = 'backlinks failed: ' + r.error; continue; }
+        const cursor = Number(c.anchor_cursor) || 0;
+        let used = 0;
 
-        const rows: UpsertRow[] = r.items.map((it: any) => ({
-          domain: normDomain(it?.domain_from || ''),
-          source: 'referring_domains',
-          competitor: domain,
-          dfs_rank: num(it?.rank ?? it?.domain_from_rank),
-          spam_score: num(it?.backlink_spam_score),
-          backlinks_count: null,
-          referring_pages: null,
-          anchor: str(it?.anchor, 500),
-          page_title: str(it?.page_from_title, 500),
-          first_seen: str(it?.first_seen, 40),
-        })).filter((x: UpsertRow) => x.domain);
+        for (let k = 0; k < ANCHOR_PATTERNS_PER_RUN; k++) {
+          if (outOfTime() || !affordable()) break;
+          const pattern = ANCHOR_PATTERNS[(cursor + k) % ANCHOR_PATTERNS.length];
 
-        const withAnchor = rows.filter(x => x.anchor).length;
-        await ingest(rows);
-        stats.anchors_filled += withAnchor;
-        await sleep(300);
+          const r = await dfsCallTolerant('/v3/backlinks/backlinks/live', {
+            target: domain,
+            limit: rowsPerCall,
+            mode: 'one_per_domain',     // one link per donor — don't pay for dupes
+            backlinks_status_type: 'live',
+          }, {
+            filters: [
+              ['dofollow', '=', true],
+              'and',
+              ['anchor', 'like', pattern],
+            ],
+            order_by: ['rank,desc'],
+          }, `${domain} ${pattern}`);
+          stats.calls += r.attempts;
+          stats.spent += r.cost;
+          used++;
+          if (r.dropped.length) dropNote('anchors', r.dropped);
+          if (!r.ok) { stats.reason = 'backlinks failed: ' + r.error; continue; }
+
+          // If the API refused the filter clause we are back to paying for
+          // unfiltered links, so apply the pattern here rather than let the
+          // phase quietly revert to its v7 behaviour.
+          const anchorRe = new RegExp(
+            pattern.replace(/%/g, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+          const filtersDropped = r.dropped.includes('filters');
+
+          const rows: UpsertRow[] = r.items.map((it: any) => ({
+            domain: normDomain(it?.domain_from || ''),
+            source: 'anchor_match',
+            competitor: domain,
+            dfs_rank: num(it?.rank ?? it?.domain_from_rank),
+            spam_score: num(it?.backlink_spam_score),
+            backlinks_count: null,
+            referring_pages: null,
+            anchor: str(it?.anchor, 500),
+            page_title: str(it?.page_from_title, 500),
+            first_seen: str(it?.first_seen, 40),
+          })).filter((x: UpsertRow) => x.domain
+            && (!filtersDropped || (x.anchor ? anchorRe.test(x.anchor) : false)));
+
+          const withAnchor = rows.filter(x => x.anchor).length;
+          const kept = await ingest(rows);
+          stats.anchors_filled += withAnchor;
+          stats.anchors.push({ competitor: domain, pattern, returned: r.items.length, kept });
+          await sleep(300);
+        }
+
+        if (used) {
+          await quiet(supabase.from('dfs_competitors').update({
+            anchor_cursor: (cursor + used) % ANCHOR_PATTERNS.length,
+            last_harvest_at: new Date().toISOString(),
+          }).eq('id', c.id));
+        }
       }
     }
 
@@ -798,6 +1285,8 @@ Deno.serve(async (req: Request) => {
       level: 'info', service: 'dfs-harvest',
       message: `mode=${mode} calls=${stats.calls} spent=$${stats.spent.toFixed(4)} `
         + `seen=${stats.rows_seen} junk=${stats.junk_filtered} saved=${stats.saved} `
+        + `serp=${stats.serp_saved} ranked=${stats.ranked_checked} `
+        + `pro=${stats.ranked_professional} similar=${stats.similar.length} `
         + `anchors=${stats.anchors_filled} balance=$${(stats.balance_after ?? 0).toFixed(4)} `
         + (Object.keys(stats.dropped_fields).length
             ? `dropped=${JSON.stringify(stats.dropped_fields)} ` : '')

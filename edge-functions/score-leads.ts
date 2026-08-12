@@ -123,30 +123,59 @@ function scoreLead(l: Record<string, any>): Score {
   if (l.search_layer === 'C') { score += 10; reasons.push('найден по футпринту конкурента (слой C)'); }
   else if (l.search_layer === 'B') { score += 5; reasons.push('медиахолдинг/паблишер (слой B)'); }
 
-  // ── DataForSEO pipeline signals ───────────────────────────────────────────
-  // These come off the link graph rather than off page text, which makes them
-  // harder evidence than anything above: a site cannot accidentally link to
-  // three competitor bookmakers.
+  // ── DataForSEO pipeline signals (v7.1 weights) ────────────────────────────
+  // Reweighted when the harvest method changed. The ordering principle: MEASURED
+  // ownership of the commercial SERP outranks anything inferred from the link
+  // graph. A domain holding the top 10 for "best betting sites nigeria" is
+  // demonstrably a professional affiliate; a domain that once linked to two
+  // bookmakers is a domain that once linked to two bookmakers — the pilot found
+  // 30 of those and every one was rejected as having no audience.
   if (l.pipeline === 'dataforseo') {
     if (l.affiliate_maturity === 'professional') {
-      score += 30; reasons.push('профи-аффилиат: коммерческие анкоры + сравнения + мультибук');
+      score += 35; reasons.push('профи-аффилиат: 15+ коммерческих ключей в топ-10 с частотностью');
     } else if (l.affiliate_maturity === 'semi_pro') {
-      score += 12; reasons.push('полупрофи: есть коммерческий анкор или сравнения');
+      score += 15; reasons.push('полупрофи: 5+ коммерческих ключей в топ-10');
     }
 
+    // The headline number of the rework. Volume behind the positions is what
+    // separates a business from a set of positions nobody searches for.
+    const vol = Number(l.total_search_volume) || 0;
+    if (vol >= 50_000)      { score += 30; reasons.push(`частотность ключей ${vol.toLocaleString('ru-RU')}/мес`); }
+    else if (vol >= 10_000) { score += 25; reasons.push(`частотность ключей ${vol.toLocaleString('ru-RU')}/мес`); }
+    else if (vol >= 1_000)  { score += 12; reasons.push(`частотность ключей ${vol.toLocaleString('ru-RU')}/мес`); }
+
+    // How the domain was found is itself evidence.
+    if (l.dfs_source === 'serp_competitors') {
+      score += 20; reasons.push('владеет коммерческой выдачей (найден через SERP)');
+    } else if (l.dfs_source === 'competitors_domain') {
+      score += 5;  reasons.push('конкурент найденного профи');
+    }
+
+    const top3 = Number(l.top3_keywords) || 0;
+    if (top3 >= 5) { score += 15; reasons.push(`${top3} ключей в топ-3`); }
+
+    const med = Number(l.dfs_median_position) || 0;
+    if (med > 0 && med <= 5) { score += 10; reasons.push(`медианная позиция ${med}`); }
+
+    // Owner portfolio: one deal instead of N cold emails.
+    const portfolio = Number(l.ua_portfolio_hint) || 0;
+    if (portfolio >= 5) { score += 10; reasons.push(`портфель владельца: минимум ${portfolio} проектов (UA-ID)`); }
+
+    // Link-graph signals, kept but demoted — they are why the previous method
+    // filled the queue with scrapers.
     const inter = Number(l.dfs_intersect_count) || 0;
-    if (inter >= 3)      { score += 25; reasons.push(`ссылается на ${inter} букмекеров сразу`); }
-    else if (inter === 2) { score += 14; reasons.push('ссылается на 2 букмекеров'); }
+    if (inter >= 3)       { score += 12; reasons.push(`ссылается на ${inter} букмекеров сразу`); }
+    else if (inter === 2) { score += 5;  reasons.push('ссылается на 2 букмекеров'); }
 
     const ps = (l.pro_signals || {}) as Record<string, unknown>;
-    if (ps.multi_bookmaker) { score += 20; reasons.push('мультибук в контенте'); }
+    if (ps.multi_bookmaker) { score += 10; reasons.push('мультибук в контенте'); }
 
     const ck = Number(l.commercial_keywords) || 0;
-    if (ck >= 10)     { score += 15; reasons.push(`${ck} коммерческих ключей в топ-20`); }
-    else if (ck >= 3) { score += 7;  reasons.push(`${ck} коммерческих ключей в топ-20`); }
+    if (!vol && ck >= 10)     { score += 8; reasons.push(`${ck} коммерческих ключей`); }
+    else if (!vol && ck >= 3) { score += 4; reasons.push(`${ck} коммерческих ключей`); }
 
     const rank = Number(l.dfs_rank) || 0;
-    if (rank >= 30) { score += 10; reasons.push(`вес домена DFS rank ${rank}`); }
+    if (rank >= 30) { score += 6; reasons.push(`вес домена DFS rank ${rank}`); }
   }
 
   // signals of a real affiliate operation
@@ -175,7 +204,8 @@ Deno.serve(async (req: Request) => {
     const { data: leads } = await supabase.from('leads')
       .select('id, name, url, summary, type, geo, brand, found_keyword, contact_email_type, email_status, '
         + 'search_layer, competitor_book, monetization_signal, monetization_evidence, has_partnership_path, '
-        + 'pipeline, affiliate_maturity, pro_signals, commercial_keywords, dfs_intersect_count, dfs_rank')
+        + 'pipeline, affiliate_maturity, pro_signals, commercial_keywords, dfs_intersect_count, dfs_rank, '
+        + 'total_search_volume, top3_keywords, ua_portfolio_hint, dfs_etv, dfs_median_position, dfs_source')
       .is('fit_score', null)
       .limit(BATCH);
 
