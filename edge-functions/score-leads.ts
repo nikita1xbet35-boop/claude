@@ -178,6 +178,31 @@ function scoreLead(l: Record<string, any>): Score {
     if (rank >= 30) { score += 6; reasons.push(`вес домена DFS rank ${rank}`); }
   }
 
+  // ── Brand pipeline signals (v8) ───────────────────────────────────────────
+  // A different kind of evidence again. Here the site is not judged on what it
+  // writes about but on WHERE IT SITS in a brand SERP: position 2 for
+  // "mostbet apk" is a measured share of somebody's existing demand, and the
+  // people running those pages already know how to convert it.
+  if (l.pipeline === 'brand') {
+    const pos = Number(l.serp_position) || 0;
+    if (pos > 0 && pos <= 5)       { score += 30; reasons.push(`позиция ${pos} в брендовой выдаче`); }
+    else if (pos >= 6 && pos <= 15) { score += 10; reasons.push(`позиция ${pos} в брендовой выдаче`); }
+
+    // The confirmed 35 000-FTD-a-month case runs on APK traffic specifically.
+    if (l.has_apk) { score += 25; reasons.push('раздаёт APK — подтверждённая модель трафика'); }
+    if (l.monetization_signal) { score += 20; reasons.push('реф-ссылки / промокоды на странице'); }
+    if (l.traffic_type === 'brand_mirror') { score += 20; reasons.push('зеркало бренда — чистый перехват'); }
+
+    // Priority markets from the brief: confirmed cases or the largest volume.
+    const BRAND_PRIORITY_GEO = new Set(['UZ', 'NG', 'KE', 'GH', 'CM', 'SN', 'BD']);
+    if (BRAND_PRIORITY_GEO.has(geo)) { score += 15; reasons.push(`приоритетное ГЕО модуля (${geo})`); }
+
+    // Referral ids shared across sites mean one owner and one deal.
+    const refs = l.ref_params && typeof l.ref_params === 'object'
+      ? Object.keys(l.ref_params as Record<string, unknown>).length : 0;
+    if (refs) { score += 8; reasons.push('видны реф-параметры — понятно, на кого уже льёт'); }
+  }
+
   // signals of a real affiliate operation
   if (/affiliate|partner|revshare|rev share|cpa/.test(t)) { score += 8; reasons.push('упоминает партнёрку'); }
   if (l.contact_email_type === 'advertising' || l.contact_email_type === 'admin') {
@@ -205,7 +230,8 @@ Deno.serve(async (req: Request) => {
       .select('id, name, url, summary, type, geo, brand, found_keyword, contact_email_type, email_status, '
         + 'search_layer, competitor_book, monetization_signal, monetization_evidence, has_partnership_path, '
         + 'pipeline, affiliate_maturity, pro_signals, commercial_keywords, dfs_intersect_count, dfs_rank, '
-        + 'total_search_volume, top3_keywords, ua_portfolio_hint, dfs_etv, dfs_median_position, dfs_source')
+        + 'total_search_volume, top3_keywords, ua_portfolio_hint, dfs_etv, dfs_median_position, dfs_source, '
+        + 'serp_position, has_apk, traffic_type, ref_params, brand_found, suspected_official')
       .is('fit_score', null)
       .limit(BATCH);
 

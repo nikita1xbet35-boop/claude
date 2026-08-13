@@ -144,6 +144,9 @@ jobs:
             dfs-enrich
             generate-queue-dfs
             recover-contacts
+            brand-search
+            brand-enrich
+            generate-queue-brand
           "
           for fn in $FUNCTIONS; do
             mkdir -p "supabase/functions/$fn"
