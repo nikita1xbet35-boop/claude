@@ -627,12 +627,42 @@ async function isThrottled(sb: any, source: string): Promise<Date | null> {
 }
 
 /** Record the run's yield and, if it looks like a soft ban, park the source for
- *  45 minutes. Returns true when a throttle was tripped. */
-async function recordHealth(sb: any, source: string, s: DdgSession): Promise<boolean> {
+ *  45 minutes. Returns true when a throttle was tripped.
+ *
+ *  WHAT THIS USED TO DO, AND WHY IT WAS STARVING THE PIPELINE
+ *  The old rule was `avg < 5 results/request` → freeze DuckDuckGo for 45
+ *  minutes. Ninety minutes of real logs showed what that costs:
+ *
+ *    10:03:46  degraded 4.0/request  → frozen until 10:48:45
+ *    10:12 10:21 10:30 10:39 10:48   → five scheduled runs skipped
+ *    10:57:26  ran
+ *    10:57:40  degraded 3.0/request  → frozen until 11:42:39
+ *    10:58:02  ...and that same run found 9 sites and saved a lead
+ *    11:06 11:15 11:24 11:33         → four more skipped
+ *
+ *  Two searches out of ten scheduled runs. And the run that tripped the second
+ *  freeze was layer C — `"affiliate disclosure" betting zambia` and friends.
+ *  Exact-phrase footprints return three results on a healthy day; that is what
+ *  they are for. Deep pages (3-4) are thin for the same structural reason. The
+ *  detector was measuring query narrowness and calling it a ban.
+ *
+ *  What the real ban actually looked like, from the incident this was built
+ *  after: EVERY query returned an empty page, found=0 across the board, for two
+ *  days. Empty. Not thin. So that is the signature to react to — and reacting
+ *  to it still matters, which is why this is being narrowed rather than removed. */
+async function recordHealth(sb: any, source: string, s: DdgSession, layer = 'A'): Promise<boolean> {
   if (!s.requests) return false;
   const avg = s.resultsTotal / s.requests;
-  // Only call it a ban on a run that actually asked enough questions to know.
-  const degraded = s.requests >= 3 && avg < HEALTHY_AVG;
+  const allEmpty    = s.emptyResponses >= s.requests;
+  const mostlyEmpty = s.emptyResponses >= Math.ceil(s.requests * 0.75);
+
+  // A run that returned nothing at all, anywhere, is the ban signature.
+  // "Thin but working" is only treated as a ban on layer A, where a broad
+  // commercial keyword genuinely should return 10-12 and near-silence means
+  // something is wrong with us rather than with the query.
+  const dead     = s.requests >= 3 && allEmpty;
+  const starving = s.requests >= 3 && layer === 'A' && mostlyEmpty && avg < 2;
+  const degraded = dead || starving;
   const until = degraded ? new Date(Date.now() + 45 * 60 * 1000).toISOString() : null;
 
   try {
@@ -648,8 +678,9 @@ async function recordHealth(sb: any, source: string, s: DdgSession): Promise<boo
     if (degraded) {
       await sb.from('error_log').insert([{
         level: 'warning', service: 'find-and-queue',
-        message: `${source} degraded: ${avg.toFixed(1)} results/request over ${s.requests} requests `
-          + `(${s.emptyResponses} empty) — backing off until ${until}`,
+        message: `${source} ${dead ? 'DEAD' : 'starving'}: ${avg.toFixed(1)} results/request over `
+          + `${s.requests} requests (${s.emptyResponses} empty, layer ${layer}) `
+          + `— backing off until ${until}`,
       }]);
       await fetch(`${SUPABASE_URL}/functions/v1/send-alert`, {
         method: 'POST',
@@ -657,8 +688,8 @@ async function recordHealth(sb: any, source: string, s: DdgSession): Promise<boo
                    'Authorization': `Bearer ${SUPABASE_KEY}` },
         body: JSON.stringify({
           level: 'warning', service: 'DuckDuckGo',
-          message: `Выдача деградировала: ${avg.toFixed(1)} результатов на запрос `
-            + `(норма ~10-12). Пауза 45 минут — это ранний признак бана, не полный отказ.`,
+          message: `Выдача пустая: ${avg.toFixed(1)} результатов на запрос из ${s.requests} `
+            + `(${s.emptyResponses} совсем пустых). Пауза 45 минут — это признак бана.`,
         }),
       }).catch(() => {});
     }
@@ -1172,21 +1203,47 @@ const RUN_EVERY_TICKS = 3;
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
-  // TEMPORARY — remove after this answers itself. Nothing in this repo's
-  // pg_cron (cron.job) or GitHub Actions workflows fires often enough to
-  // explain this function's actual invocation cadence (every 3-9 minutes,
-  // all day), so the caller is external to everything visible from here.
-  // Logging who is actually knocking, once, settles it without guessing.
-  quiet(supabase.from('error_log').insert([{
-    level: 'info', service: 'find-and-queue-caller-probe',
-    message: `ua="${req.headers.get('user-agent') || ''}" `
-      + `xff="${req.headers.get('x-forwarded-for') || ''}" `
-      + `cf-ip="${req.headers.get('cf-connecting-ip') || ''}" `
-      + `origin="${req.headers.get('origin') || ''}" `
-      + `referer="${req.headers.get('referer') || ''}"`,
-  }]));
+  const tick = Math.floor(Date.now() / (3 * 60 * 1000));
 
-  if (Math.floor(Date.now() / (3 * 60 * 1000)) % RUN_EVERY_TICKS !== 0) {
+  if (tick % RUN_EVERY_TICKS !== 0) {
+    // Something outside this repository invokes this function every three
+    // minutes — the cadence is visible in error_log and is accurate to a
+    // couple of seconds, but it is not in cron.job and not in any workflow
+    // here, so it cannot be edited from the codebase. Two of every three of
+    // those invocations are thrown away by the gate above.
+    //
+    // The brand pipeline has no scheduler of its own for exactly that reason:
+    // nothing here can create one. So it rides a discarded tick instead. This
+    // costs nothing (the invocation was already paid for and already
+    // discarded), needs no new infrastructure, and keeps the two searchers off
+    // the same minute — which is what the shared egress IP requires anyway.
+    //
+    // Awaited rather than fired and forgotten: an edge function's runtime can
+    // be torn down the moment it returns a response, which would kill the call
+    // mid-flight. This tick had nothing else to do with its time.
+    if (tick % RUN_EVERY_TICKS === 1) {
+      try {
+        const r = await fetch(`${SUPABASE_URL}/functions/v1/brand-search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY,
+                     'Authorization': `Bearer ${SUPABASE_KEY}` },
+          // force: this function owns the timing now, so brand-search's own
+          // tick gate must not second-guess it.
+          body: JSON.stringify({ force: true }),
+          signal: AbortSignal.timeout(130_000),
+        });
+        const out = await r.json().catch(() => ({}));
+        return new Response(JSON.stringify({
+          skipped: true, reason: 'heavy run throttled — spare tick ran brand-search',
+          brand: out,
+        }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+      } catch (e: any) {
+        await quiet(supabase.from('error_log').insert([{
+          level: 'warning', service: 'find-and-queue',
+          message: 'brand-search hand-off failed: ' + String(e?.message || e).slice(0, 200),
+        }]));
+      }
+    }
     return new Response(JSON.stringify({ skipped: true, reason: 'throttled — heavy run ~every 9 min (DDG rate-limit protection)' }),
       { headers: { ...cors, 'Content-Type': 'application/json' } });
   }
@@ -1431,7 +1488,7 @@ Deno.serve(async (req: Request) => {
     };
     await Promise.all(Array.from({ length: DDG_CONCURRENCY }, runWorker));
 
-    const ddgDegraded = await recordHealth(supabase, 'ddg', session);
+    const ddgDegraded = await recordHealth(supabase, 'ddg', session, layer);
     (stats as any).ddg_avg = session.requests
       ? Number((session.resultsTotal / session.requests).toFixed(2)) : null;
     (stats as any).ddg_degraded = ddgDegraded;

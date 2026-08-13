@@ -82,19 +82,15 @@ jobs:
           echo; echo
           q "SELECT service, level, left(message,300) AS message, created_at FROM public.error_log WHERE service LIKE 'brand-%' ORDER BY created_at DESC LIMIT 6;"
           echo; echo
-          echo "── 1d. WHO actually calls find-and-queue ─────────────────"
-          # Temporary probe (commit 798fa48): logs every invocation's headers.
-          # cron.job has nothing that fires this often, so the caller is
-          # outside anything queryable from Postgres — this is the only way
-          # left to identify it.
-          q "SELECT left(message,400) AS message, created_at FROM public.error_log WHERE service='find-and-queue-caller-probe' ORDER BY created_at DESC LIMIT 5;"
-          echo; echo
-          echo "── 1e. find-and-queue's OWN real cadence (never checked directly) ─"
-          # Every prior diagnostic filtered error_log on 'dfs-%' / 'recover-contacts'
-          # / 'generate-queue-dfs' — find-and-queue itself was never actually in that
-          # WHERE clause. The 3-9 min cadence was inferred from OTHER services ticking
-          # that often, not observed on this function. Settle it directly.
+          echo "── 1d. find-and-queue: is it searching or throttling itself? ─"
+          # The question this answers: of the runs that fire, how many actually
+          # search? A run that only logs "started" was skipped by the DDG
+          # backoff. Ninety minutes of these logs is what exposed the pipeline
+          # freezing itself on layer B/C queries that were working fine.
           q "SELECT left(message,200) AS message, created_at FROM public.error_log WHERE service='find-and-queue' ORDER BY created_at DESC LIMIT 15;"
+          echo; echo
+          echo "── 1e. DDG health decisions (throttled = frozen 45 min) ─────"
+          q "SELECT requests, results_total, empty_results, avg_results, throttled, window_start FROM public.source_health WHERE source='ddg' ORDER BY window_start DESC LIMIT 10;"
           echo; echo
 
           echo "── 2. module tables present ────────────────────────────────"
@@ -215,4 +211,4 @@ jobs:
           q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: probe still empty — check find-and-queue's own real invocation history directly, no spend
+# ping: DDG false-ban fix + brand-search rides find-and-queue spare tick — no spend
