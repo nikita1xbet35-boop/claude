@@ -186,4 +186,4 @@ jobs:
           q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: results from the $0.15 ranked_keywords run — read commercial_keywords/total_search_volume per domain, disarm
+# ping: verify brand pipeline cron actually got scheduled by migration 030 — no spend
