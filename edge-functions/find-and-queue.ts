@@ -1238,10 +1238,17 @@ Deno.serve(async (req: Request) => {
           brand: out,
         }), { headers: { ...cors, 'Content-Type': 'application/json' } });
       } catch (e: any) {
-        await quiet(supabase.from('error_log').insert([{
-          level: 'warning', service: 'find-and-queue',
-          message: 'brand-search hand-off failed: ' + String(e?.message || e).slice(0, 200),
-        }]));
+        // No quiet() helper in this file — it exists in the dfs-* functions,
+        // not here. Calling it cost three and a half hours of total pipeline
+        // silence once already: a ReferenceError on the first line of the
+        // handler kills the invocation before any logging, so the outage looks
+        // exactly like "the external scheduler stopped calling us".
+        try {
+          await supabase.from('error_log').insert([{
+            level: 'warning', service: 'find-and-queue',
+            message: 'brand-search hand-off failed: ' + String(e?.message || e).slice(0, 200),
+          }]);
+        } catch { /* logging must never break the tick */ }
       }
     }
     return new Response(JSON.stringify({ skipped: true, reason: 'throttled — heavy run ~every 9 min (DDG rate-limit protection)' }),
