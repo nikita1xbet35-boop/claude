@@ -1172,6 +1172,20 @@ const RUN_EVERY_TICKS = 3;
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
+  // TEMPORARY — remove after this answers itself. Nothing in this repo's
+  // pg_cron (cron.job) or GitHub Actions workflows fires often enough to
+  // explain this function's actual invocation cadence (every 3-9 minutes,
+  // all day), so the caller is external to everything visible from here.
+  // Logging who is actually knocking, once, settles it without guessing.
+  quiet(supabase.from('error_log').insert([{
+    level: 'info', service: 'find-and-queue-caller-probe',
+    message: `ua="${req.headers.get('user-agent') || ''}" `
+      + `xff="${req.headers.get('x-forwarded-for') || ''}" `
+      + `cf-ip="${req.headers.get('cf-connecting-ip') || ''}" `
+      + `origin="${req.headers.get('origin') || ''}" `
+      + `referer="${req.headers.get('referer') || ''}"`,
+  }]));
+
   if (Math.floor(Date.now() / (3 * 60 * 1000)) % RUN_EVERY_TICKS !== 0) {
     return new Response(JSON.stringify({ skipped: true, reason: 'throttled — heavy run ~every 9 min (DDG rate-limit protection)' }),
       { headers: { ...cors, 'Content-Type': 'application/json' } });
