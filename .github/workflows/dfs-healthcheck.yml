@@ -89,6 +89,13 @@ jobs:
           # left to identify it.
           q "SELECT left(message,400) AS message, created_at FROM public.error_log WHERE service='find-and-queue-caller-probe' ORDER BY created_at DESC LIMIT 5;"
           echo; echo
+          echo "── 1e. find-and-queue's OWN real cadence (never checked directly) ─"
+          # Every prior diagnostic filtered error_log on 'dfs-%' / 'recover-contacts'
+          # / 'generate-queue-dfs' — find-and-queue itself was never actually in that
+          # WHERE clause. The 3-9 min cadence was inferred from OTHER services ticking
+          # that often, not observed on this function. Settle it directly.
+          q "SELECT left(message,200) AS message, created_at FROM public.error_log WHERE service='find-and-queue' ORDER BY created_at DESC LIMIT 15;"
+          echo; echo
 
           echo "── 2. module tables present ────────────────────────────────"
           q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('dfs_domains','dfs_competitors','dfs_usage','owner_clusters','source_health','pipeline_limits') ORDER BY table_name;"
@@ -208,4 +215,4 @@ jobs:
           q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: read the caller-probe log from find-and-queue (798fa48) — no spend
+# ping: probe still empty — check find-and-queue's own real invocation history directly, no spend
