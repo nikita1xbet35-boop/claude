@@ -62,6 +62,21 @@ jobs:
           # missing looks identical to one that simply found nothing.
           q "SELECT jobname, schedule, active FROM cron.job ORDER BY jobname;"
           echo; echo
+          echo "── 1b-ii. what the auto-* jobs ACTUALLY call ────────────────"
+          # These ran daily at ~20:00 UTC and matched none of the LIKE patterns
+          # migration 030 searched for, which means the real 3-9 minute pipeline
+          # cadence (find-and-queue, dfs-qualify, recover-contacts — all visibly
+          # ticking in error_log) is not driven by any per-function cron.job row.
+          # Reading the actual command text is the only way to find out what
+          # DOES drive it — a wrapper function, pg_net with a different target,
+          # or something outside pg_cron entirely.
+          q "SELECT jobname, command FROM cron.job ORDER BY jobname LIMIT 3;"
+          echo; echo
+          echo "── 1b-iii. all cron-related extensions + schemas ────────────"
+          q "SELECT extname, extversion FROM pg_extension WHERE extname LIKE '%cron%' OR extname LIKE '%net%' OR extname LIKE '%http%';"
+          echo; echo
+          q "SELECT schemaname, tablename FROM pg_tables WHERE schemaname IN ('cron','net','supabase_functions','pgsodium') ORDER BY 1,2;"
+          echo; echo
           echo "── 1c. brand pipeline state ────────────────────────────────"
           q "SELECT (SELECT count(*) FROM public.brand_targets WHERE active) AS targets, (SELECT count(*) FROM public.brand_keywords WHERE active) AS keywords, (SELECT count(*) FROM public.brand_keywords WHERE active AND last_run_at IS NULL) AS never_run, (SELECT count(*) FROM public.official_domains) AS blocked, (SELECT count(*) FROM public.leads WHERE pipeline='brand') AS brand_leads;"
           echo; echo
@@ -186,4 +201,4 @@ jobs:
           q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: verify brand pipeline cron actually got scheduled by migration 030 — no spend
+# ping: cron.job only has 10 unrelated daily auto-* jobs — find what actually drives the 3-9 min pipeline cadence, no spend
