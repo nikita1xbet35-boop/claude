@@ -82,6 +82,13 @@ jobs:
           echo; echo
           q "SELECT service, level, left(message,300) AS message, created_at FROM public.error_log WHERE service LIKE 'brand-%' ORDER BY created_at DESC LIMIT 6;"
           echo; echo
+          echo "── 1d. WHO actually calls find-and-queue ─────────────────"
+          # Temporary probe (commit 798fa48): logs every invocation's headers.
+          # cron.job has nothing that fires this often, so the caller is
+          # outside anything queryable from Postgres — this is the only way
+          # left to identify it.
+          q "SELECT left(message,400) AS message, created_at FROM public.error_log WHERE service='find-and-queue-caller-probe' ORDER BY created_at DESC LIMIT 5;"
+          echo; echo
 
           echo "── 2. module tables present ────────────────────────────────"
           q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('dfs_domains','dfs_competitors','dfs_usage','owner_clusters','source_health','pipeline_limits') ORDER BY table_name;"
@@ -201,4 +208,4 @@ jobs:
           q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: cron.job only has 10 unrelated daily auto-* jobs — find what actually drives the 3-9 min pipeline cadence, no spend
+# ping: read the caller-probe log from find-and-queue (798fa48) — no spend
