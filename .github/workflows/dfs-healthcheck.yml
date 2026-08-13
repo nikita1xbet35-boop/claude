@@ -53,7 +53,19 @@ jobs:
           }
 
           echo "── 1. migrations recorded ──────────────────────────────────"
-          q "SELECT name FROM public.schema_migrations WHERE name LIKE '02%' ORDER BY name;"
+          q "SELECT name FROM public.schema_migrations WHERE name LIKE '0%' ORDER BY name;"
+          echo; echo
+
+          echo "── 1b. cron schedule (is anything actually automatic?) ─────"
+          # The crons live in the database, not in this repository, so this is
+          # the only place their real state is visible. A pipeline whose cron is
+          # missing looks identical to one that simply found nothing.
+          q "SELECT jobname, schedule, active FROM cron.job ORDER BY jobname;"
+          echo; echo
+          echo "── 1c. brand pipeline state ────────────────────────────────"
+          q "SELECT (SELECT count(*) FROM public.brand_targets WHERE active) AS targets, (SELECT count(*) FROM public.brand_keywords WHERE active) AS keywords, (SELECT count(*) FROM public.brand_keywords WHERE active AND last_run_at IS NULL) AS never_run, (SELECT count(*) FROM public.official_domains) AS blocked, (SELECT count(*) FROM public.leads WHERE pipeline='brand') AS brand_leads;"
+          echo; echo
+          q "SELECT service, level, left(message,300) AS message, created_at FROM public.error_log WHERE service LIKE 'brand-%' ORDER BY created_at DESC LIMIT 6;"
           echo; echo
 
           echo "── 2. module tables present ────────────────────────────────"
