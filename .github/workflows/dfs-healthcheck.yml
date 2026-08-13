@@ -211,4 +211,4 @@ jobs:
           q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: DDG false-ban fix + brand-search rides find-and-queue spare tick — no spend
+# ping: verify both fixes on live data — search rate + brand-search runs, no spend
