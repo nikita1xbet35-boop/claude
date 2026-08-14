@@ -200,22 +200,132 @@ function detectApk(html: string): boolean {
   return false;
 }
 
-/** Operator-mirror heuristic. All three conditions together, never one alone:
- *  no outbound referral links, its own login/registration form, and the brand
- *  name in the domain. An affiliate always links out to the book — that is how
- *  it earns — so the absence of any outbound referral is the load-bearing part.
+// ── Parked / dead domains ───────────────────────────────────────────────────
+// A parked page has no owner to write to. Detecting it BEFORE contact
+// extraction also skips ~15 page fetches per lead that were only ever going to
+// find the registrar's support address.
+const PARKED_MARKERS = [
+  'domain is parked', 'this domain is for sale', 'buy this domain',
+  'domain for sale', 'this website is for sale', 'future home of',
+  'parked free', 'parking page', 'domain parking',
+  'домен продаётся', 'сайт временно недоступен', 'домен припаркован',
+  'parkingcrew', 'sedoparking', 'bodis.com', 'afternic', 'dan.com',
+  'default web site page', 'welcome to nginx', 'apache2 ubuntu default page',
+  'index of /', 'account suspended', 'this account has been suspended',
+];
+
+/** Text content with markup stripped — the structural checks below need to see
+ *  how much a human would actually read, not how much HTML there is. */
+function visibleText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z#0-9]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Returns a reason when the page is parked/dead, null when it is a real site. */
+function detectParked(html: string, text: string): string | null {
+  const low = html.toLowerCase();
+  for (const m of PARKED_MARKERS) {
+    if (low.includes(m)) return `parked marker: ${m}`;
+  }
+  // Structural: a real affiliate page is not 500 characters long, and it links
+  // somewhere. Both conditions together, because a short page with real
+  // internal navigation may just be a thin landing.
+  const internalLinks = (html.match(/href=["'](?!https?:|mailto:|tel:|#|javascript:)[^"']+["']/gi) || []).length;
+  if (text.length < 500 && internalLinks === 0) return 'no content and no internal links';
+  return null;
+}
+
+/** The brand this domain was found for must actually appear on the page.
  *
- *  This only sets a flag. Blocking on a heuristic is exactly what the explicit
- *  official_domains list exists to avoid: 1win.fyi and 1win.com are
- *  indistinguishable by domain shape, and one of them is our best kind of lead. */
-function suspectedOfficial(html: string, domain: string, brand: string, refCount: number): boolean {
-  if (refCount > 0) return false;
-  const hasOwnAuth = /<form[^>]*>[\s\S]{0,2000}?(type=["']password["']|name=["']password["'])/i.test(html)
-    || /(регистрация|ro'?yxatdan|inscription|cadastro|registration)\b[\s\S]{0,200}<form/i.test(html);
-  if (!hasOwnAuth) return false;
+ *  A domain surfaced by the query "mostbet apk" that never says "mostbet" has
+ *  changed since it was indexed — resold, parked, or the redirect was pulled.
+ *  Whatever it is now, it is not the site the search found. */
+function brandMismatch(html: string, text: string, brand: string): boolean {
   const stem = String(brand || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!stem || stem.length < 4) return false;
-  return domain.replace(/[^a-z0-9]/g, '').includes(stem);
+  if (!stem || stem.length < 3) return false;   // too short to test honestly
+  const hay = (text + ' ' + html).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return !hay.includes(stem);
+}
+
+// ── Operator-mirror heuristic ───────────────────────────────────────────────
+// Second-level suffixes where the registrable label sits one further left:
+// betway.co.ke's brand label is "betway", not "co".
+const SLD_SUFFIXES = new Set([
+  'co', 'com', 'net', 'org', 'gov', 'edu', 'ac', 'or', 'ne', 'go', 'web',
+]);
+
+/** The label a brand would occupy in a bare-brand domain.
+ *  1win.xyz → "1win" · betway.co.ke → "betway" · ke.kamabet.com → "kamabet" */
+function brandLabel(domain: string): string {
+  const parts = String(domain || '').toLowerCase().replace(/^www\./, '').split('.');
+  if (parts.length < 2) return parts[0] || '';
+  const candidate = parts[parts.length - 2];
+  if (SLD_SUFFIXES.has(candidate) && parts.length >= 3) return parts[parts.length - 3];
+  return candidate;
+}
+
+// Zones where operators concentrate their mirrors. Not a blocklist — only a
+// reason to look harder at a domain that already matched the bare-brand shape.
+const MIRROR_TLDS = new Set([
+  'xyz', 'social', 'bet', 'win', 'vip', 'pro', 'site', 'online',
+  'club', 'icu', 'top', 'fyi', 'live', 'cyou', 'sbs',
+]);
+
+/** Operator-mirror heuristic. Returns a human-readable reason, or null.
+ *
+ *  THE SHAPE THAT MATTERS: a bare brand on some TLD. 1win.xyz is the operator's
+ *  own mirror; operators run those on dozens of zones to survive blocking, and
+ *  no explicit list can keep up. Affiliates almost always add a modifier —
+ *  1winbonus.com, mostbet-app.net, bet9ja-apk.com — because they cannot
+ *  register the bare brand and would not want to.
+ *
+ *  The previous version tested `domain.includes(brand)`, which flagged
+ *  1winbonus.com as a mirror: exactly backwards, since the modifier is what
+ *  proves it ISN'T one.
+ *
+ *  A flag only, never a block. The explicit official_domains list exists
+ *  precisely because 1win.fyi (affiliate, our best kind of lead) and 1win.com
+ *  (operator) cannot be told apart by domain shape alone — so a heuristic gets
+ *  to withhold from automatic sending and ask a human, nothing more. */
+function suspectedOfficial(
+  html: string, domain: string, brand: string, refCount: number, emailDomain: string,
+): string | null {
+  const stem = String(brand || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!stem || stem.length < 4) return null;
+  const label = brandLabel(domain).replace(/[^a-z0-9]/g, '');
+  // Bare brand and nothing else. A modifier here means affiliate, and we stop.
+  if (label !== stem) return null;
+
+  const signals: string[] = [];
+  signals.push('bare brand domain');
+
+  const tld = domain.split('.').pop() || '';
+  if (MIRROR_TLDS.has(tld)) signals.push(`mirror-prone .${tld}`);
+
+  // Its own account system, not a download button pointing elsewhere.
+  const hasOwnAuth = /<input[^>]+type=["']password["']/i.test(html)
+    || /<form[^>]*>[\s\S]{0,2000}?(type=["']password["']|name=["']password["'])/i.test(html);
+  if (hasOwnAuth) signals.push('login form');
+
+  // Contact on the domain itself. support@1win.xyz is the product talking;
+  // partner@othersite.com is a shopfront talking about the product.
+  if (emailDomain && brandLabel(emailDomain) === label) signals.push('same-domain contact');
+
+  // An affiliate links out to the book with a tracking id — that is how it
+  // gets paid. Nothing outbound is the strongest hint it IS the book.
+  if (refCount === 0) signals.push('no outbound referral links');
+
+  // The bare-brand shape alone is suspicious but not enough: an affiliate can
+  // genuinely own a homonym domain. Require corroboration from the page.
+  const corroborated = hasOwnAuth
+    || signals.includes('same-domain contact')
+    || (refCount === 0 && MIRROR_TLDS.has(tld));
+  return corroborated ? signals.join(' + ') : null;
 }
 
 /** Attach the lead to an owner cluster keyed on a shared referral id. */
@@ -289,7 +399,8 @@ Deno.serve(async (req: Request) => {
   jinaCount = 0;
   const stats = {
     processed: 0, with_email: 0, with_telegram: 0, no_contact: 0,
-    with_apk: 0, with_refs: 0, clustered: 0, suspected_official: 0, reason: '',
+    with_apk: 0, with_refs: 0, clustered: 0, suspected_official: 0,
+    parked: 0, brand_mismatch: 0, registrar_contact: 0, reason: '',
   };
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -306,6 +417,22 @@ Deno.serve(async (req: Request) => {
       .limit(BATCH);
 
     if (!leads?.length) { stats.reason = 'nothing to enrich'; return json(stats); }
+
+    // Registrar / hosting / parking domains. An address on one of these is
+    // infrastructure support, not the site's owner.
+    const { data: regRows } = await supabase.from('registrar_domains').select('domain');
+    const registrars = new Set((regRows || [])
+      .map((r: any) => String(r.domain || '').toLowerCase()).filter(Boolean));
+
+    /** True when the address belongs to a registrar rather than to this site.
+     *  Compared against a FOREIGN domain only: mail@hostinger.com on
+     *  hostinger.com would be the owner's own perfectly legitimate address. */
+    const isRegistrarEmail = (email: string, leadDomain: string): boolean => {
+      const d = String(email || '').toLowerCase().split('@')[1] || '';
+      if (!d) return false;
+      if (d === String(leadDomain || '').toLowerCase()) return false;
+      return registrars.has(d) || [...registrars].some(r => d.endsWith('.' + r));
+    };
 
     for (const lead of leads) {
       if (Date.now() > deadline) { stats.reason = 'deadline'; break; }
@@ -326,6 +453,34 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
+      const text = visibleText(html);
+
+      // ── Cheap rejections, BEFORE any contact work ─────────────────────────
+      // Both of these end with "there is nobody here to write to", and the
+      // contact walk costs ~15 page fetches per lead. Doing it first is the
+      // difference between spending that on real candidates and spending it
+      // discovering a registrar's support address.
+      const parkedWhy = detectParked(html, text);
+      if (parkedWhy) {
+        patch.reject_reason  = 'parked_domain';
+        patch.exclude_reason = 'parked_domain';
+        patch.stage = 'excluded';
+        patch.contact_source = 'parked';
+        stats.parked++;
+        await quiet(supabase.from('leads').update(patch).eq('id', lead.id));
+        continue;
+      }
+
+      if (brandMismatch(html, text, lead.brand_found || '')) {
+        patch.reject_reason  = 'brand_mismatch';
+        patch.exclude_reason = 'brand_mismatch';
+        patch.stage = 'excluded';
+        patch.contact_source = 'brand_mismatch';
+        stats.brand_mismatch++;
+        await quiet(supabase.from('leads').update(patch).eq('id', lead.id));
+        continue;
+      }
+
       // Brand signals come off the landing page itself — the referral links and
       // the APK button are on the page the searcher lands on, not on /contact.
       const refs = extractRefParams(html);
@@ -335,15 +490,6 @@ Deno.serve(async (req: Request) => {
       const hasApk = detectApk(html);
       patch.has_apk = hasApk;
       if (hasApk) stats.with_apk++;
-
-      const suspect = suspectedOfficial(html, lead.domain_normalized || '', lead.brand_found || '', refCount);
-      if (suspect) {
-        patch.suspected_official = true;
-        // Kept out of automatic sending, not deleted — this is a heuristic and
-        // heuristics are wrong often enough that a human must confirm.
-        if (!lead.exclude_reason) patch.exclude_reason = 'suspected_official';
-        stats.suspected_official++;
-      }
 
       // Contacts: homepage, then the pages that carry a business address.
       const acc: Contact = { email: null, emailType: null, telegram: null, whatsapp: null, sourceUrl: null, source: null };
@@ -358,6 +504,37 @@ Deno.serve(async (req: Request) => {
           if (!h || h.length < 100) continue;
           scanContacts(h, page, acc, prio, 'contact_page');
         }
+      }
+
+      // A registrar's support address is not a person who can agree to
+      // anything. Dropped rather than stored, so it cannot be mistaken for a
+      // working contact later — but recorded as the reason, so the lead reads
+      // as "no reachable owner" instead of silently as "no contact found".
+      if (acc.email && isRegistrarEmail(acc.email, lead.domain_normalized || '')) {
+        patch.reject_reason = 'registrar_contact';
+        stats.registrar_contact++;
+        acc.email = null;
+        acc.emailType = null;
+        acc.source = 'registrar';
+      }
+
+      // The mirror heuristic wants the contact domain, so it runs after the
+      // contact walk: support@1win.xyz on 1win.xyz is the product talking,
+      // and that is the single most telling signal available here.
+      const suspect = suspectedOfficial(
+        html, lead.domain_normalized || '', lead.brand_found || '', refCount,
+        String(acc.email || '').split('@')[1] || '',
+      );
+      if (suspect) {
+        patch.suspected_official = true;
+        patch.suspected_reason   = suspect;
+        // Kept out of automatic sending, not deleted — this is a heuristic and
+        // heuristics are wrong often enough that a human must confirm.
+        if (!lead.exclude_reason) {
+          patch.exclude_reason = 'suspected_official';
+          patch.reject_reason  = 'suspected_official';
+        }
+        stats.suspected_official++;
       }
 
       if (acc.email) {
@@ -395,7 +572,9 @@ Deno.serve(async (req: Request) => {
       level: 'info', service: 'brand-enrich',
       message: `processed=${stats.processed} email=${stats.with_email} tg=${stats.with_telegram} `
         + `none=${stats.no_contact} apk=${stats.with_apk} refs=${stats.with_refs} `
-        + `clustered=${stats.clustered} suspect=${stats.suspected_official} jina=${jinaCount} ${stats.reason}`,
+        + `clustered=${stats.clustered} suspect=${stats.suspected_official} `
+        + `parked=${stats.parked} mismatch=${stats.brand_mismatch} `
+        + `registrar=${stats.registrar_contact} jina=${jinaCount} ${stats.reason}`,
     }]));
 
     return json(stats);
