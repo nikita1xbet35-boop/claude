@@ -340,12 +340,19 @@ Deno.serve(async (req: Request) => {
     // Pause logic removed entirely — system is self-healing.
     // Individual failures mark items as failed/skipped; system keeps running.
 
-    // 2. Working hours: 08:00–20:00 GMT+3
-    const { hour, dateStr } = toGMT3(now);
-    if (hour < 8 || hour >= 20) {
-      stats.reason = hour < 8 ? 'before working hours' : 'after working hours';
-      return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
+    // 2. Round the clock. The 08:00-20:00 GMT+3 window used to live here.
+    //
+    // It was never protecting much: the recipients are in Nigeria (GMT+1),
+    // Bangladesh (+6), Uzbekistan (+5) and a dozen other zones, so a Moscow
+    // business-hours window lands somewhere arbitrary for almost all of them.
+    // Meanwhile it squeezed the whole day's volume into twelve hours, which is
+    // the opposite of what reputation wants — a steady trickle across 24 hours
+    // looks less like a campaign than the same count fired in half a day.
+    //
+    // What actually rations sending stays exactly where it was: the per-account
+    // daily quota, the per-pipeline daily ceiling, and the 30-90s random gap
+    // between messages. Those are the real limits; this was a calendar.
+    const { dateStr } = toGMT3(now);
 
     // 3. Sends run 7/7 — no weekend throttle. The per-account daily quota
     //    (ACCOUNT_DAILY_LIMIT) still applies every day.

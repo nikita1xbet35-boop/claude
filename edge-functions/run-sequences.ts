@@ -28,7 +28,12 @@ const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const ENROL_PER_RUN   = 40;
 const ADVANCE_PER_RUN = 40;
-const WORK_START = 8, WORK_END = 20;   // GMT+3 — follow-ups keep business hours
+// Follow-ups ride the same round-the-clock rule as first touches: the window
+// was a Moscow calendar imposed on recipients across a dozen time zones, and
+// holding a reply-chase until morning only makes it land further from the
+// message it is chasing. WORK_START/WORK_END are kept as the full day so the
+// slot-bumping arithmetic below still has a range to work with.
+const WORK_START = 0, WORK_END = 24;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
