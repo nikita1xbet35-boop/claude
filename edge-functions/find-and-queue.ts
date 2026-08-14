@@ -663,7 +663,27 @@ async function recordHealth(sb: any, source: string, s: DdgSession, layer = 'A')
   const dead     = s.requests >= 3 && allEmpty;
   const starving = s.requests >= 3 && layer === 'A' && mostlyEmpty && avg < 2;
   const degraded = dead || starving;
-  const until = degraded ? new Date(Date.now() + 45 * 60 * 1000).toISOString() : null;
+
+  // Escalating backoff, because a flat 45 minutes is wrong for what actually
+  // happens. Observed: an all-empty batch at 10:03, and six minutes earlier
+  // the same source was returning 12.0 results per request. These blips are
+  // transient, and each one was costing five scheduled runs — most of the hour
+  // frozen over one bad minute.
+  //
+  // So: ten minutes on a first strike, and the full forty-five only if the
+  // source failed again recently, which is what a real ban looks like from
+  // here. The long freeze still exists — it just has to be earned twice.
+  let mins = 10;
+  if (degraded) {
+    try {
+      const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const { data: recent } = await sb.from('source_health')
+        .select('id').eq('source', source).eq('throttled', true)
+        .gte('window_start', since).limit(1);
+      if (recent && recent.length) mins = 45;
+    } catch { /* if we cannot tell, the cheap option is the short freeze */ }
+  }
+  const until = degraded ? new Date(Date.now() + mins * 60 * 1000).toISOString() : null;
 
   try {
     await sb.from('source_health').insert([{
@@ -680,7 +700,7 @@ async function recordHealth(sb: any, source: string, s: DdgSession, layer = 'A')
         level: 'warning', service: 'find-and-queue',
         message: `${source} ${dead ? 'DEAD' : 'starving'}: ${avg.toFixed(1)} results/request over `
           + `${s.requests} requests (${s.emptyResponses} empty, layer ${layer}) `
-          + `— backing off until ${until}`,
+          + `— backing off ${mins}min until ${until}`,
       }]);
       await fetch(`${SUPABASE_URL}/functions/v1/send-alert`, {
         method: 'POST',
@@ -689,7 +709,8 @@ async function recordHealth(sb: any, source: string, s: DdgSession, layer = 'A')
         body: JSON.stringify({
           level: 'warning', service: 'DuckDuckGo',
           message: `Выдача пустая: ${avg.toFixed(1)} результатов на запрос из ${s.requests} `
-            + `(${s.emptyResponses} совсем пустых). Пауза 45 минут — это признак бана.`,
+            + `(${s.emptyResponses} совсем пустых). Пауза ${mins} мин.`
+            + (mins === 45 ? ' Повторно за полчаса — похоже на настоящий бан.' : ''),
         }),
       }).catch(() => {});
     }

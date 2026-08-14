@@ -170,7 +170,7 @@ let lastLlmError = '';
 /** Groq with per-key rotation and a second pass after a pause. The keys are
  *  shared with find-and-queue, which keeps them near their per-minute cap, so
  *  all three can be 429 at the same instant and be fine a second later. */
-async function groqChat(user: string): Promise<string | null> {
+async function groqChat(user: string, itemCount: number): Promise<string | null> {
   const n = GROQ_KEYS.length;
   if (!n) { lastLlmError = 'no GROQ key configured'; return null; }
   const body = {
@@ -180,12 +180,13 @@ async function groqChat(user: string): Promise<string | null> {
       { role: 'user', content: user },
     ],
     temperature: 0.1,
-    // 8000 was the actual cause of the HTTP 413s below — a 25-item batch
-    // asking for up to 8000 completion tokens sat over Groq's free-tier
-    // per-request ceiling on every single call, not just under load. 15 items
-    // at ~200 tokens/verdict comes to ~3000; 4096 leaves real headroom without
-    // being big enough to trip the same wall again.
-    max_tokens: 4096,
+    // Sized to the batch. 8000 caused outright 413s; 4096 stopped the 413s but
+    // left a subtler version of the same problem — Groq reserves max_tokens
+    // against a 6000 tokens/minute budget whether the answer uses them or not,
+    // so a near-ceiling reservation lets exactly one request through per
+    // minute and 429s the rest. This verdict carries more fields than the
+    // brand one, so 200 per item rather than 110.
+    max_tokens: 200 * itemCount + 200,
     response_format: { type: 'json_object' },
   };
   let sawRateLimit = false;
@@ -348,7 +349,7 @@ async function judge(batch: Row[]): Promise<Map<number, Verdict>> {
     return lines.join('\n');
   }).join('\n\n');
 
-  const raw = ANTHROPIC_KEY ? await anthropicChat(user) : await groqChat(user);
+  const raw = ANTHROPIC_KEY ? await anthropicChat(user) : await groqChat(user, batch.length);
   if (!raw) return out;
 
   try {
