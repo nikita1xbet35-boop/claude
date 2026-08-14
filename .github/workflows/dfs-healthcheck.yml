@@ -93,6 +93,21 @@ jobs:
           q "SELECT requests, results_total, empty_results, avg_results, throttled, window_start FROM public.source_health WHERE source='ddg' ORDER BY window_start DESC LIMIT 10;"
           echo; echo
 
+          echo "── 1f. ALL PIPELINES: are they producing? ──────────────────"
+          # One place to see whether each of the three lead sources is alive,
+          # because "0 leads" looks identical whether the searcher is broken,
+          # the qualifier is broken, or the source genuinely found nothing.
+          q "SELECT pipeline, count(*) AS leads, count(contact_email) AS with_email, count(*) FILTER (WHERE created_at > now() - interval '24 hours') AS last_24h FROM public.leads GROUP BY pipeline ORDER BY 2 DESC;"
+          echo; echo
+          echo "--- send queues per pipeline ---"
+          q "SELECT pipeline, status, count(*) FROM public.send_queue GROUP BY 1,2 ORDER BY 1,3 DESC;"
+          echo; echo
+          echo "--- telegram pipeline ---"
+          q "SELECT (SELECT count(*) FROM public.tg_outreach_channels) AS channels, (SELECT count(*) FROM public.tg_outreach_channels WHERE contact IS NOT NULL) AS with_contact, (SELECT count(*) FROM public.tg_search_queries WHERE active) AS queries, (SELECT count(*) FROM public.tg_outreach_log) AS sent_cards;"
+          echo; echo
+          q "SELECT service, level, left(message,220) AS message, created_at FROM public.error_log WHERE service IN ('scan-tg-channels','send-tg-leads','extract-tg-contact','draft-tg-message') ORDER BY created_at DESC LIMIT 6;"
+          echo; echo
+
           echo "── 2. module tables present ────────────────────────────────"
           q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('dfs_domains','dfs_competitors','dfs_usage','owner_clusters','source_health','pipeline_limits') ORDER BY table_name;"
           echo; echo
@@ -211,4 +226,4 @@ jobs:
           q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: verify both fixes on live data — search rate + brand-search runs, no spend
+# ping: all-pipelines status check before full launch — no spend
