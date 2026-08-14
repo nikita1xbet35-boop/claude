@@ -110,6 +110,17 @@ jobs:
           q "SELECT service, level, left(message,220) AS message, created_at FROM public.error_log WHERE service IN ('scan-tg-channels','send-tg-leads','extract-tg-contact','draft-tg-message') ORDER BY created_at DESC LIMIT 6;"
           echo; echo
 
+          echo "── 1g. BRAND SENDING (just unpaused) ───────────────────────"
+          q "SELECT (SELECT count(*) FROM public.leads WHERE pipeline='brand') AS leads, (SELECT count(*) FROM public.leads WHERE pipeline='brand' AND contact_email IS NOT NULL) AS with_email, (SELECT count(*) FROM public.leads WHERE pipeline='brand' AND contact_email IS NOT NULL AND exclude_reason IS NULL) AS sendable, (SELECT count(*) FROM public.leads WHERE pipeline='brand' AND exclude_reason IS NOT NULL) AS excluded;"
+          echo; echo
+          q "SELECT coalesce(reject_reason,'—') AS reason, count(*) FROM public.leads WHERE pipeline='brand' AND reject_reason IS NOT NULL GROUP BY 1 ORDER BY 2 DESC;"
+          echo; echo
+          q "SELECT service, level, left(message,240) AS message, created_at FROM public.error_log WHERE service IN ('generate-queue-brand','process-queue') ORDER BY created_at DESC LIMIT 8;"
+          echo; echo
+          echo "--- what actually went out on the brand pipeline ---"
+          q "SELECT l.domain_normalized, l.geo, left(l.found_keyword,40) AS keyword, e.subject, e.sent_at FROM public.email_log e JOIN public.leads l ON l.id = e.lead_id WHERE e.pipeline='brand' ORDER BY e.sent_at DESC LIMIT 10;"
+          echo; echo
+
           echo "── 2. module tables present ────────────────────────────────"
           q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('dfs_domains','dfs_competitors','dfs_usage','owner_clusters','source_health','pipeline_limits') ORDER BY table_name;"
           echo; echo
@@ -228,4 +239,4 @@ jobs:
           q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: groq token sizing + escalating backoff + tick lock — verify all three pipelines, no spend
+# ping: brand queue unpaused — verify sending started, no spend
