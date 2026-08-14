@@ -64,7 +64,11 @@ const RESULTS_PER_PAGE = 15;
 // having. 25, not the main pipeline's 35.
 const MIN_SCORE   = 25;
 const GROQ_BATCH  = 8;
-const GROQ_PACE_MS = 12_000;
+// 15s, not 12s. With max_tokens now sized to the batch a request reserves
+// ~2100 tokens, so four per minute sits under the 6000/minute free tier with
+// room for the other functions sharing these keys (find-and-queue, dfs-qualify,
+// draft-tg-message all draw on the same three).
+const GROQ_PACE_MS = 15_000;
 
 // Runs every 3rd tick like find-and-queue, but on a DIFFERENT residue so the
 // two never hit DuckDuckGo in the same minute. find-and-queue uses 0.
@@ -308,7 +312,7 @@ let groqKeyIdx = 0;
 let groqLastError = '';
 let groqCount = 0;
 
-async function groqChat(user: string): Promise<string | null> {
+async function groqChat(user: string, itemCount: number): Promise<string | null> {
   const n = GROQ_KEYS.length;
   if (!n) { groqLastError = 'no GROQ key configured'; return null; }
   const body = {
@@ -318,11 +322,15 @@ async function groqChat(user: string): Promise<string | null> {
       { role: 'user', content: user },
     ],
     temperature: 0.1,
-    // 4096, not 8000: an 8-item batch answers in well under 2000 tokens, and a
-    // request whose declared ceiling exceeds the free tier's per-minute token
-    // budget is rejected outright with a 413 — which is how the DataForSEO
-    // qualifier spent a whole day claiming rows and judging none of them.
-    max_tokens: 4096,
+    // Sized to the batch, not fixed — and this is the whole ballgame on the
+    // free tier. Groq reserves max_tokens against a 6000 tokens/minute budget
+    // whether the answer uses them or not, so a flat 4096 plus the prompt put
+    // ONE request at the per-minute ceiling: every request after it in the
+    // same minute came back 429. Measured cost of that: 257 sites found across
+    // six runs, 14 saved, three runs analysing literally nothing.
+    // A verdict is ~55 tokens of JSON; 110 per item is a comfortable double.
+    // find-and-queue has done it this way all along (130 * cands.length + 100).
+    max_tokens: 110 * itemCount + 120,
     response_format: { type: 'json_object' },
   };
   // Two rounds with a pause: the keys are shared across the whole pipeline, so
@@ -384,7 +392,7 @@ async function judge(batch: Candidate[]): Promise<Map<number, Verdict>> {
     + `   snippet: ${(c.snippet || '—').slice(0, 220)}`,
   ).join('\n\n');
 
-  const raw = await groqChat(user);
+  const raw = await groqChat(user, batch.length);
   if (!raw) return out;
   try {
     const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim().match(/\{[\s\S]*\}/)?.[0] || raw);
@@ -429,9 +437,30 @@ Deno.serve(async (req: Request) => {
 
   // Own tick, never find-and-queue's. `force` exists for manual runs from the
   // interface, which must not have to wait up to nine minutes to prove a change.
-  if (!body.force && Math.floor(Date.now() / (3 * 60 * 1000)) % 3 !== TICK_RESIDUE) {
+  const tick = Math.floor(Date.now() / (3 * 60 * 1000));
+  if (!body.force && tick % 3 !== TICK_RESIDUE) {
     return json({ skipped: true, reason: 'throttled — brand search runs ~every 9 min, offset from find-and-queue' });
   }
+
+  // One run per tick, whoever asks. The logs caught two full runs starting one
+  // second apart (09:58:23 and 09:58:24) — the external scheduler fired
+  // find-and-queue twice inside the same three-minute bucket, and each handed
+  // off. That doubles the draw on both shared budgets at once: the Groq
+  // per-minute tokens and the DuckDuckGo egress IP, which are exactly the two
+  // things this pipeline is rationed against. `force` skips the tick gate but
+  // not this: a manual run from the interface should still not collide with a
+  // scheduled one.
+  try {
+    const { data: claimed } = await supabase.from('app_state')
+      .select('value').eq('key', 'brand_search_tick').maybeSingle();
+    if (String(claimed?.value || '') === String(tick)) {
+      return json({ skipped: true, reason: `tick ${tick} already claimed by a concurrent run` });
+    }
+    await supabase.from('app_state').upsert(
+      { key: 'brand_search_tick', value: String(tick), updated_at: new Date().toISOString() },
+      { onConflict: 'key' },
+    );
+  } catch { /* if app_state is unavailable, a duplicate run is better than none */ }
 
   try {
     if (!GROQ_KEYS.length) { stats.reason = 'no LLM key configured'; return json(stats, 400); }
