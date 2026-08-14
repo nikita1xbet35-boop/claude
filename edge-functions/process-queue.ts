@@ -215,6 +215,94 @@ function cleanSiteName(leadName: string, leadUrl: string): string {
   return domain || 'your site';
 }
 
+// ── Brand pipeline copy ─────────────────────────────────────────────────────
+// A separate letter, and the reason the brand queue shipped paused rather than
+// borrowing this file's default. The main pipeline opens with "strong work in
+// Nigeria" — a compliment about a market. That is the wrong thing to say to
+// someone intercepting "mostbet apk": what they own is a POSITION, and the
+// letter has to name it or it reads as a mailshot.
+//
+// Two variables, both taken from the find itself: the domain, and the query it
+// was ranking for when we found it. Everything else is fixed copy.
+//
+// Uzbekistan gets Uzbek — it is the confirmed market for this traffic and the
+// one where the partner is least likely to be working in English. Everyone
+// else gets the English original.
+
+/** The query this lead was found on. brand-search always records it, but a
+ *  lead promoted before that, or by another path, may not have one — and
+ *  "you're ranking for undefined" is worse than any fallback. The brand name
+ *  is the honest substitute: it is what the query was about. */
+function brandKeywordOf(lead: Record<string, unknown>): string {
+  const kw = String(lead.found_keyword || '').trim();
+  if (kw) return kw;
+  return String(lead.brand_found || '').trim();
+}
+
+/** The site as the recipient knows it — the bare domain. "I came by
+ *  kenyanbets.co.ke" is a sentence a human writes; "I came by Kenyanbets"
+ *  is one a mail merge writes. */
+function brandSiteOf(lead: Record<string, unknown>): string {
+  const d = String(lead.domain_normalized || '').trim();
+  if (d) return d;
+  try {
+    const raw = String(lead.url || '');
+    return new URL(raw.startsWith('http') ? raw : 'https://' + raw).hostname.replace(/^www\./, '');
+  } catch { return String(lead.name || 'your site'); }
+}
+
+function buildBrandEmail(lead: Record<string, unknown>): { subject: string; body: string } | null {
+  const site    = brandSiteOf(lead);
+  const keyword = brandKeywordOf(lead);
+  // Without a query there is no letter worth sending here — the whole opening
+  // is built on naming it. Better to skip the lead than to mangle the copy.
+  if (!site || !keyword) return null;
+
+  const uz = String(lead.geo || '').trim().toUpperCase() === 'UZ';
+
+  // Subject picked by lead id, not at random: a retry must not arrive under a
+  // different subject line than the attempt before it.
+  //
+  // Subjects use an ASCII hyphen where the brief writes an em dash: headers go
+  // through toAsciiSafe, which deletes the dash outright and leaves
+  // "site.com a partnership worth 5 minutes". The body keeps the em dashes —
+  // it is sent as UTF-8 base64 and arrives exactly as written.
+  const idx = Math.abs(Number(lead.id) || 0) % 3;
+
+  if (uz) {
+    const subjects = [
+      `Saytingiz haqida qisqa savol`,
+      `${keyword} bo'yicha o'rningizni ko'rdim`,
+      `${site} - 5 daqiqaga arziydigan hamkorlik`,
+    ];
+    const body =
+      `Salom, ${site} saytingizga kirdim — ${keyword} bo'yicha yaxshi o'rinda turibsiz, zo'r ish. `
+      + `Bu o'rinni ushlab turish oson emas.\n\n`
+      + `Men Nikman, 1xBet'da hamkorlik yo'nalishida ishlayman. Biz shunday brend-trafik yuboradigan `
+      + `odamlar bilan ishlaymiz va shartlar odatda ikkala tomon uchun ham qulay chiqadi — toza RevShare, `
+      + `admin to'lovisiz, haftalik to'lovlar.\n\n`
+      + `Hozir sizga hech narsa sotmoqchi emasman — shunchaki raqamlarni eshitishga qiziqasizmi, `
+      + `bilmoqchiman. Ikki daqiqa vaqt oladi.\n\n`
+      + `Telegram: @aff_manager_xbet`;
+    return { subject: toAsciiSafe(subjects[idx]), body };
+  }
+
+  const subjects = [
+    `Quick one about your site`,
+    `Saw your ranking for ${keyword}`,
+    `${site} - a partnership worth 5 minutes`,
+  ];
+  const body =
+    `Hey, I came by ${site} — you're ranking for ${keyword}, solid work. That's not easy to hold.\n\n`
+    + `I'm Nick, I work with 1xBet on the partnerships side. We work with people who send us `
+    + `brand-intent traffic like this, and the terms tend to work out well for both sides — `
+    + `clean RevShare, no admin fee, weekly payouts.\n\n`
+    + `Not trying to sell you anything right now — just curious if you're open to hearing the numbers. `
+    + `Takes two minutes.\n\n`
+    + `Telegram: @aff_manager_xbet`;
+  return { subject: toAsciiSafe(subjects[idx]), body };
+}
+
 function buildSubject(leadName: string, leadUrl: string, _brand: string, leadGeo?: string): string {
   const geo  = geoName(leadGeo || '');
   const hasGeo = !!geo && geo !== 'the region' && geo !== 'your market';
@@ -475,6 +563,21 @@ Deno.serve(async (req: Request) => {
       let subject = buildSubject(lead.name, lead.url || '', item.brand, lead.geo as string);
       let body    = buildEmailBody(lead, item.brand);
       let inReplyTo: string | undefined;
+
+      // Brand-traffic leads get their own letter. Checked on the queue row
+      // first because that is what routing and the daily ceiling key on; the
+      // lead is the fallback for rows written before pipeline was stamped.
+      const pipelineOf = String(item.pipeline || lead.pipeline || 'search');
+      if (pipelineOf === 'brand') {
+        const t = buildBrandEmail(lead);
+        if (!t) {
+          await markFailed(item, 'brand lead has no keyword to write about', true);
+          stats.skipped++;
+          continue;
+        }
+        subject = t.subject;
+        body    = t.body;
+      }
 
       // ── Follow-up steps (P0.3) ────────────────────────────────────────────
       // A queue row carrying step_no >= 2 is a sequence touch, not a cold email:
