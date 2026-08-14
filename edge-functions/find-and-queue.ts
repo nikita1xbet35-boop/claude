@@ -1242,36 +1242,63 @@ Deno.serve(async (req: Request) => {
     // Awaited rather than fired and forgotten: an edge function's runtime can
     // be torn down the moment it returns a response, which would kill the call
     // mid-flight. This tick had nothing else to do with its time.
-    if (tick % RUN_EVERY_TICKS === 1) {
+    // No quiet() helper in this file — it exists in the dfs-* functions, not
+    // here. Calling it cost three and a half hours of total pipeline silence
+    // once already: a ReferenceError on the first line of the handler kills the
+    // invocation before any logging, so the outage looked exactly like "the
+    // external scheduler stopped calling us".
+    const handOff = async (fn: string, ms: number, payload: unknown = {}) => {
       try {
-        const r = await fetch(`${SUPABASE_URL}/functions/v1/brand-search`, {
+        const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY,
                      'Authorization': `Bearer ${SUPABASE_KEY}` },
-          // force: this function owns the timing now, so brand-search's own
-          // tick gate must not second-guess it.
-          body: JSON.stringify({ force: true }),
-          signal: AbortSignal.timeout(130_000),
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(ms),
         });
-        const out = await r.json().catch(() => ({}));
-        return new Response(JSON.stringify({
-          skipped: true, reason: 'heavy run throttled — spare tick ran brand-search',
-          brand: out,
-        }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+        return await r.json().catch(() => ({}));
       } catch (e: any) {
-        // No quiet() helper in this file — it exists in the dfs-* functions,
-        // not here. Calling it cost three and a half hours of total pipeline
-        // silence once already: a ReferenceError on the first line of the
-        // handler kills the invocation before any logging, so the outage looks
-        // exactly like "the external scheduler stopped calling us".
         try {
           await supabase.from('error_log').insert([{
             level: 'warning', service: 'find-and-queue',
-            message: 'brand-search hand-off failed: ' + String(e?.message || e).slice(0, 200),
+            message: `${fn} hand-off failed: ` + String(e?.message || e).slice(0, 200),
           }]);
         } catch { /* logging must never break the tick */ }
+        return { error: String(e?.message || e).slice(0, 120) };
       }
+    };
+
+    if (tick % RUN_EVERY_TICKS === 1) {
+      // force: this function owns the timing now, so brand-search's own tick
+      // gate must not second-guess it.
+      const brand = await handOff('brand-search', 130_000, { force: true });
+      return new Response(JSON.stringify({
+        skipped: true, reason: 'heavy run throttled — spare tick ran brand-search', brand,
+      }), { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
+
+    // The third tick was sitting idle while the two stages BEHIND the searcher
+    // had no schedule at all. That is why the brand queue stayed empty after
+    // being unpaused: 351 leads found, 63 of them sendable, and neither
+    // brand-enrich nor generate-queue-brand had ever run — migration 030 looked
+    // for a cron to copy, correctly found none, and created nothing. The 89
+    // contacts those leads do have came from the generic extract-contacts,
+    // which is pipeline-agnostic; none of the brand-specific work (APK, ref
+    // ids, parked and mirror filtering) had happened.
+    //
+    // Neither of these touches DuckDuckGo or the Groq keys the searchers
+    // ration, so running both back to back here costs nothing that is scarce.
+    // Enrich first: the queue filler can only pick leads that already have a
+    // contact, so filling before enriching would just find the same 63 again.
+    if (tick % RUN_EVERY_TICKS === 2) {
+      const enriched = await handOff('brand-enrich', 95_000);
+      const queued   = await handOff('generate-queue-brand', 30_000);
+      return new Response(JSON.stringify({
+        skipped: true, reason: 'heavy run throttled — spare tick ran brand enrich + queue',
+        enriched, queued,
+      }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
     return new Response(JSON.stringify({ skipped: true, reason: 'throttled — heavy run ~every 9 min (DDG rate-limit protection)' }),
       { headers: { ...cors, 'Content-Type': 'application/json' } });
   }
