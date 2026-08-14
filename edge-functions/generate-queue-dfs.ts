@@ -83,13 +83,16 @@ Deno.serve(async (req: Request) => {
     const gmt3  = new Date(now.getTime() + 3 * 60 * 60 * 1000);
     const hour  = gmt3.getUTCHours();
     const today = gmt3.toISOString().slice(0, 10);
-    if (hour < 8 || hour >= 20) {
-      stats.skipped = true;
-      stats.reason = hour < 8 ? 'before working hours' : 'after working hours';
-      return json(stats);
-    }
+    // Round the clock — see the note in process-queue. The recipients span a
+    // dozen time zones, so a Moscow window was arbitrary for nearly all of
+    // them, and compressing a day's volume into twelve hours reads more like a
+    // campaign than spreading it does. The daily ceiling still caps the day.
+
     const nowMs     = now.getTime();
-    const workEndMs = new Date(`${today}T20:00:00+03:00`).getTime();
+    // Schedule out to the end of the day, not to 20:00 — the cursor below
+    // stops adding rows once it passes this, and stopping at 20:00 left the
+    // late-evening capacity unused every single day.
+    const workEndMs = new Date(`${today}T23:59:00+03:00`).getTime();
 
     // ── Today's spend for THIS pipeline ───────────────────────────────────
     const dayStart = new Date(`${today}T00:00:00+03:00`).toISOString();

@@ -7,7 +7,7 @@
 //   - Reschedules only overdue items (slot in the past) to fire again soon
 //   - Appends newly-eligible leads (with contacts) after the last occupied slot
 //   - Keeps the queue within the daily target (200 weekday / 100 weekend)
-//   - Respects working hours 08:00-20:00 GMT+3
+//   - Sends round the clock; the daily target and per-send gap are the limits
 //
 // Deploy: supabase functions deploy generate-queue --no-verify-jwt
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto-injected)
@@ -118,18 +118,22 @@ Deno.serve(async (req: Request) => {
     // GMT+3 day boundaries / working window (as UTC instants)
     const todayMidnightUTC    = new Date(`${todayStr}T00:00:00+03:00`);
     const tomorrowMidnightUTC = new Date(todayMidnightUTC.getTime() + 24 * 60 * 60 * 1000);
-    const workStartMs = new Date(`${todayStr}T08:00:00+03:00`).getTime();
-    const workEndMs   = new Date(`${todayStr}T20:00:00+03:00`).getTime();
+    // Round the clock — see the note in process-queue. A Moscow business-hours
+    // window was arbitrary for recipients spread across a dozen time zones, and
+    // compressing the day's volume into twelve hours reads more like a campaign
+    // than spreading it does. The daily target still caps the day.
+    const workStartMs = new Date(`${todayStr}T00:00:00+03:00`).getTime();
+    const workEndMs   = new Date(`${todayStr}T23:59:00+03:00`).getTime();
 
     const dayOfWeek    = nowGMT3.getUTCDay();
     const isWeekend    = dayOfWeek === 0 || dayOfWeek === 6;
     const dailyTarget  = WEEKDAY_TARGET;  // send 7/7 at the full target — no weekend reduction
 
-    // After the work day — nothing to schedule today
+    // Only the last minute of the day has nothing left to schedule into.
     if (nowMs >= workEndMs) {
       return new Response(JSON.stringify({
         generated: 0, repacked: 0, skipped: true,
-        reason: 'after working hours',
+        reason: 'end of day — next slots open after midnight GMT+3',
         date: todayStr,
         is_weekend: isWeekend,
       }), { headers: { ...cors, 'Content-Type': 'application/json' } });
