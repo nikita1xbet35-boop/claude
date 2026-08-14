@@ -14204,8 +14204,8 @@ async function loadBrand(){
       sb.from('leads')
         .select('id, name, url, contact_email, contact_telegram, contact_source, geo, lang, '
               + 'fit_score, score, stage, brand_found, serp_position, traffic_type, has_apk, '
-              + 'ref_params, suspected_official, exclude_reason, found_keyword, owner_cluster_id, '
-              + 'summary, created_at')
+              + 'ref_params, suspected_official, suspected_reason, exclude_reason, reject_reason, '
+              + 'found_keyword, owner_cluster_id, summary, created_at')
         .eq('pipeline','brand')
         .order('fit_score', { ascending:false, nullsFirst:false })
         .limit(1000).then(r => r.data || []),
@@ -14407,6 +14407,8 @@ function brandApplyFilter(l){
   if(f.status === 'contact'   && !(l.contact_email || l.contact_telegram)) return false;
   if(f.status === 'occupied'  && l.exclude_reason !== 'occupied') return false;
   if(f.status === 'suspected' && !l.suspected_official) return false;
+  if(f.status === 'parked'    && l.reject_reason !== 'parked_domain') return false;
+  if(f.status === 'mismatch'  && l.reject_reason !== 'brand_mismatch') return false;
   if(f.status === 'new'       && (l.contact_email || l.contact_telegram)) return false;
   return true;
 }
@@ -14439,10 +14441,13 @@ function brandRenderLeads(){
       : l.contact_telegram
       ? `<span style="color:var(--purple);">${bEsc(l.contact_telegram)}</span>`
       : `<span style="color:var(--text3);">${bEsc(l.contact_source || 'ищется…')}</span>`;
-    const flag = l.exclude_reason === 'occupied'
-      ? `<span style="font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:5px;border:1px solid var(--amber);color:var(--amber);">занято</span>`
-      : l.suspected_official
-      ? `<span style="font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:5px;border:1px solid var(--red);color:var(--red);">оператор?</span>`
+    const tag = (label, color, title) =>
+      `<span title="${bEsc(title||'')}" style="margin-left:6px;font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:5px;border:1px solid ${color};color:${color};">${label}</span>`;
+    const flag =
+        l.reject_reason === 'parked_domain'  ? tag('запаркован', 'var(--text3)', 'Заглушка парковки или страница хостера — владельца нет')
+      : l.reject_reason === 'brand_mismatch' ? tag('нет бренда', 'var(--text3)', 'Бренд, по которому найден домен, на странице не встречается — сайт изменился с момента индексации')
+      : l.suspected_official                 ? tag('оператор?', 'var(--red)', l.suspected_reason || 'Похоже на зеркало оператора')
+      : l.exclude_reason === 'occupied'      ? tag('занято', 'var(--amber)', 'Уже промотирует 1xBet — есть свой менеджер')
       : '';
     return `<tr style="border-top:1px solid var(--border2);">
       <td style="padding:9px 8px;font-family:var(--font-mono);font-size:12px;">
@@ -14465,6 +14470,9 @@ function brandRenderLeads(){
         <button onclick="brandBlockDomain('${bEsc(l.name||'').replace(/'/g,"\\'")}','${bEsc(l.brand_found||'').replace(/'/g,"\\'")}')"
           style="padding:4px 9px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text3);font-size:11px;cursor:pointer;"
           title="Это оператор, а не аффилиат — в блок-лист">В блок</button>
+        ${l.suspected_official ? `<button onclick="brandClearSuspicion(${l.id})"
+          style="margin-left:5px;padding:4px 9px;border-radius:6px;border:1px solid var(--green);background:transparent;color:var(--green);font-size:11px;cursor:pointer;"
+          title="Эвристика ошиблась — это аффилиат, вернуть в отправку">Не зеркало</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -14477,7 +14485,7 @@ function brandRenderLeads(){
         <div><span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-right:8px;">Тип</span>${trafficChips}</div>
         <div><span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-right:8px;">Позиция</span>${sel('pos',[['all','любая'],['1-5','1-5'],['6-15','6-15'],['16-50','16+']])}</div>
         <div><span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-right:8px;">APK</span>${sel('apk',[['all','не важно'],['yes','есть'],['no','нет']])}</div>
-        <div><span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-right:8px;">Статус</span>${sel('status',[['all','все'],['contact','с контактом'],['new','без контакта'],['occupied','занято 1xBet'],['suspected','похоже на оператора']])}</div>
+        <div><span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;margin-right:8px;">Статус</span>${sel('status',[['all','все'],['contact','с контактом'],['new','без контакта'],['occupied','занято 1xBet'],['suspected','подозрение на зеркало'],['parked','запаркован'],['mismatch','бренда нет на странице']])}</div>
         <div style="display:flex;align-items:center;gap:12px;padding-top:4px;">
           <button onclick="brandResetFilter()" style="padding:5px 13px;border-radius:7px;border:1px solid var(--border2);background:var(--bg);color:var(--text2);font-size:11px;font-family:var(--font-mono);cursor:pointer;">Сбросить</button>
           <span style="font-size:11px;color:var(--text3);">показано ${bNum(shown.length)} из ${bNum(all.length)}${shown.length>400?' (первые 400)':''}</span>
@@ -14732,6 +14740,21 @@ async function brandToggleKeyword(id, active){
 }
 
 /** Домен оказался оператором, а не аффилиатом — в блок-лист, и лид из выдачи убрать. */
+/** Эвристика зеркала ошиблась — это настоящий аффилиат с доменом-омонимом.
+ *  Снимаем флаг и возвращаем лид в отправку, не теряя его. */
+async function brandClearSuspicion(id){
+  try {
+    const { error } = await sb.from('leads').update({
+      suspected_official: false, suspected_reason: null,
+      exclude_reason: null, reject_reason: null,
+    }).eq('id', id);
+    if(error) throw error;
+    const l = brandData.leads.find(x => x.id === id);
+    if(l){ l.suspected_official = false; l.exclude_reason = null; l.reject_reason = null; }
+    renderBrand();
+  } catch(e){ showError('Не удалось снять флаг: ' + (e.message || e)); }
+}
+
 async function brandBlockDomain(domain, brand){
   if(!domain) return;
   if(!confirm(`Добавить ${domain} в блок-лист операторов?\n\nЛид будет исключён из отправки.`)) return;
