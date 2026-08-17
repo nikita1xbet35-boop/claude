@@ -121,6 +121,44 @@ jobs:
           q "SELECT l.domain_normalized, l.geo, left(l.found_keyword,40) AS keyword, e.subject, e.sent_at FROM public.email_log e JOIN public.leads l ON l.id = e.lead_id WHERE e.pipeline='brand' ORDER BY e.sent_at DESC LIMIT 10;"
           echo; echo
 
+          echo "╔═══════════════ 2-DAY REPORT ═══════════════╗"
+          echo "── R1. leads found per pipeline per day ─────────────────────"
+          q "SELECT date_trunc('day', created_at)::date AS day, pipeline, count(*) AS leads, count(contact_email) AS with_email FROM public.leads WHERE created_at > now() - interval '3 days' GROUP BY 1,2 ORDER BY 1 DESC, 3 DESC;"
+          echo; echo
+          echo "── R2. emails actually sent per day per pipeline ────────────"
+          q "SELECT date_trunc('day', sent_at)::date AS day, coalesce(pipeline,'search') AS pipeline, count(*) AS sent FROM public.email_log WHERE sent_at > now() - interval '3 days' GROUP BY 1,2 ORDER BY 1 DESC, 3 DESC;"
+          echo; echo
+          echo "── R3. sends by hour (did 24/7 actually take effect?) ───────"
+          q "SELECT to_char(sent_at + interval '3 hours','YYYY-MM-DD HH24') AS hour_gmt3, count(*) FROM public.email_log WHERE sent_at > now() - interval '30 hours' GROUP BY 1 ORDER BY 1 DESC LIMIT 24;"
+          echo; echo
+          echo "── R4. replies / interest ──────────────────────────────────"
+          q "SELECT stage, count(*) FROM public.leads WHERE stage NOT IN ('new','excluded') GROUP BY 1 ORDER BY 2 DESC LIMIT 12;"
+          echo; echo
+          echo "── R5. search pipeline: real runs vs self-throttled (48h) ───"
+          q "SELECT count(*) FILTER (WHERE message = 'started') AS started, count(*) FILTER (WHERE message LIKE '%found=%') AS searched, count(*) FILTER (WHERE message LIKE '%DEAD%' OR message LIKE '%starving%') AS froze FROM public.error_log WHERE service='find-and-queue' AND created_at > now() - interval '48 hours';"
+          echo; echo
+          q "SELECT count(*) AS ddg_windows, count(*) FILTER (WHERE throttled) AS throttled, round(avg(avg_results),2) AS avg_results FROM public.source_health WHERE source='ddg' AND window_start > now() - interval '48 hours';"
+          echo; echo
+          echo "── R6. brand pipeline end to end ───────────────────────────"
+          q "SELECT (SELECT count(*) FROM public.brand_keywords WHERE active AND last_run_at IS NOT NULL) AS kw_done, (SELECT count(*) FROM public.brand_keywords WHERE active) AS kw_total, (SELECT count(*) FROM public.leads WHERE pipeline='brand') AS leads, (SELECT count(*) FROM public.leads WHERE pipeline='brand' AND contact_email IS NOT NULL) AS with_email, (SELECT count(*) FROM public.leads WHERE pipeline='brand' AND contact_email IS NOT NULL AND exclude_reason IS NULL) AS sendable, (SELECT count(*) FROM public.leads WHERE pipeline='brand' AND enriched_at IS NOT NULL) AS enriched, (SELECT count(*) FROM public.send_queue WHERE pipeline='brand') AS queued, (SELECT count(*) FROM public.email_log WHERE pipeline='brand') AS sent;"
+          echo; echo
+          q "SELECT coalesce(reject_reason,'(none)') AS reason, count(*) FROM public.leads WHERE pipeline='brand' GROUP BY 1 ORDER BY 2 DESC;"
+          echo; echo
+          echo "── R7. brand emails that went out (real subjects) ───────────"
+          q "SELECT l.domain_normalized, l.geo, left(l.found_keyword,32) AS keyword, left(e.subject,52) AS subject, e.sent_at FROM public.email_log e JOIN public.leads l ON l.id=e.lead_id WHERE e.pipeline='brand' ORDER BY e.sent_at DESC LIMIT 12;"
+          echo; echo
+          echo "── R8. stage functions: last line each ─────────────────────"
+          q "SELECT DISTINCT ON (service) service, left(message,190) AS message, created_at FROM public.error_log WHERE created_at > now() - interval '3 hours' AND service IN ('find-and-queue','brand-search','brand-enrich','generate-queue-brand','generate-queue','process-queue','dfs-qualify','scan-tg-channels','send-tg-leads','extract-contacts','score-leads') ORDER BY service, created_at DESC;"
+          echo; echo
+          echo "── R9. errors worth seeing (48h, non-info) ─────────────────"
+          q "SELECT service, level, left(message,150) AS message, count(*) AS n, max(created_at) AS last FROM public.error_log WHERE level <> 'info' AND created_at > now() - interval '48 hours' GROUP BY 1,2,3 ORDER BY n DESC LIMIT 12;"
+          echo; echo
+          echo "── R10. telegram ───────────────────────────────────────────"
+          q "SELECT (SELECT count(*) FROM public.tg_outreach_channels) AS channels, (SELECT count(*) FROM public.tg_outreach_channels WHERE found_at > now() - interval '48 hours') AS new_48h, (SELECT count(*) FROM public.tg_outreach_channels WHERE owner_contact IS NOT NULL) AS with_contact, (SELECT count(*) FROM public.tg_outreach_log) AS cards_sent;"
+          echo; echo
+          echo "╚═════════════ END 2-DAY REPORT ═════════════╝"
+          echo
+
           echo "── 2. module tables present ────────────────────────────────"
           q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('dfs_domains','dfs_competitors','dfs_usage','owner_clusters','source_health','pipeline_limits') ORDER BY table_name;"
           echo; echo
@@ -239,4 +277,4 @@ jobs:
           q "SELECT domain, keyword_cluster, commercial_keywords, total_search_volume, top3_keywords, round(etv) AS etv FROM public.dfs_domains WHERE rank_checked_at IS NOT NULL ORDER BY total_search_volume DESC NULLS LAST LIMIT 40;"
           echo
 
-# ping: brand queue unpaused — verify sending started, no spend
+# ping: two-day system report — no spend
