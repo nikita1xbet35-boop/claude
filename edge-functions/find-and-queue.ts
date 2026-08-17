@@ -884,9 +884,17 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
   // over their per-minute cap in the same instant. The keys are shared with
   // the rest of the pipeline, so simultaneous 429s are normal and a second or
   // two later they are fine again. Losing a whole run's material to that is
-  // the expensive outcome; a 2s wait is the cheap one.
-  for (let round = 0; round < 2; round++) {
-    if (round) await new Promise(r => setTimeout(r, 2000));
+  // the expensive outcome; waiting is the cheap one.
+  //
+  // The 2s wait this comment used to describe did not actually recover anything:
+  // the free tier's budget is a ROLLING minute, so three keys over budget now are
+  // still over budget two seconds later. 48h of logs showed exactly the same line
+  // as before, only with `round 2` on the end — e.g. `found=20 analyzed=0
+  // irrelevant=16 saved=0 groqCalls=12 groqErr="HTTP 429 (key 1, round 2)"`.
+  // 25s of ladder fits inside the run budget and rides out the minute boundary.
+  const BACKOFF_MS = [0, 5_000, 20_000];
+  for (let round = 0; round < BACKOFF_MS.length; round++) {
+    if (round) await new Promise(r => setTimeout(r, BACKOFF_MS[round]));
     for (let i = 0; i < n; i++) {
       const idx = (groqKeyIdx + i) % n;
       try {

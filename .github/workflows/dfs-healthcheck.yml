@@ -153,6 +153,11 @@ jobs:
           echo "── R9. errors worth seeing (48h, non-info) ─────────────────"
           q "SELECT service, level, left(message,150) AS message, count(*) AS n, max(created_at) AS last FROM public.error_log WHERE level <> 'info' AND created_at > now() - interval '48 hours' GROUP BY 1,2,3 ORDER BY n DESC LIMIT 12;"
           echo; echo
+          echo "── R11. brand queue: why so few eligible ───────────────────"
+          q "SELECT count(*) AS not_yet_mailed, count(*) FILTER (WHERE stage NOT IN ('new','ready','researched','followup')) AS wrong_stage, count(*) FILTER (WHERE suspected_official) AS flagged_official, count(*) FILTER (WHERE email_status IN ('invalid','disposable')) AS bad_status, count(*) FILTER (WHERE contact_email IN (SELECT email FROM public.email_log)) AS addr_already_mailed, count(*) FILTER (WHERE contact_email IN (SELECT email FROM public.suppression_list)) AS suppressed FROM public.leads WHERE pipeline='brand' AND contact_email IS NOT NULL AND contact_email <> '' AND exclude_reason IS NULL AND id NOT IN (SELECT lead_id FROM public.email_log WHERE lead_id IS NOT NULL);"
+          echo; echo
+          q "SELECT coalesce(stage,'(null)') AS stage, count(*) FROM public.leads WHERE pipeline='brand' GROUP BY 1 ORDER BY 2 DESC;"
+          echo; echo
           echo "── R10. telegram ───────────────────────────────────────────"
           q "SELECT (SELECT count(*) FROM public.tg_outreach_channels) AS channels, (SELECT count(*) FROM public.tg_outreach_channels WHERE found_at > now() - interval '48 hours') AS new_48h, (SELECT count(*) FROM public.tg_outreach_channels WHERE owner_contact IS NOT NULL) AS with_contact, (SELECT count(*) FROM public.tg_outreach_log) AS cards_sent;"
           echo; echo

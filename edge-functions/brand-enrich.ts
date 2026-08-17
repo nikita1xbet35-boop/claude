@@ -298,13 +298,20 @@ function suspectedOfficial(
   const stem = String(brand || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!stem || stem.length < 4) return null;
   const label = brandLabel(domain).replace(/[^a-z0-9]/g, '');
+  const tld = domain.split('.').pop() || '';
   // Bare brand and nothing else. A modifier here means affiliate, and we stop.
-  if (label !== stem) return null;
+  //
+  // …with one exception: the TLD itself can carry the tail of the brand.
+  // meridian.bet reads as "meridianbet" and IS the operator — it took a real
+  // letter from us before this case existed, because label "meridian" never
+  // equalled stem "meridianbet". Only the brand's own tail counts, so
+  // 1win.bet stays an ordinary bare-brand match and nobody.bet matches nothing.
+  const bareBrand = label === stem || label + tld === stem;
+  if (!bareBrand) return null;
 
   const signals: string[] = [];
-  signals.push('bare brand domain');
+  signals.push(label === stem ? 'bare brand domain' : `brand split across .${tld}`);
 
-  const tld = domain.split('.').pop() || '';
   if (MIRROR_TLDS.has(tld)) signals.push(`mirror-prone .${tld}`);
 
   // Its own account system, not a download button pointing elsewhere.
@@ -320,10 +327,21 @@ function suspectedOfficial(
   // gets paid. Nothing outbound is the strongest hint it IS the book.
   if (refCount === 0) signals.push('no outbound referral links');
 
+  // The brand on a country zone. sportpesa.co.za got a real letter from us: the
+  // shape matched, but the page gave no corroboration that run, so it sailed
+  // through as an affiliate. Bare brand on a ccTLD is not an ambiguous case —
+  // operators run one local domain per market (sportpesa.co.ke, betway.co.ke)
+  // and an affiliate can no more register the bare brand there than on .com.
+  const ccTld = /^[a-z]{2}$/.test(tld);
+  if (ccTld) signals.push(`country zone .${tld}`);
+
   // The bare-brand shape alone is suspicious but not enough: an affiliate can
-  // genuinely own a homonym domain. Require corroboration from the page.
+  // genuinely own a homonym domain. Require corroboration from the page — or
+  // from a zone that only the operator could have taken.
   const corroborated = hasOwnAuth
     || signals.includes('same-domain contact')
+    || ccTld
+    || label + tld === stem
     || (refCount === 0 && MIRROR_TLDS.has(tld));
   return corroborated ? signals.join(' + ') : null;
 }

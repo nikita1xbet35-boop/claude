@@ -104,6 +104,14 @@ const GLOBAL_SKIP = new Set([
   'play.google.com', 'apps.apple.com', 'apkpure.com', 'apkmirror.com',
   'apkcombo.com', 'uptodown.com', 'softonic.com', 'medium.com', 'github.com',
   'blogspot.com', 'wordpress.com', 'archive.org', 'trustpilot.com',
+  // Review/verification aggregators. They rank for "<brand> official site"
+  // precisely because people check brands there, so brand-intent queries surface
+  // them constantly — and scamadviser.com collected a real letter from us on
+  // "merrybet official site" before this line existed. They sell trust ratings,
+  // never affiliate traffic.
+  'scamadviser.com', 'sitejabber.com', 'similarweb.com', 'semrush.com',
+  'ahrefs.com', 'crunchbase.com', 'glassdoor.com', 'indeed.com',
+  'whois.com', 'who.is', 'godaddy.com', 'namecheap.com', 'hostinger.com',
 ]);
 
 // ── DuckDuckGo (same hardening as find-and-queue) ───────────────────────────
@@ -333,11 +341,15 @@ async function groqChat(user: string, itemCount: number): Promise<string | null>
     max_tokens: 110 * itemCount + 120,
     response_format: { type: 'json_object' },
   };
-  // Two rounds with a pause: the keys are shared across the whole pipeline, so
-  // all three being momentarily over their per-minute cap is normal and passes
-  // within a second or two. Losing the run's material to that is not.
-  for (let round = 0; round < 2; round++) {
-    if (round) await new Promise(r => setTimeout(r, 2000));
+  // The keys are shared across the whole pipeline, so all three being over their
+  // per-minute cap at once is normal. What is NOT normal is losing the run's
+  // material to it — and a 2s pause never recovered any, because the free tier's
+  // budget is a rolling minute: three keys over budget now are still over budget
+  // two seconds later. Measured over 48h, this function's runs kept ending on
+  // `HTTP 429 (round 2)` with analyzed < dedup, i.e. sites found and thrown away.
+  const BACKOFF_MS = [0, 5_000, 20_000];
+  for (let round = 0; round < BACKOFF_MS.length; round++) {
+    if (round) await new Promise(r => setTimeout(r, BACKOFF_MS[round]));
     for (let i = 0; i < n; i++) {
       const idx = (groqKeyIdx + i) % n;
       try {
