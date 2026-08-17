@@ -190,8 +190,15 @@ async function groqChat(user: string, itemCount: number): Promise<string | null>
     response_format: { type: 'json_object' },
   };
   let sawRateLimit = false;
-  for (let round = 0; round < 2; round++) {
-    if (round) await sleep(2000);
+  // The free tier's limit is a ROLLING minute, so a 2s pause between rounds was
+  // theatre: if all three keys are over budget now, they are still over budget
+  // two seconds later. Measured over 48h: every one of these functions ended its
+  // last run on `HTTP 429 (round 2)` with material already paid for — twenty
+  // DDG results fetched, zero analysed. The ladder below spends up to 25s of
+  // wall clock to save that material, which is the cheapest trade in the system.
+  const BACKOFF_MS = [0, 5_000, 20_000];
+  for (let round = 0; round < BACKOFF_MS.length; round++) {
+    if (round) await sleep(BACKOFF_MS[round]);
     for (let i = 0; i < n; i++) {
       const idx = (groqKeyIdx + i) % n;
       try {
