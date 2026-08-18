@@ -156,6 +156,9 @@ jobs:
           echo "── T1. is anything running AT ALL right now ────────────────"
           q "SELECT service, count(*) AS lines_24h, count(*) FILTER (WHERE level <> 'info') AS bad, max(created_at) AS last_seen FROM public.error_log WHERE created_at > now() - interval '24 hours' GROUP BY 1 ORDER BY last_seen DESC;"
           echo; echo
+          echo "── T1b. did the model fallback take, and which model answered ─"
+          q "SELECT service, left(message,200) AS message, created_at FROM public.error_log WHERE created_at > now() - interval '2 hours' AND (message LIKE '%model%' OR message LIKE '%analyzed=%') ORDER BY created_at DESC LIMIT 12;"
+          echo; echo
           echo "── T2. last 15 lines of anything, newest first ──────────────"
           q "SELECT service, level, left(message,150) AS message, created_at FROM public.error_log ORDER BY created_at DESC LIMIT 15;"
           echo; echo
