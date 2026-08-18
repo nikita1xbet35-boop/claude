@@ -2953,9 +2953,19 @@
 // every network. The worker forwards it on. Opening index.html straight off the
 // filesystem has no worker, so that case keeps the direct URL.
 const SUPABASE_DIRECT = 'https://lxsyrserfuighwxuymgb.supabase.co';
-const SUPABASE_URL  = location.protocol.startsWith('http')
-  ? location.origin + '/db'
-  : SUPABASE_DIRECT;
+// ?direct=1 talks to Supabase straight from the browser, ?direct=0 forces the
+// proxy, and the choice is remembered. Which of the two routes is faster is a
+// property of the visitor's network, not something that can be decided here —
+// from one country the proxy is the only one that works, from another the
+// direct hop is a round trip shorter. This makes it measurable instead of
+// guessed: open the page both ways and keep whichever loads.
+const _directParam = new URLSearchParams(location.search).get('direct');
+if (_directParam !== null) { try { localStorage.setItem('db_direct', _directParam); } catch(_){} }
+let _useDirect = false;
+try { _useDirect = (localStorage.getItem('db_direct') || '0') === '1'; } catch(_){}
+const SUPABASE_URL  = (!location.protocol.startsWith('http') || _useDirect)
+  ? SUPABASE_DIRECT
+  : location.origin + '/db';
 const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 const GROQ_API_KEY = ['gsk_fFeymSY6J6SrLPZRyXX3WGd', 'yb3FYobOMV2q3vZ2p4PRNwSmsWRnA'].join('');  // ⚠️ перенести в edge function
@@ -3125,24 +3135,57 @@ async function loadLeads(){
   showGlobalLoading(true);
   // Supabase caps a single request at 1000 rows — page through with .range()
   // so the "Все" view shows every lead, not just the first 1000.
+  //
+  // Rendered PROGRESSIVELY, page by page. This used to await every page before
+  // drawing anything, which on a fast connection looked instant and on a slow
+  // one looked broken: 8500+ leads is nine sequential round trips carrying every
+  // column of every row, and until the last one landed the screen showed zeroes
+  // with no way to tell loading from empty. Reported from a Russian IP as "very
+  // slow, database does not load, everything reads zero" while the same build
+  // was instant from Amsterdam.
+  //
+  // Now the first page paints immediately and the rest flow in behind it. Same
+  // total bytes, but the dashboard is usable from the first second — and if the
+  // connection dies at page four, four pages of leads are on screen instead of
+  // nothing.
   const PAGE = 1000;
-  let all = [], from = 0, error = null;
+  let all = [], from = 0, error = null, pages = 0;
+
+  const paint = () => {
+    leads = all;
+    renderLeads(curFilter);
+    updateBadge();
+    populateGeoFilter();
+    if(document.getElementById('page-dashboard')?.classList.contains('active')) _renderDashboard();
+    if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
+  };
+
   while(true){
     const {data, error: e} = await sb.from('leads').select('*')
       .order('created_at', {ascending: false}).range(from, from + PAGE - 1);
     if(e){ error = e; break; }
     all = all.concat(data || []);
+    pages++;
+    // Paint the first page at once, then every other page — a redraw per page
+    // would spend on rendering what we just saved on waiting.
+    if(pages === 1 || pages % 2 === 0) paint();
     if(!data || data.length < PAGE) break;
     from += PAGE;
   }
   showGlobalLoading(false);
-  if(error){ showError('Ошибка загрузки: ' + error.message); return; }
-  leads = all;
-  renderLeads(curFilter);
-  updateBadge();
-  populateGeoFilter();
-  if(document.getElementById('page-dashboard')?.classList.contains('active')) _renderDashboard();
-  if(document.getElementById('page-gmail')?.classList.contains('active')) renderGmailLeads();
+
+  // A mid-flight failure keeps whatever arrived: partial data beats an empty
+  // screen, as long as the screen says so.
+  if(error){
+    if(all.length){
+      paint();
+      showError('Загружено ' + all.length + ' лидов, дальше связь оборвалась: ' + error.message);
+    } else {
+      showError('Ошибка загрузки: ' + error.message);
+    }
+    return;
+  }
+  paint();
 }
 
 // ══════════════════════════════════════════
