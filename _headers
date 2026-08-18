@@ -1,5 +1,16 @@
 /index.html
-  Cache-Control: no-cache, no-store, must-revalidate
+  Cache-Control: no-cache
 
 /
-  Cache-Control: no-cache, no-store, must-revalidate
+  Cache-Control: no-cache
+
+# `no-cache` means "revalidate before use", NOT "do not store". The browser
+# still keeps the file and asks with an ETag; an unchanged page comes back as a
+# 304 with no body. The previous value added `no-store, must-revalidate`, which
+# forbids keeping it at all — so every single open re-downloaded the whole
+# 827 KB page (~179 KB gzipped). On a fast link that is invisible; on a
+# degraded one it is most of the wait before anything appears on screen.
+# Freshness after a deploy is unaffected: the ETag changes, so does the page.
+
+/vendor/*
+  Cache-Control: public, max-age=86400
