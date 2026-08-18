@@ -465,6 +465,28 @@ async function gate(request, env) {
 
 export default {
   async fetch(request, env, ctx) {
+    // Serving the dashboard is this worker's one indispensable job. Anything
+    // added around it — proxies, gates, webhooks — is a convenience, and a
+    // convenience that throws must not take the site down with it. With
+    // run_worker_first the worker sees every request, so an unhandled error
+    // here is a blank page for everyone, from every network.
+    try {
+      return await handleRequest(request, env, ctx);
+    } catch (e) {
+      console.error('fetch handler failed, falling back to assets:', e);
+      try { return await env.ASSETS.fetch(request); }
+      catch (_) { return new Response('Service temporarily unavailable', { status: 503 }); }
+    }
+  },
+
+  async scheduled(event, env, ctx) {
+    return scheduledHandler(event, env, ctx);
+  },
+};
+
+// The real request handler. Wrapped by the export above so that a failure in
+// any of the conveniences below still falls back to serving the dashboard.
+async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
 
     // Telegram webhook endpoint
@@ -507,6 +529,13 @@ export default {
         { cf: { cacheEverything: true, cacheTtl: 86400 } },
       );
       if (!upstream.ok) return new Response('// upstream CDN unavailable', { status: 502 });
+      // Never pass off an error page as a script. A 200 carrying HTML is worse
+      // than a clean failure: the browser accepts it, fails to parse it, and no
+      // fallback ever fires because nothing reported an error.
+      const ct = upstream.headers.get('content-type') || '';
+      if (!/javascript|ecmascript|text\/plain/i.test(ct)) {
+        return new Response('// upstream returned ' + (ct || 'no content-type'), { status: 502 });
+      }
       return new Response(upstream.body, {
         status: 200,
         headers: {
@@ -560,9 +589,9 @@ export default {
       return res;
     }
     return assetRes;
-  },
+}
 
-  async scheduled(event, env, ctx) {
+async function scheduledHandler(event, env, ctx) {
     const SUPABASE_URL  = env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
     const SUPABASE_KEY  = env.SUPABASE_ANON_KEY || DEFAULT_ANON_KEY;
     const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
@@ -708,5 +737,5 @@ export default {
       ]);
       return;
     }
-  },
-};
+}
+
