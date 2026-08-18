@@ -2934,13 +2934,29 @@
 
 <div class="copy-toast" id="copy-toast">Скопировано в буфер</div>
 
-<!-- Served through our own worker (/vendor/supabase.js), not straight from the
-     CDN. From some networks cdn.jsdelivr.net does not resolve, and then this
-     script never defines `supabase` — the page renders its full layout and
-     every table stays empty, because the first line of app code throws. The
-     CDN stays as a fallback for the case where the worker route is missing. -->
-<script src="/vendor/supabase.js"
-        onerror="this.onerror=null;var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';document.head.appendChild(s);"></script>
+<!-- The CDN is the primary again, with our worker as the fallback — NOT the
+     other way round, which is what broke the page for everyone.
+     A worker route that answers 200 with something that is not JavaScript (an
+     error page, an HTML redirect) does not fire onerror: the browser loads it,
+     fails to parse it, `supabase` is never defined, and the page dies silently
+     with no fallback attempted. The CDN either serves the library or fails
+     outright, and an outright failure is recoverable. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"
+        onerror="this.onerror=null;var s=document.createElement('script');s.src='/vendor/supabase.js';document.head.appendChild(s);"></script>
+<script>
+// Last resort: if neither source defined `supabase`, say so on screen. Every
+// query in this page goes through that global, so without it the dashboard can
+// only render zeroes — and a blank dashboard that explains itself is worth a
+// great deal more than one that does not.
+window.addEventListener('DOMContentLoaded', function () {
+  if (typeof supabase !== 'undefined') return;
+  document.body.insertAdjacentHTML('afterbegin',
+    '<div style="background:#b3261e;color:#fff;padding:14px 18px;font:14px/1.4 system-ui;position:sticky;top:0;z-index:9999">'
+    + 'Не загрузилась библиотека для работы с базой (cdn.jsdelivr.net и запасной путь оба недоступны). '
+    + 'Данные показать невозможно — это сетевая проблема, а не пустая база. Попробуйте обновить страницу или сменить сеть.'
+    + '</div>');
+});
+</script>
 <script>
 // ══════════════════════════════════════════
 //  КОНФИГ — вставь свои данные сюда
@@ -2959,10 +2975,15 @@ const SUPABASE_DIRECT = 'https://lxsyrserfuighwxuymgb.supabase.co';
 // from one country the proxy is the only one that works, from another the
 // direct hop is a round trip shorter. This makes it measurable instead of
 // guessed: open the page both ways and keep whichever loads.
+// DEFAULT IS DIRECT. The proxy is opt-in via ?direct=0, not the other way
+// round: routing everyone through an untested path to fix one network is how
+// the dashboard ended up broken from every IP at once. Direct is the
+// configuration that has worked all along; the proxy is there for the network
+// where it does not.
 const _directParam = new URLSearchParams(location.search).get('direct');
 if (_directParam !== null) { try { localStorage.setItem('db_direct', _directParam); } catch(_){} }
-let _useDirect = false;
-try { _useDirect = (localStorage.getItem('db_direct') || '0') === '1'; } catch(_){}
+let _useDirect = true;
+try { _useDirect = (localStorage.getItem('db_direct') || '1') === '1'; } catch(_){}
 const SUPABASE_URL  = (!location.protocol.startsWith('http') || _useDirect)
   ? SUPABASE_DIRECT
   : location.origin + '/db';
