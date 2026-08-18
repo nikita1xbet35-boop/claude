@@ -271,7 +271,7 @@ function buildBrandEmail(lead: Record<string, unknown>): { subject: string; body
 
   if (uz) {
     const subjects = [
-      `Saytingiz haqida qisqa savol`,
+      `${site} haqida qisqa savol`,
       `${keyword} bo'yicha o'rningizni ko'rdim`,
       `${site} - 5 daqiqaga arziydigan hamkorlik`,
     ];
@@ -288,7 +288,7 @@ function buildBrandEmail(lead: Record<string, unknown>): { subject: string; body
   }
 
   const subjects = [
-    `Quick one about your site`,
+    `Quick one about ${site}`,
     `Saw your ranking for ${keyword}`,
     `${site} - a partnership worth 5 minutes`,
   ];
