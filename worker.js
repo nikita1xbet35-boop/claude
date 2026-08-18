@@ -406,6 +406,17 @@ function loginPage(error, blocked) {
 </body></html>`;
 }
 
+// CORS for the /db proxy. Same-origin in normal use, so this is mostly a
+// formality — but supabase-js sends apikey/authorization/prefer as custom
+// headers, and a browser will not replay those without an explicit allow list.
+const proxyCors = request => ({
+  'Access-Control-Allow-Origin': request.headers.get('Origin') || '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS, HEAD',
+  'Access-Control-Allow-Headers':
+    'authorization, apikey, content-type, prefer, range, x-client-info, accept-profile, content-profile',
+  'Access-Control-Max-Age': '86400',
+});
+
 const htmlResponse = (body, status) =>
   new Response(body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 
@@ -471,6 +482,73 @@ export default {
     // to allow the request through. No-op until DASHBOARD_PASSWORD is set.
     const gated = await gate(request, env);
     if (gated) return gated;
+
+    // ── Same-origin proxies ──────────────────────────────────────────────────
+    // The dashboard used to load its library from cdn.jsdelivr.net and talk to
+    // *.supabase.co directly from the browser. Both are third-party hosts, and
+    // from some networks one or the other simply does not resolve — the page
+    // then renders its whole layout with every table empty, because the script
+    // dies on the first line that touches an unreachable host. Reported from a
+    // Russian IP: page fine, pipeline blank.
+    //
+    // This worker is served from a host the browser has already reached — it
+    // fetched this very page from it. So both dependencies now travel through
+    // it. The hop to jsDelivr and Supabase happens from Cloudflare's network
+    // rather than from the visitor's, which is exactly the part that was
+    // failing.
+    //
+    // No credentials are injected here: the browser sends its own apikey /
+    // Authorization headers, the same anon key that already ships in the page.
+    // The proxy is transport, not an authority — it cannot grant access the
+    // caller did not already have, and it sits BEHIND the password gate above.
+    if (url.pathname === '/vendor/supabase.js') {
+      const upstream = await fetch(
+        'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
+        { cf: { cacheEverything: true, cacheTtl: 86400 } },
+      );
+      if (!upstream.ok) return new Response('// upstream CDN unavailable', { status: 502 });
+      return new Response(upstream.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/javascript; charset=utf-8',
+          'Cache-Control': 'public, max-age=86400',
+        },
+      });
+    }
+
+    if (url.pathname === '/db' || url.pathname.startsWith('/db/')) {
+      const target = (env.SUPABASE_URL || DEFAULT_SUPABASE_URL)
+        + url.pathname.slice('/db'.length) + url.search;
+
+      // Preflight never reaches Supabase — answer it here, or the browser
+      // refuses the real request and the table stays empty for a second reason.
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: proxyCors(request) });
+      }
+
+      // Hop-by-hop and Cloudflare-added headers must not be replayed upstream.
+      const fwd = new Headers();
+      for (const [k, v] of request.headers) {
+        const lk = k.toLowerCase();
+        if (lk === 'host' || lk === 'origin' || lk === 'referer' || lk === 'cookie') continue;
+        if (lk.startsWith('cf-') || lk.startsWith('x-forwarded-')) continue;
+        fwd.set(k, v);
+      }
+
+      const upstream = await fetch(target, {
+        method: request.method,
+        headers: fwd,
+        body: (request.method === 'GET' || request.method === 'HEAD') ? undefined : request.body,
+        redirect: 'follow',
+      });
+
+      const out = new Response(upstream.body, upstream);
+      for (const [k, v] of Object.entries(proxyCors(request))) out.headers.set(k, v);
+      // PostgREST paginates through this one; without it the client cannot
+      // tell a short page from the end of the table.
+      out.headers.set('Access-Control-Expose-Headers', 'content-range, content-length');
+      return out;
+    }
 
     const assetRes = await env.ASSETS.fetch(request);
 

@@ -2934,7 +2934,13 @@
 
 <div class="copy-toast" id="copy-toast">Скопировано в буфер</div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<!-- Served through our own worker (/vendor/supabase.js), not straight from the
+     CDN. From some networks cdn.jsdelivr.net does not resolve, and then this
+     script never defines `supabase` — the page renders its full layout and
+     every table stays empty, because the first line of app code throws. The
+     CDN stays as a fallback for the case where the worker route is missing. -->
+<script src="/vendor/supabase.js"
+        onerror="this.onerror=null;var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';document.head.appendChild(s);"></script>
 <script>
 // ══════════════════════════════════════════
 //  КОНФИГ — вставь свои данные сюда
@@ -2942,7 +2948,14 @@
 // ⚠️ БЕЗОПАСНОСТЬ: SUPABASE_KEY (anon) можно держать в клиенте — он защищён RLS.
 // GROQ_API_KEY и SERP_API_KEY — приватные ключи! Перенеси вызовы Groq в Supabase Edge Function,
 // а SERP_API_KEY убери из фронтенда. Пока не сделано — не публикуй сайт публично.
-const SUPABASE_URL  = 'https://lxsyrserfuighwxuymgb.supabase.co';
+// Same-origin by default: the browser has already reached this host to load the
+// page, so /db is guaranteed to be reachable, while *.supabase.co is not from
+// every network. The worker forwards it on. Opening index.html straight off the
+// filesystem has no worker, so that case keeps the direct URL.
+const SUPABASE_DIRECT = 'https://lxsyrserfuighwxuymgb.supabase.co';
+const SUPABASE_URL  = location.protocol.startsWith('http')
+  ? location.origin + '/db'
+  : SUPABASE_DIRECT;
 const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 const GROQ_API_KEY = ['gsk_fFeymSY6J6SrLPZRyXX3WGd', 'yb3FYobOMV2q3vZ2p4PRNwSmsWRnA'].join('');  // ⚠️ перенести в edge function
