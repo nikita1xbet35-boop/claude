@@ -153,6 +153,18 @@ jobs:
           echo "── R9. errors worth seeing (48h, non-info) ─────────────────"
           q "SELECT service, level, left(message,150) AS message, count(*) AS n, max(created_at) AS last FROM public.error_log WHERE level <> 'info' AND created_at > now() - interval '48 hours' GROUP BY 1,2,3 ORDER BY n DESC LIMIT 12;"
           echo; echo
+          echo "── T1. is anything running AT ALL right now ────────────────"
+          q "SELECT service, count(*) AS lines_24h, count(*) FILTER (WHERE level <> 'info') AS bad, max(created_at) AS last_seen FROM public.error_log WHERE created_at > now() - interval '24 hours' GROUP BY 1 ORDER BY last_seen DESC;"
+          echo; echo
+          echo "── T2. last 15 lines of anything, newest first ──────────────"
+          q "SELECT service, level, left(message,150) AS message, created_at FROM public.error_log ORDER BY created_at DESC LIMIT 15;"
+          echo; echo
+          echo "── T3. queue + leads state right now ───────────────────────"
+          q "SELECT (SELECT count(*) FROM public.send_queue WHERE status='pending') AS pending_all, (SELECT count(*) FROM public.send_queue WHERE status='pending' AND pipeline='brand') AS pending_brand, (SELECT count(*) FROM public.send_queue WHERE status='pending' AND scheduled_at < now()) AS overdue, (SELECT count(*) FROM public.leads WHERE created_at > now() - interval '24 hours') AS leads_24h, (SELECT count(*) FROM public.email_log WHERE sent_at > now() - interval '24 hours') AS sent_24h;"
+          echo; echo
+          echo "── T4. did migration 033 flag more than it should ──────────"
+          q "SELECT count(*) FILTER (WHERE suspected_official) AS flagged, count(*) FILTER (WHERE exclude_reason IS NOT NULL) AS excluded, count(*) AS total FROM public.leads WHERE pipeline='brand';"
+          echo; echo
           echo "── R11. brand queue: why so few eligible ───────────────────"
           q "SELECT count(*) AS not_yet_mailed, count(*) FILTER (WHERE stage NOT IN ('new','ready','researched','followup')) AS wrong_stage, count(*) FILTER (WHERE suspected_official) AS flagged_official, count(*) FILTER (WHERE email_status IN ('invalid','disposable')) AS bad_status, count(*) FILTER (WHERE contact_email IN (SELECT email FROM public.email_log)) AS addr_already_mailed, count(*) FILTER (WHERE contact_email IN (SELECT email FROM public.suppression_list)) AS suppressed FROM public.leads WHERE pipeline='brand' AND contact_email IS NOT NULL AND contact_email <> '' AND exclude_reason IS NULL AND id NOT IN (SELECT lead_id FROM public.email_log WHERE lead_id IS NOT NULL);"
           echo; echo
