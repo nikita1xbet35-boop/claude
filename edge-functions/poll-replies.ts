@@ -35,6 +35,31 @@ const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
 const TG_TOKEN     = Deno.env.get('ALERTS_BOT_TOKEN') || '';
 const TG_CHAT      = Deno.env.get('ALERTS_CHAT_ID') || '';
 
+// ── Model selection ─────────────────────────────────────────────────────────
+// Groq decommissioned llama-3.1-8b-instant without warning and every call
+// started coming back `HTTP 404: The model does not exist or you do not have
+// access to it`. Seven functions named that model as a string literal, so the
+// whole system went to zero in one step: search still found sites, DuckDuckGo
+// was healthy, and not one candidate could be judged.
+//
+// A single hardcoded model is therefore a single point of failure owned by
+// somebody else. This is a list: on a "model is gone" answer we advance to the
+// next one and keep going, and the surviving model's name goes into the run log
+// so the swap is visible rather than silent.
+const GROQ_MODELS = [
+  'llama-3.3-70b-versatile',   // current default
+  'openai/gpt-oss-20b',
+  'gemma2-9b-it',
+  'llama-3.1-8b-instant',      // the retired one, kept last in case access returns
+];
+let groqModelIdx = 0;
+const groqModel = () => GROQ_MODELS[groqModelIdx];
+/** Does this failure mean the model itself is gone (as opposed to a bad request)? */
+function groqModelGone(status: number, text: string): boolean {
+  return (status === 404 || status === 400)
+    && /does not exist|decommissioned|model[_ ]not[_ ]found|has been deprecated/i.test(text);
+}
+
 const GROQ_KEYS = [
   Deno.env.get('GROQ_API_KEY') || '',
   Deno.env.get('GROQ_KEY_2')   || '',
@@ -278,13 +303,23 @@ async function groqChat(system: string, user: string): Promise<string> {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
         body: JSON.stringify({
-          model: 'llama-3.1-8b-instant',
+          model: groqModel(),
           temperature: 0,
           response_format: { type: 'json_object' },
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         }),
       });
       if (r.status === 429 || r.status >= 500) continue;   // rotate to next key
+      if (!r.ok) {
+        // Model retired under us — rotating keys cannot help, so step down the
+        // model list and retry with the same key.
+        const errText = await r.text().catch(() => '');
+        if (groqModelGone(r.status, errText) && groqModelIdx < GROQ_MODELS.length - 1) {
+          groqModelIdx++; i--;
+          continue;
+        }
+        continue;
+      }
       const j = await r.json();
       const txt = j?.choices?.[0]?.message?.content;
       if (txt) return txt;

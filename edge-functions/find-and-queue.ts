@@ -38,6 +38,31 @@ const SERP_KW_PER_RUN = 1;
 // the env var (with the legacy hardcoded fallback); keys #2/#3 come from secrets
 // GROQ_KEY_2 / GROQ_KEY_3. On a 429 the call retries on the next key rather than
 // skipping analysis, which is what capped how many found sites got saved.
+// ── Model selection ─────────────────────────────────────────────────────────
+// Groq decommissioned llama-3.1-8b-instant without warning and every call
+// started coming back `HTTP 404: The model does not exist or you do not have
+// access to it`. Seven functions named that model as a string literal, so the
+// whole system went to zero in one step: search still found sites, DuckDuckGo
+// was healthy, and not one candidate could be judged.
+//
+// A single hardcoded model is therefore a single point of failure owned by
+// somebody else. This is a list: on a "model is gone" answer we advance to the
+// next one and keep going, and the surviving model's name goes into the run log
+// so the swap is visible rather than silent.
+const GROQ_MODELS = [
+  'llama-3.3-70b-versatile',   // current default
+  'openai/gpt-oss-20b',
+  'gemma2-9b-it',
+  'llama-3.1-8b-instant',      // the retired one, kept last in case access returns
+];
+let groqModelIdx = 0;
+const groqModel = () => GROQ_MODELS[groqModelIdx];
+/** Does this failure mean the model itself is gone (as opposed to a bad request)? */
+function groqModelGone(status: number, text: string): boolean {
+  return (status === 404 || status === 400)
+    && /does not exist|decommissioned|model[_ ]not[_ ]found|has been deprecated/i.test(text);
+}
+
 const GROQ_KEYS = [
   Deno.env.get('GROQ_API_KEY') ||
     ['gsk_9DKnaMxmKm8WEPDDjtZbWGdyb3FYX', 'R6kIEWkpNsjz6BlDlvj347v'].join(''),
@@ -899,6 +924,9 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
       const idx = (groqKeyIdx + i) % n;
       try {
         groqCount++;
+        // The model list can advance mid-run (see GROQ_MODELS), so stamp the
+        // current choice onto the body at call time rather than at build time.
+        (body as Record<string, unknown>).model = groqModel();
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
@@ -912,7 +940,15 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
           continue;
         }
         if (!res.ok) {
-          groqLastError = `HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`;
+          const errText = await res.text().catch(() => '');
+          // The model was retired under us. Every key will say the same thing,
+          // so rotating them is pointless — move down GROQ_MODELS and retry.
+          if (groqModelGone(res.status, errText) && groqModelIdx < GROQ_MODELS.length - 1) {
+            groqModelIdx++;
+            groqLastError = `model retired, switched to ${groqModel()}`;
+            continue;
+          }
+          groqLastError = `HTTP ${res.status}: ${errText.slice(0, 120)}`;
           return null; // a real error (bad request/auth) — next key won't help
         }
         const d = await res.json();
@@ -1017,7 +1053,7 @@ RULES for "priority":
 
   try {
     const raw = await groqChat({
-      model: 'llama-3.1-8b-instant',
+      model: groqModel(),
       messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
       temperature: 0.1,
       max_tokens: 130 * cands.length + 100,
@@ -1832,6 +1868,9 @@ Deno.serve(async (req: Request) => {
         + `found=${stats.found} analyzed=${stats.analyzed} `
         + `irrelevant=${stats.irrelevant} not_owner=${stats.not_audience_owner} competitors=${stats.competitors} geo_excl=${stats.geo_excluded} `
         + `saved=${stats.saved} contacts=${stats.contacts} groqCalls=${groqCount}`
+        // Which model actually answered. When Groq retires one, the fallback is
+        // silent otherwise — and silent is exactly how the last outage read.
+        + (groqModelIdx ? ` model=${groqModel()}` : '')
         + ((stats as any).serp ? ` serp=${(stats as any).serp}(${(stats as any).serp_acct})` : '')
         + ((stats as any).serp_fallback ? ` serpFallback=${(stats as any).serp_fallback}(${(stats as any).serp_acct})` : '')
         + (groqLastError ? ` groqErr="${groqLastError}"` : '')

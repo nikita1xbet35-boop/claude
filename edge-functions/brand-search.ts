@@ -45,6 +45,31 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+// ── Model selection ─────────────────────────────────────────────────────────
+// Groq decommissioned llama-3.1-8b-instant without warning and every call
+// started coming back `HTTP 404: The model does not exist or you do not have
+// access to it`. Seven functions named that model as a string literal, so the
+// whole system went to zero in one step: search still found sites, DuckDuckGo
+// was healthy, and not one candidate could be judged.
+//
+// A single hardcoded model is therefore a single point of failure owned by
+// somebody else. This is a list: on a "model is gone" answer we advance to the
+// next one and keep going, and the surviving model's name goes into the run log
+// so the swap is visible rather than silent.
+const GROQ_MODELS = [
+  'llama-3.3-70b-versatile',   // current default
+  'openai/gpt-oss-20b',
+  'gemma2-9b-it',
+  'llama-3.1-8b-instant',      // the retired one, kept last in case access returns
+];
+let groqModelIdx = 0;
+const groqModel = () => GROQ_MODELS[groqModelIdx];
+/** Does this failure mean the model itself is gone (as opposed to a bad request)? */
+function groqModelGone(status: number, text: string): boolean {
+  return (status === 404 || status === 400)
+    && /does not exist|decommissioned|model[_ ]not[_ ]found|has been deprecated/i.test(text);
+}
+
 const GROQ_KEYS = [
   Deno.env.get('GROQ_API_KEY') || '',
   Deno.env.get('GROQ_KEY_2')   || '',
@@ -324,7 +349,7 @@ async function groqChat(user: string, itemCount: number): Promise<string | null>
   const n = GROQ_KEYS.length;
   if (!n) { groqLastError = 'no GROQ key configured'; return null; }
   const body = {
-    model: 'llama-3.1-8b-instant',
+    model: groqModel(),
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: user },
@@ -354,6 +379,9 @@ async function groqChat(user: string, itemCount: number): Promise<string | null>
       const idx = (groqKeyIdx + i) % n;
       try {
         groqCount++;
+        // The model list can advance mid-run (see GROQ_MODELS), so stamp the
+        // current choice onto the body at call time rather than at build time.
+        (body as Record<string, unknown>).model = groqModel();
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEYS[idx] },
@@ -366,7 +394,15 @@ async function groqChat(user: string, itemCount: number): Promise<string | null>
           continue;
         }
         if (!res.ok) {
-          groqLastError = `HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`;
+          const errText = await res.text().catch(() => '');
+          // The model was retired under us. Every key will say the same thing,
+          // so rotating them is pointless — move down GROQ_MODELS and retry.
+          if (groqModelGone(res.status, errText) && groqModelIdx < GROQ_MODELS.length - 1) {
+            groqModelIdx++;
+            groqLastError = `model retired, switched to ${groqModel()}`;
+            continue;
+          }
+          groqLastError = `HTTP ${res.status}: ${errText.slice(0, 150)}`;
           return null;
         }
         const d = await res.json();
@@ -679,6 +715,8 @@ Deno.serve(async (req: Request) => {
       message: `kw=${stats.keywords_run} found=${stats.found} official=${stats.official_blocked} `
         + `dedup=${stats.dedup} analyzed=${stats.analyzed} operators=${stats.operators} `
         + `saved=${stats.saved} occupied=${stats.occupied} groqCalls=${groqCount} `
+        // Which model actually answered — the fallback is silent otherwise.
+        + (groqModelIdx ? `model=${groqModel()} ` : '')
         + (groqLastError ? `groqErr="${groqLastError}" ` : '')
         + stats.reason,
     }]));
