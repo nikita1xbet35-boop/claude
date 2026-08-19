@@ -64,8 +64,7 @@ function groqModelGone(status: number, text: string): boolean {
 }
 
 const GROQ_KEYS = [
-  Deno.env.get('GROQ_API_KEY') ||
-    ['gsk_9DKnaMxmKm8WEPDDjtZbWGdyb3FYX', 'R6kIEWkpNsjz6BlDlvj347v'].join(''),
+  Deno.env.get('GROQ_API_KEY') || '',
   Deno.env.get('GROQ_KEY_2') || '',
   Deno.env.get('GROQ_KEY_3') || '',
 ].filter(Boolean);
