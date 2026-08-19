@@ -46,6 +46,86 @@ function isGMT3Midnight(now: Date): boolean {
   return gmt3.getUTCHours() === 0 && gmt3.getUTCMinutes() < 31;
 }
 
+/** Funnel thresholds (v9 block A).
+ *
+ *  Each check names a DIFFERENT repair, which is the whole point — before this,
+ *  every one of these conditions surfaced as the same symptom ("volume is down")
+ *  and the cause had to be guessed at:
+ *
+ *    search engine degrading  → back off, rotate, wait it out
+ *    LLM rate-limited         → more keys / bigger spacing
+ *    pipeline stalled         → something crashed or the scheduler stopped
+ *    SERP exhausted           → new keywords and geos, nothing else will help
+ *    contacts not extracted   → the problem is downstream of the search entirely
+ *
+ *  Alerts are deliberately not deduplicated here: check-limits runs every 15
+ *  minutes, so a persisting problem repeats four times an hour. That is
+ *  intentional for a system whose failures are otherwise silent.
+ */
+async function checkFunnel(): Promise<any[]> {
+  const out: any[] = [];
+  try {
+    const { data: rows } = await supabase.from('funnel_24h').select('*');
+    if (!rows?.length) return out;
+
+    for (const r of rows) {
+      const p = String(r.pipeline);
+
+      // Soft ban on the search source: normal is 10-12 results per keyword.
+      if (Number(r.keywords_used) >= 10 && Number(r.avg_urls_per_keyword) < 5) {
+        await sendAlert('warning', 'funnel',
+          `${p}: поисковик деградирует — ${r.avg_urls_per_keyword} результатов на ключ (норма 10-12). Похоже на мягкий бан.`);
+        out.push({ service: 'funnel', pipeline: p, action: 'search_degraded' });
+      }
+
+      // Rate limit wall. Counted per 24h, so 10+ is a wall and not a blip.
+      if (Number(r.llm_429) > 10) {
+        await sendAlert('warning', 'funnel',
+          `${p}: упёрлись в лимиты LLM — ${r.llm_429} ответов 429 за сутки. Нужны ключи или пауза между вызовами.`);
+        out.push({ service: 'funnel', pipeline: p, action: 'llm_throttled' });
+      }
+
+      // Ran, but produced nothing. Distinct from not running at all, which is
+      // the missing-row case checked below.
+      if (Number(r.runs) >= 3 && Number(r.leads_created) === 0) {
+        await sendAlert('critical', 'funnel',
+          `${p}: пайплайн встал — ${r.runs} прогонов за сутки, ноль лидов. Найдено URL: ${r.urls_returned}, новых после дедупа: ${r.urls_after_dedup}.`);
+        out.push({ service: 'funnel', pipeline: p, action: 'stalled' });
+      }
+
+      // The SERP is picked clean. No amount of retrying fixes this one.
+      if (Number(r.urls_after_noise) >= 100 && Number(r.pct_new_urls) < 5) {
+        await sendAlert('warning', 'funnel',
+          `${p}: выдача исчерпана — только ${r.pct_new_urls}% найденных URL новые. Нужны новые ключи и ГЕО, ретраи не помогут.`);
+        out.push({ service: 'funnel', pipeline: p, action: 'serp_exhausted' });
+      }
+
+      // Sites are found and qualified, but no contact can be pulled out of them.
+      if (Number(r.passed_criteria) >= 20 && Number(r.pct_contacts) < 15) {
+        await sendAlert('warning', 'funnel',
+          `${p}: ломается извлечение контактов — ${r.pct_contacts}% (из ${r.passed_criteria} подходящих сайтов). Проблема не в поиске.`);
+        out.push({ service: 'funnel', pipeline: p, action: 'contacts_failing' });
+      }
+    }
+
+    // A pipeline with NO row at all did not run. That is a different failure
+    // from running badly, and the one most likely to go unnoticed, because
+    // nothing anywhere produces an error line when a stage simply stops.
+    const seen = new Set(rows.map((r: any) => String(r.pipeline)));
+    for (const p of ['search', 'brand']) {
+      if (!seen.has(p)) {
+        await sendAlert('critical', 'funnel',
+          `${p}: за сутки нет ни одного прогона. Пайплайн не запускается — проверь планировщик.`);
+        out.push({ service: 'funnel', pipeline: p, action: 'no_runs' });
+      }
+    }
+  } catch (e: any) {
+    // Never let the funnel check break the quota check it rides on.
+    out.push({ service: 'funnel', action: 'check_failed', error: String(e?.message || e) });
+  }
+  return out;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
@@ -143,6 +223,17 @@ Deno.serve(async (req: Request) => {
         results.push({ service: svc.service, action: 'warning_alert' });
       }
     }
+
+    // ── v9 block A: funnel alerts ──────────────────────────────────────────
+    // Hung off this function rather than a new one, because Cloudflare's free
+    // plan allows five cron triggers and all five are already spoken for. A
+    // sixth would not error — it would silently never fire, which is how a whole
+    // channel once went unnoticed for weeks.
+    //
+    // These thresholds answer "which stage is losing the volume", so each one
+    // names a different repair. A generic "pipeline is down" alert would not.
+    const funnelActions = await checkFunnel();
+    results.push(...funnelActions);
 
     return new Response(
       JSON.stringify({ success: true, checked: services?.length || 0, actions: results }),
