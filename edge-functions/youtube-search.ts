@@ -172,6 +172,13 @@ function scoreOf(c: Contacts): number {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
+  // Hoisted above the try so the telemetry in `finally` can still read them
+  // when the run throws — a crashed run is the one whose numbers matter most.
+  const startedAt = Date.now();
+  let saved = 0, updated = 0, processed = 0, skippedSubs = 0, skippedStale = 0, skippedBrand = 0;
+  let geosRun: string[] = [];
+  let runErr = '';
+  const perGeo: Record<string, number> = {};
   try {
     if (!YT_KEY) {
       return new Response(JSON.stringify({ success: false, error: 'YOUTUBE_API_KEY not configured' }),
@@ -217,9 +224,8 @@ Deno.serve(async (req: Request) => {
     const byUrl = new Map<string, any>();
     for (const r of (existing || [])) if (r.url) byUrl.set(r.url.toLowerCase(), r);
 
-    let saved = 0, updated = 0, processed = 0, skippedSubs = 0, skippedStale = 0, skippedBrand = 0;
-    const perGeo: Record<string, number> = {};
 
+    geosRun = geos;
     for (const geo of geos) {
       const q = pickQuery(geo, isCron);
       perGeo[geo] = 0;
@@ -325,10 +331,36 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ success: true, saved, updated, processed, skipped_subs: skippedSubs, skipped_stale: skippedStale, skipped_brand: skippedBrand, min_subs: minSubs, per_geo: perGeo }),
       { headers: { ...cors, 'Content-Type': 'application/json' } });
   } catch (e: any) {
+    runErr = String(e?.message || e);
     await supabase.from('error_log').insert([{
       level: 'warning', service: 'youtube-search', message: e.message,
     }]).catch(() => {});
     return new Response(JSON.stringify({ success: false, error: e.message }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
+
+  } finally {
+    // v9 block A. This branch was reported as "working badly" with no way to say
+    // in what way — whether the quota is spent, the queries are burned out, or
+    // contacts simply are not extractable. `processed` vs `saved` separates the
+    // first two from the third at a glance.
+    try {
+      await supabase.from('funnel_stats').insert([{
+        run_id:           crypto.randomUUID(),
+        pipeline:         'youtube',
+        started_at:       new Date(startedAt).toISOString(),
+        finished_at:      new Date().toISOString(),
+        duration_ms:      Date.now() - startedAt,
+        keywords_used:    geosRun.length,
+        urls_returned:    processed,
+        urls_after_noise: processed - skippedSubs - skippedBrand,
+        // Everything not already on file: `saved` are new rows, `updated` were
+        // known channels seen again. The second number IS the burn-out signal.
+        urls_after_dedup: saved,
+        leads_created:    saved,
+        notes: `geos=${geosRun.join(',')} updated=${updated} `
+          + `skipped_subs=${skippedSubs} skipped_stale=${skippedStale} skipped_brand=${skippedBrand}`
+          + (runErr ? ` | ${runErr}` : ''),
+      }]);
+    } catch { /* telemetry is best-effort */ }
   }
 });

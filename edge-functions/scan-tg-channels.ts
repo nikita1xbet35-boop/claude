@@ -527,6 +527,28 @@ Deno.serve(async (req: Request) => {
 
     return json(stats);
   } catch (e: any) {
+    stats.reason = stats.reason || String(e?.message || e);
     return json({ ...stats, error: String(e?.message || e) }, 500);
+
+  } finally {
+    // v9 block A. Telegram discovery stopped once and nobody noticed for a week,
+    // because "no new channels" and "the stage never ran" look identical from
+    // the outside. A row per run makes the second case visible as an absence.
+    await quiet(supabase.from('funnel_stats').insert([{
+      run_id:           crypto.randomUUID(),
+      pipeline:         'telegram',
+      started_at:       new Date(startedAt).toISOString(),
+      finished_at:      new Date().toISOString(),
+      duration_ms:      Date.now() - startedAt,
+      keywords_used:    stats.queries.length,
+      urls_returned:    stats.candidates,
+      urls_after_noise: stats.candidates,
+      // `fresh` is exactly the post-dedup count: channels not already on file.
+      urls_after_dedup: stats.fresh,
+      leads_created:    stats.inserted,
+      budget_exhausted: Date.now() - startedAt > DEADLINE_MS,
+      notes: `src=${stats.source} unscored=${stats.unscored} ran=${stats.ran}`
+        + (stats.reason ? ` | ${stats.reason}` : ''),
+    }]));
   }
 });

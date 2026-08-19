@@ -344,6 +344,11 @@ Return ONLY JSON shaped {"results":[...]}. No prose, no markdown.`;
 let groqKeyIdx = 0;
 let groqLastError = '';
 let groqCount = 0;
+// Split by cause: a 429 is capacity refused (retry with more keys), anything
+// else is the request being wrong (retrying cannot help). Counting them as one
+// number hid a rate-limit wall behind what looked like generic flakiness.
+let groq429Count = 0;
+let groqOtherErrCount = 0;
 
 async function groqChat(user: string, itemCount: number): Promise<string | null> {
   const n = GROQ_KEYS.length;
@@ -389,6 +394,7 @@ async function groqChat(user: string, itemCount: number): Promise<string | null>
           signal: AbortSignal.timeout(25_000),
         });
         if (res.status === 429 || res.status >= 500) {
+          if (res.status === 429) groq429Count++; else groqOtherErrCount++;
           groqLastError = `HTTP ${res.status} (key ${idx + 1}, round ${round + 1})`;
           res.body?.cancel().catch(() => {});
           continue;
@@ -475,6 +481,10 @@ Deno.serve(async (req: Request) => {
     keywords_run: 0, found: 0, official_blocked: 0, dedup: 0, skipped_platform: 0,
     analyzed: 0, operators: 0, irrelevant: 0, low_score: 0,
     saved: 0, occupied: 0, suspected: 0, reason: '',
+    // Candidates the model never returned a verdict on. Distinct from
+    // `irrelevant`, which is a verdict — this is the absence of one, and the two
+    // were indistinguishable while both simply failed to appear in the output.
+    llm_failed: 0,
   };
   const json = (s: unknown, code = 200) => new Response(JSON.stringify(s),
     { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -647,7 +657,10 @@ Deno.serve(async (req: Request) => {
       for (let j = 0; j < batch.length; j++) {
         const c = batch[j];
         const v = verdicts.get(j);
-        if (!v) continue;
+        // No verdict means the model never answered for this candidate — a
+        // silently dropped site, not a rejected one. Counted so the funnel can
+        // tell "the LLM said no" apart from "the LLM said nothing".
+        if (!v) { stats.llm_failed++; continue; }
         stats.analyzed++;
 
         // The operator's own site is the one thing this pipeline must never
@@ -726,6 +739,43 @@ Deno.serve(async (req: Request) => {
     await quiet(supabase.from('error_log').insert([{
       level: 'critical', service: 'brand-search', message: String(e?.message || e),
     }]));
+    stats.reason = stats.reason || String(e?.message || e);
     return json({ ...stats, error: String(e?.message || e) }, 500);
+
+  } finally {
+    // v9 block A. In `finally` so a run that died halfway still says how far it
+    // got — that is precisely the run worth looking at, and the exception alone
+    // never says which stage lost the volume.
+    //
+    // This pipeline already separated dedup from noise, so the two numbers the
+    // search pipeline was blind to are available here for free.
+    await quiet(supabase.from('funnel_stats').insert([{
+      run_id:           crypto.randomUUID(),
+      pipeline:         'brand',
+      started_at:       new Date(startedAt).toISOString(),
+      finished_at:      new Date().toISOString(),
+      duration_ms:      Date.now() - startedAt,
+      keywords_used:    stats.keywords_run,
+      urls_returned:    stats.found,
+      // Everything the platform/official filters did not reject.
+      urls_after_noise: Math.max(0, stats.found - stats.official_blocked - stats.skipped_platform),
+      // ...and was not already known. On a brand SERP this is the number that
+      // says whether the keyword pool still has anything left in it.
+      urls_after_dedup: Math.max(0, stats.found - stats.official_blocked - stats.skipped_platform - stats.dedup),
+      sent_to_llm:      stats.analyzed + stats.llm_failed,
+      llm_ok:           stats.analyzed,
+      llm_failed:       stats.llm_failed,
+      passed_criteria:  stats.saved + stats.occupied + stats.suspected,
+      leads_created:    stats.saved,
+      llm_429:          groq429Count,
+      llm_other_errors: groqOtherErrCount,
+      budget_exhausted: Date.now() - startedAt >= TIME_BUDGET_MS,
+      notes: `dedup=${stats.dedup} official=${stats.official_blocked} `
+        + `platform=${stats.skipped_platform} operators=${stats.operators} `
+        + `irrelevant=${stats.irrelevant} low_score=${stats.low_score} `
+        + `occupied=${stats.occupied} suspected=${stats.suspected}`
+        + (groqLastError ? ` groqErr="${groqLastError}"` : '')
+        + (stats.reason ? ` | ${stats.reason}` : ''),
+    }]));
   }
 });

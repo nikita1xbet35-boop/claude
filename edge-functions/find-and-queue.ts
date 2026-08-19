@@ -892,6 +892,11 @@ interface Analysis {
 
 let groqCount = 0;
 let groqLastError = '';
+// Counted separately from other failures: a 429 means the work was refused for
+// capacity and is worth retrying with more keys, while a 4xx means the request
+// itself was wrong. Lumping them together hid a rate-limit wall for weeks.
+let groq429Count = 0;
+let groqOtherErrCount = 0;
 
 // Round-robin cursor across GROQ_KEYS — spreads load so no single key hits its
 // per-minute cap. Advances every call and every 429.
@@ -935,6 +940,7 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
         });
         if (res.status === 429 || res.status >= 500) {
           // Rate-limited or transient on this key — immediately try the next one.
+          if (res.status === 429) groq429Count++; else groqOtherErrCount++;
           groqLastError = `HTTP ${res.status} (key ${idx + 1}, round ${round + 1})`;
           res.body?.cancel().catch(() => {});
           continue;
@@ -1355,6 +1361,27 @@ Deno.serve(async (req: Request) => {
     not_audience_owner: 0,
     saved: 0, contacts: 0, errors: [] as string[],
   };
+  // Funnel telemetry (v9 block A). The counters above answer "what did this run
+  // produce"; these answer "where did the volume go", which is a different
+  // question and the one that could not be answered at all before.
+  //
+  // The distinction that matters most: `dedup_dropped` vs `noise_dropped`. Both
+  // used to end in the same bare `continue`, so a run that found nothing because
+  // the SERP was exhausted looked EXACTLY like a run that found nothing because
+  // the results were junk — and those two call for opposite fixes (new keywords
+  // and geos vs better filters).
+  const fs = {
+    run_id: crypto.randomUUID(),
+    urls_after_noise: 0,   // survived the junk filters
+    urls_after_dedup: 0,   // ...and were not already known — the real yield
+    dedup_dropped:    0,
+    sent_to_llm:      0,
+    llm_ok:           0,
+    llm_failed:       0,
+    llm_429:          0,
+    contacts_tried:   0,
+    budget_exhausted: false,
+  };
   const startedAt = Date.now();
   const deadline  = startedAt + TIME_BUDGET_MS;
 
@@ -1698,9 +1725,15 @@ Deno.serve(async (req: Request) => {
         const domain = getDomain(url);
         const domNorm = normalizeDomain(url);
         if (!domain || seenThisRun.has(domNorm)) continue;
-        if (GLOBAL_SKIP.has(domain) || existingDomains.has(domNorm) || blacklistSet.has(domNorm) || blacklistSet.has(domain)) continue;
+        // Split what used to be one `continue`. Platforms and blacklist are
+        // noise; existingDomains is dedup. Counting them together made the two
+        // most important diagnoses indistinguishable from each other.
+        if (GLOBAL_SKIP.has(domain) || blacklistSet.has(domNorm) || blacklistSet.has(domain)) continue;
         if (isNoisyResult(url, result.title || '', result.snippet || '')) { stats.irrelevant++; continue; }
         if (isExcludedByTld(domain)) { stats.geo_excluded++; continue; }
+        fs.urls_after_noise++;
+        if (existingDomains.has(domNorm)) { fs.dedup_dropped++; continue; }
+        fs.urls_after_dedup++;
         let origin: string;
         try {
           origin = new URL(url.startsWith('http') ? url : 'https://' + url).origin;
@@ -1714,8 +1747,12 @@ Deno.serve(async (req: Request) => {
     let lastGroqCallMs = 0;
 
     for (let bi = 0; bi < candidates.length; bi += GROQ_BATCH_SIZE) {
-      if (Date.now() > deadline) break;
+      // Ran out of time with candidates still unprocessed. Worth recording as
+      // its own condition: it means the work was found and then thrown away,
+      // which calls for splitting the run, not for more keywords.
+      if (Date.now() > deadline) { fs.budget_exhausted = bi < candidates.length; break; }
       const batch = candidates.slice(bi, bi + GROQ_BATCH_SIZE);
+      fs.sent_to_llm += batch.length;
 
       // 4a. Pace, then analyze the whole batch in ONE Groq call
       const sinceLastGroq = Date.now() - lastGroqCallMs;
@@ -1733,8 +1770,9 @@ Deno.serve(async (req: Request) => {
         const analysis = analyses.get(i);
         // Groq MUST succeed — if it failed we skip the site rather than risk adding
         // operators/competitors that Groq would have caught.
-        if (!analysis) { stats.irrelevant++; return; }
+        if (!analysis) { stats.irrelevant++; fs.llm_failed++; return; }
         stats.analyzed++;
+        fs.llm_ok++;
         if (analysis.is_operator)     { stats.competitors++;        return; }
         if (analysis.geo_excluded)    { stats.geo_excluded++;       return; }
         if (!analysis.audience_owner) { stats.not_audience_owner++; return; }
@@ -1744,6 +1782,7 @@ Deno.serve(async (req: Request) => {
 
       // 4c. Contact extraction for all relevant sites IN PARALLEL (each one already
       //     fans out its page fetches; doing leads concurrently overlaps the Groq pacing gap)
+      fs.contacts_tried += toExtract.length;
       const extracted = await Promise.all(toExtract.map(async ({ cand, analysis }) => {
         const homepageHtml = await fetchPage(cand.url);
         let contact: Contact = { email: null, emailType: null, telegram: null, whatsapp: null, phone: null, sourceUrl: null };
@@ -1884,7 +1923,51 @@ Deno.serve(async (req: Request) => {
     await supabase.from('error_log').insert([{
       level: 'critical', service: 'find-and-queue', message: e.message,
     }]);
+    stats.errors.push(String(e?.message || e));
     return new Response(JSON.stringify({ ...stats, error: e.message }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
+
+  } finally {
+    // In `finally` on purpose: a run that died halfway is exactly the run whose
+    // numbers matter most, and the crash itself tells us nothing about WHERE it
+    // died. A missing row here means the pipeline never started at all, which
+    // is its own diagnosis and must stay distinguishable from a failed run.
+    // Bookkeeping must never be able to break the run it is describing — and
+    // this file has no `quiet()` helper, unlike its siblings. Calling one that
+    // did not exist here once killed the pipeline for three and a half hours
+    // with a ReferenceError on the first line, which looked from the outside
+    // exactly like the scheduler having stopped.
+    try {
+      await supabase.from('funnel_stats').insert([{
+        run_id:           fs.run_id,
+        pipeline:         'search',
+        started_at:       new Date(startedAt).toISOString(),
+        finished_at:      new Date().toISOString(),
+        duration_ms:      Date.now() - startedAt,
+        keywords_used:    stats.keywords_run,
+        urls_returned:    stats.found,
+        urls_after_noise: fs.urls_after_noise,
+        urls_after_dedup: fs.urls_after_dedup,
+        sent_to_llm:      fs.sent_to_llm,
+        llm_ok:           fs.llm_ok,
+        llm_failed:       fs.llm_failed,
+        // In this pipeline contact extraction runs for exactly the candidates
+        // that passed the model's criteria, so the two counts coincide by
+        // construction. Kept as separate columns because that is not true of
+        // every pipeline, and a shared column would hide the difference.
+        passed_criteria:  fs.contacts_tried,
+        contacts_tried:   fs.contacts_tried,
+        contacts_found:   stats.contacts,
+        leads_created:    stats.saved,
+        llm_429:          groq429Count,
+        llm_other_errors: groqOtherErrCount,
+        budget_exhausted: fs.budget_exhausted,
+        notes: `${stats.brand || ''} ${stats.preset || ''} layer=${stats.layer || ''} `
+          + `dedup_dropped=${fs.dedup_dropped} noise=${stats.irrelevant} `
+          + `geo_excl=${stats.geo_excluded} competitors=${stats.competitors}`
+          + (groqLastError ? ` groqErr="${groqLastError}"` : '')
+          + (stats.errors.length ? ` | ${stats.errors.slice(0, 2).join('; ')}` : ''),
+      }]);
+    } catch { /* telemetry is best-effort */ }
   }
 });
