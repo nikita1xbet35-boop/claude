@@ -153,6 +153,21 @@ jobs:
           echo "── R9. errors worth seeing (48h, non-info) ─────────────────"
           q "SELECT service, level, left(message,150) AS message, count(*) AS n, max(created_at) AS last FROM public.error_log WHERE level <> 'info' AND created_at > now() - interval '48 hours' GROUP BY 1,2,3 ORDER BY n DESC LIMIT 12;"
           echo; echo
+          echo "── V9. funnel telemetry (block A) ──────────────────────────"
+          q "SELECT to_regclass('public.funnel_stats') IS NOT NULL AS funnel_table, to_regclass('public.funnel_24h') IS NOT NULL AS funnel_view, (SELECT count(*) FROM information_schema.columns WHERE table_name='keywords' AND column_name='new_urls') AS keywords_new_urls_col;"
+          echo; echo
+          q "SELECT * FROM public.funnel_24h ORDER BY pipeline;"
+          echo; echo
+          q "SELECT pipeline, to_char(started_at,'DD HH24:MI') AS t, keywords_used AS kw, urls_returned AS urls, urls_after_noise AS noise_ok, urls_after_dedup AS new_urls, sent_to_llm AS llm_in, llm_ok, llm_429, contacts_found AS contacts, leads_created AS leads, budget_exhausted AS no_time, left(notes,60) AS notes FROM public.funnel_stats ORDER BY started_at DESC LIMIT 15;"
+          echo; echo
+          echo "── V9-G4. top errors, 7 days (block G.4) ───────────────────"
+          q "SELECT service, level, left(message,110) AS message, count(*) AS n, max(created_at) AS last FROM public.error_log WHERE level <> 'info' AND created_at > now() - interval '7 days' GROUP BY 1,2,3 ORDER BY n DESC LIMIT 15;"
+          echo; echo
+          echo "── V9-C1. keyword pool burn-out (block C) ──────────────────"
+          q "SELECT count(*) FILTER (WHERE active) AS active_kw, count(*) FILTER (WHERE NOT active) AS archived_kw, count(*) FILTER (WHERE active AND last_run_at IS NULL) AS never_run, count(*) FILTER (WHERE active AND runs >= 15 AND leads_created = 0) AS candidates_for_archive, round(avg(NULLIF(runs,0)),1) AS avg_runs FROM public.keywords;"
+          echo; echo
+          q "SELECT preset, count(*) FILTER (WHERE active) AS active_kw, sum(runs) AS runs, sum(urls_found) AS urls, sum(leads_created) AS leads FROM public.keywords GROUP BY preset ORDER BY leads DESC LIMIT 12;"
+          echo; echo
           echo "── T1. is anything running AT ALL right now ────────────────"
           q "SELECT service, count(*) AS lines_24h, count(*) FILTER (WHERE level <> 'info') AS bad, max(created_at) AS last_seen FROM public.error_log WHERE created_at > now() - interval '24 hours' GROUP BY 1 ORDER BY last_seen DESC;"
           echo; echo
