@@ -92,6 +92,13 @@
   /* .progress-bar-fill's background is !important (line ~922) — brand-colored
      bars on the Обзор card need their own class or that override wins. */
   .mb-bar-wrap{background:var(--bg3);height:4px;border-radius:999px;overflow:hidden;}
+  /* Горизонтальная строка модулей — врезается вместо старой <nav class="nav-tabs">
+     на существующих страницах (Автомат/YouTube/Telegram/DataForSEO/Brand/Базы),
+     чтобы переход между модулями не выглядел как прыжок на другой сайт. */
+  .mb-modulebar{display:flex;align-items:center;gap:4px;padding:8px 20px;border-bottom:1px solid var(--border);background:var(--bg2);flex-wrap:wrap;}
+  .mb-modbtn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;font-size:12px;color:var(--text2);cursor:pointer;border:1px solid transparent;background:none;transition:all .15s;white-space:nowrap;}
+  .mb-modbtn:hover{background:var(--glass);color:var(--text);}
+  .mb-modbtn.active{background:var(--glass2);color:var(--text);border-color:var(--border2);font-weight:600;}
   .mb-bar-fill{height:100%;border-radius:999px;transition:width .4s ease;}
 
   /* PIPELINE LAYOUT */
@@ -2156,40 +2163,11 @@
 
 <!-- PAGE: АВТОМАТ (was Analytics) -->
 <div class="page" id="page-analytics">
-  <header class="topbar">
-    <div class="logo" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="goTo('dashboard',this)">
-      <svg class="logo-icon" width="22" height="22" viewBox="0 0 36 36" fill="none">
-        <rect x="2" y="2" width="14" height="14" rx="3" fill="var(--accent)" opacity="1"/>
-        <rect x="20" y="2" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".7"/>
-        <rect x="2" y="20" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".5"/>
-        <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
-      </svg>
-      Affiliate<span>OS</span>
-    </div>
-    <nav class="nav-tabs">
-      <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
-      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
-      <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      
-      
-      <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
-      <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      
-      
-      <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
-      <button class="nav-tab active" onclick="goTo('analytics',this)">⚡ Автомат</button>
-      <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
-      <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
-      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
-      <button class="nav-tab" data-page="dfs" onclick="goTo('dfs',this)">🔗 DataForSEO</button>
-      <button class="nav-tab" data-page="brand" onclick="goTo('brand',this)">🎯 Brand</button>
-      <button class="nav-tab" data-page="diag" onclick="goTo('diag',this)">🩺 Диагностика</button>
-      <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
-      
-    </nav>
-    <div class="topbar-right"><div class="status-dot"></div></div>
-  </header>
+  <div id="mb-shell-automat" class="mb-topbar"></div>
+  <div class="mb-modulebar">
+    <div id="mb-modbtns-automat" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+    <div class="status-dot"></div>
+  </div>
 
   <div style="flex:1;overflow-y:auto;padding:24px 28px;background:transparent;" id="automat-content">
 
@@ -2317,43 +2295,12 @@
 
 <!-- PAGE: TELEGRAM -->
 <div class="page" id="page-tg">
-  <header class="topbar">
-    <div class="logo" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="goTo('dashboard',this)">
-      <svg class="logo-icon" width="22" height="22" viewBox="0 0 36 36" fill="none">
-        <rect x="2" y="2" width="14" height="14" rx="3" fill="var(--accent)" opacity="1"/>
-        <rect x="20" y="2" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".7"/>
-        <rect x="2" y="20" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".5"/>
-        <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
-      </svg>
-      Affiliate<span>OS</span>
-    </div>
-    <nav class="nav-tabs">
-      <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
-      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
-      <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      
-      
-      <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
-      <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      
-      
-      <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
-      <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
-      <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
-      <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
-      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
-      <button class="nav-tab" data-page="dfs" onclick="goTo('dfs',this)">🔗 DataForSEO</button>
-      <button class="nav-tab" data-page="brand" onclick="goTo('brand',this)">🎯 Brand</button>
-      <button class="nav-tab" data-page="diag" onclick="goTo('diag',this)">🩺 Диагностика</button>
-      <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
-      
-    </nav>
-    <div class="topbar-right">
-      <span class="badge-count" id="tg-badge">0 каналов</span>
-      <div class="status-dot"></div>
-    </div>
-  </header>
+  <div id="mb-shell-telegram" class="mb-topbar"></div>
+  <div class="mb-modulebar">
+    <div id="mb-modbtns-telegram" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+    <span class="badge-count" id="tg-badge">0 каналов</span>
+    <div class="status-dot"></div>
+  </div>
 
   <div style="display:grid;grid-template-columns:260px 1fr;flex:1;overflow:hidden;">
 
@@ -2542,38 +2489,12 @@
 
 <!-- ════════════ DataForSEO ════════════ -->
 <div class="page" id="page-dfs">
-  <header class="topbar">
-    <div class="logo" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="goTo('dashboard',this)">
-      <svg class="logo-icon" width="22" height="22" viewBox="0 0 36 36" fill="none">
-        <rect x="2" y="2" width="14" height="14" rx="3" fill="var(--accent)" opacity="1"/>
-        <rect x="20" y="2" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".7"/>
-        <rect x="2" y="20" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".5"/>
-        <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
-      </svg>
-      Affiliate<span>OS</span>
-    </div>
-    <nav class="nav-tabs">
-      <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
-      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span class="nav-badge" style="display:none;">0</span></button>
-      <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
-      <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
-      <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
-      <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
-      <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
-      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
-      <button class="nav-tab active" data-page="dfs" onclick="goTo('dfs',this)">🔗 DataForSEO</button>
-      <button class="nav-tab" data-page="brand" onclick="goTo('brand',this)">🎯 Brand</button>
-      <button class="nav-tab" data-page="diag" onclick="goTo('diag',this)">🩺 Диагностика</button>
-      <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
-    </nav>
-    <div class="topbar-right">
-      <span class="badge-count" id="dfs-badge">0 доменов</span>
-      <div class="status-dot"></div>
-    </div>
-  </header>
+  <div id="mb-shell-dataforseo" class="mb-topbar"></div>
+  <div class="mb-modulebar">
+    <div id="mb-modbtns-dataforseo" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+    <span class="badge-count" id="dfs-badge">0 доменов</span>
+    <div class="status-dot"></div>
+  </div>
   <div id="dfs-content" style="flex:1;overflow-y:auto;padding:28px 32px;background:var(--bg2);">
     <div style="text-align:center;color:var(--text3);padding:80px;font-size:13px;">Загрузка...</div>
   </div>
@@ -2581,38 +2502,12 @@
 
 <!-- ════════════ BRAND (v8) ════════════ -->
 <div class="page" id="page-brand">
-  <header class="topbar">
-    <div class="logo" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="goTo('dashboard',this)">
-      <svg class="logo-icon" width="22" height="22" viewBox="0 0 36 36" fill="none">
-        <rect x="2" y="2" width="14" height="14" rx="3" fill="var(--accent)" opacity="1"/>
-        <rect x="20" y="2" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".7"/>
-        <rect x="2" y="20" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".5"/>
-        <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
-      </svg>
-      Affiliate<span>OS</span>
-    </div>
-    <nav class="nav-tabs">
-      <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
-      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span class="nav-badge" style="display:none;">0</span></button>
-      <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
-      <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
-      <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
-      <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
-      <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
-      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
-      <button class="nav-tab" data-page="dfs" onclick="goTo('dfs',this)">🔗 DataForSEO</button>
-      <button class="nav-tab active" data-page="brand" onclick="goTo('brand',this)">🎯 Brand</button>
-      <button class="nav-tab" data-page="diag" onclick="goTo('diag',this)">🩺 Диагностика</button>
-      <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
-    </nav>
-    <div class="topbar-right">
-      <span class="badge-count" id="brand-badge">0 лидов</span>
-      <div class="status-dot"></div>
-    </div>
-  </header>
+  <div id="mb-shell-traffic" class="mb-topbar"></div>
+  <div class="mb-modulebar">
+    <div id="mb-modbtns-traffic" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+    <span class="badge-count" id="brand-badge">0 лидов</span>
+    <div class="status-dot"></div>
+  </div>
   <div id="brand-content" style="flex:1;overflow-y:auto;padding:28px 32px;background:var(--bg2);">
     <div style="text-align:center;color:var(--text3);padding:80px;font-size:13px;">Загрузка...</div>
   </div>
@@ -2749,43 +2644,12 @@
 
 <!-- PAGE: YOUTUBE -->
 <div class="page" id="page-yt">
-  <header class="topbar">
-    <div class="logo" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="goTo('dashboard',this)">
-      <svg class="logo-icon" width="22" height="22" viewBox="0 0 36 36" fill="none">
-        <rect x="2" y="2" width="14" height="14" rx="3" fill="var(--accent)" opacity="1"/>
-        <rect x="20" y="2" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".7"/>
-        <rect x="2" y="20" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".5"/>
-        <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
-      </svg>
-      Affiliate<span>OS</span>
-    </div>
-    <nav class="nav-tabs">
-      <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
-      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
-      <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      
-      
-      <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
-      <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      
-      
-      <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
-      <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
-      <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
-      <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
-      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
-      <button class="nav-tab" data-page="dfs" onclick="goTo('dfs',this)">🔗 DataForSEO</button>
-      <button class="nav-tab" data-page="brand" onclick="goTo('brand',this)">🎯 Brand</button>
-      <button class="nav-tab" data-page="diag" onclick="goTo('diag',this)">🩺 Диагностика</button>
-      <button class="nav-tab" onclick="goTo('bases',this)">🗂 Базы</button>
-      
-    </nav>
-    <div class="topbar-right">
-      <span class="badge-count" id="yt-badge">0 каналов</span>
-      <div class="status-dot"></div>
-    </div>
-  </header>
+  <div id="mb-shell-youtube" class="mb-topbar"></div>
+  <div class="mb-modulebar">
+    <div id="mb-modbtns-youtube" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+    <span class="badge-count" id="yt-badge">0 каналов</span>
+    <div class="status-dot"></div>
+  </div>
 
   <div class="pipeline-layout">
     <!-- SIDEBAR: search controls -->
@@ -2900,38 +2764,12 @@
 
 <!-- PAGE: PARTNER BASES -->
 <div class="page" id="page-bases">
-  <header class="topbar">
-    <div class="logo" style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="goTo('dashboard',this)">
-      <svg class="logo-icon" width="22" height="22" viewBox="0 0 36 36" fill="none">
-        <rect x="2" y="2" width="14" height="14" rx="3" fill="var(--accent)" opacity="1"/>
-        <rect x="20" y="2" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".7"/>
-        <rect x="2" y="20" width="14" height="14" rx="3" fill="var(--accent2)" opacity=".5"/>
-        <rect x="20" y="20" width="14" height="14" rx="3" fill="var(--accent)" opacity=".9"/>
-      </svg>
-      Affiliate<span>OS</span>
-    </div>
-    <nav class="nav-tabs">
-      <button class="nav-tab" onclick="goTo('dashboard',this)">Дашборд</button>
-      <button class="nav-tab" data-page="inbox" onclick="goTo('inbox',this)">🔥 Инбокс<span  class="nav-badge" style="display:none;">0</span></button>
-      <button class="nav-tab" onclick="goTo('pipeline',this)">Pipeline</button>
-      <button class="nav-tab" onclick="goTo('database',this)">База лидов</button>
-      <button class="nav-tab" onclick="goTo('partners',this)">Партнёры</button>
-      <button class="nav-tab" onclick="goTo('stats',this)">Статистика</button>
-      <button class="nav-tab" onclick="goTo('analytics',this)">⚡ Автомат</button>
-      <button class="nav-tab" onclick="goTo('blacklist',this)">Блэклист</button>
-      <button class="nav-tab" onclick="goTo('kb',this)">База знаний</button>
-      <button class="nav-tab" onclick="goTo('yt',this)">📺 YouTube</button>
-      <button class="nav-tab" data-page="tgo" onclick="goTo('tgo',this)">✈ Telegram</button>
-      <button class="nav-tab" data-page="dfs" onclick="goTo('dfs',this)">🔗 DataForSEO</button>
-      <button class="nav-tab" data-page="brand" onclick="goTo('brand',this)">🎯 Brand</button>
-      <button class="nav-tab" data-page="diag" onclick="goTo('diag',this)">🩺 Диагностика</button>
-      <button class="nav-tab active" onclick="goTo('bases',this)">🗂 Базы</button>
-    </nav>
-    <div class="topbar-right">
-      <span class="badge-count" id="pb-badge">0 баз</span>
-      <div class="status-dot"></div>
-    </div>
-  </header>
+  <div id="mb-shell-bases" class="mb-topbar"></div>
+  <div class="mb-modulebar">
+    <div id="mb-modbtns-bases" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+    <span class="badge-count" id="pb-badge">0 баз</span>
+    <div class="status-dot"></div>
+  </div>
 
   <div class="pipeline-layout">
     <!-- SIDEBAR: base selector + base settings -->
@@ -15252,6 +15090,27 @@ const MB = (() => {
     }
   }
 
+  // Горизонтальный аналог railHtml — для существующих страниц (Автомат/
+  // YouTube/Telegram/DataForSEO/Brand-трафик/Базы), у которых нет места под
+  // левый рейл без перестройки их собственной сетки. Врезается ВМЕСТО их
+  // старой <nav class="nav-tabs">, а не рядом с ней (см. paintModulePage).
+  function moduleBarButtons(activeKey, slug){
+    return MODULES.map(m => `<button class="mb-modbtn ${activeKey===m.key?'active':''}"
+      onclick="MB.goto('brand','${slug}','${m.key}')">${m.icon} ${m.label}</button>`).join('');
+  }
+
+  // Красит новую шапку+модуль-бар НА САМОЙ странице модуля (page-yt и т.д.)
+  // после того как goTo() уже переключил на неё видимость — контейнеры
+  // mb-shell-{modkey}/mb-modbtns-{modkey} заранее вписаны в разметку страницы
+  // вместо старого <header class="topbar"><nav class="nav-tabs">.
+  async function paintModulePage(modKey, slug){
+    await loadBrands();
+    const shellEl = document.getElementById('mb-shell-' + modKey);
+    if(shellEl) shellEl.innerHTML = shellHtml('brand', slug);
+    const btnsEl = document.getElementById('mb-modbtns-' + modKey);
+    if(btnsEl) btnsEl.innerHTML = moduleBarButtons(modKey, slug);
+  }
+
   // ── Navigation ──────────────────────────────────────────────────────
   // gotoHash: cross-brand destinations (#/  #/rotation  #/settings).
   function gotoHash(hash){ location.hash = hash; }
@@ -15270,9 +15129,7 @@ const MB = (() => {
     if(mod.gotoPage){
       location.hash = `#/brand/${slug}/${mod.key}`;
       goTo(mod.gotoPage);
-      // Legacy pages don't carry the mb-rail yet (перенос — следующий проход),
-      // so there is no rail to repaint here. The brand switch itself (currentBrand,
-      // theme, localStorage) still applies.
+      await paintModulePage(mod.key, slug);
     } else {
       location.hash = `#/brand/${slug}/${mod.key}`;
       goTo('brand-overview');
@@ -15312,6 +15169,7 @@ const MB = (() => {
       try { applyBrandTheme(r.slug); } catch(_){}
       if(mod.gotoPage){
         goTo(mod.gotoPage);
+        await paintModulePage(mod.key, r.slug);
       } else {
         goTo('brand-overview');
         await paintShell('brand-overview', 'brand', r.slug);
