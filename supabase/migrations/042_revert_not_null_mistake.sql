@@ -30,3 +30,4 @@ ALTER TABLE public.api_usage    ALTER COLUMN brand_id DROP NOT NULL;
 ALTER TABLE public.error_log    ALTER COLUMN brand_id DROP NOT NULL;
 ALTER TABLE public.funnel_stats ALTER COLUMN brand_id DROP NOT NULL;
 ALTER TABLE public.dfs_domains  ALTER COLUMN brand_id DROP NOT NULL;
+-- retry 1787240343
