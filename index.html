@@ -1040,8 +1040,10 @@
 <!-- PAGE: ОБЗОР БРЕНДА (/brand/{slug}) -->
 <div class="page" id="page-brand-overview">
   <div id="mb-shell-brand-overview" class="mb-topbar"></div>
+  <div class="mb-modulebar">
+    <div id="mb-modbtns-brand-overview" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+  </div>
   <div class="mb-body">
-    <div id="mb-rail-brand-overview" class="mb-rail"></div>
     <div id="mb-content-brand-overview" class="mb-main">
       <div class="mb-empty">Загрузка…</div>
     </div>
@@ -15073,41 +15075,33 @@ const MB = (() => {
       <button class="mb-xbtn" onclick="MB.gotoHash('#/settings')" title="Настройки системы">⚙</button>`;
   }
 
-  function railHtml(activeSlug, activeModule){
-    return MODULES.map(m => `<div class="mb-rail-item ${activeModule===m.key?'active':''}"
-      onclick="MB.goto('brand','${activeSlug}','${m.key}')">
-      <span class="mb-icon">${m.icon}</span>${m.label}
-    </div>`).join('');
-  }
-
   async function paintShell(pageSuffix, kind, activeSlug){
     await loadBrands();
     const el = document.getElementById('mb-shell-' + pageSuffix);
     if(el) el.innerHTML = shellHtml(kind, activeSlug);
-    if(kind === 'brand'){
-      const rail = document.getElementById('mb-rail-brand-overview');
-      if(rail) rail.innerHTML = railHtml(activeSlug, state.module);
-    }
   }
 
-  // Горизонтальный аналог railHtml — для существующих страниц (Автомат/
-  // YouTube/Telegram/DataForSEO/Brand-трафик/Базы), у которых нет места под
-  // левый рейл без перестройки их собственной сетки. Врезается ВМЕСТО их
-  // старой <nav class="nav-tabs">, а не рядом с ней (см. paintModulePage).
+  // Единственный стиль строки модулей — горизонтальная, сверху, ВЕЗДЕ (было:
+  // слева рейлом на Обзоре бренда, сверху баром на остальных шести — разные
+  // паттерны на соседних экранах читались как два разных сайта). Врезается
+  // ВМЕСТО старой <nav class="nav-tabs"> на существующих страницах и вместо
+  // прежнего левого рейла на Обзоре бренда.
   function moduleBarButtons(activeKey, slug){
     return MODULES.map(m => `<button class="mb-modbtn ${activeKey===m.key?'active':''}"
       onclick="MB.goto('brand','${slug}','${m.key}')">${m.icon} ${m.label}</button>`).join('');
   }
 
-  // Красит новую шапку+модуль-бар НА САМОЙ странице модуля (page-yt и т.д.)
-  // после того как goTo() уже переключил на неё видимость — контейнеры
-  // mb-shell-{modkey}/mb-modbtns-{modkey} заранее вписаны в разметку страницы
-  // вместо старого <header class="topbar"><nav class="nav-tabs">.
-  async function paintModulePage(modKey, slug){
+  // Красит шапку+модуль-бар НА КОНКРЕТНОЙ странице (pageSuffix) после того как
+  // goTo() уже переключил на неё видимость — контейнеры mb-shell-{pageSuffix}/
+  // mb-modbtns-{pageSuffix} заранее вписаны в разметку каждой страницы.
+  // Один и тот же вызов для всех 7 страниц-получателей (brand-overview и
+  // шесть перенесённых модулей) — то, из-за чего Обзор бренда не красился,
+  // было именно расхождением этой функции по разным путям для разных страниц.
+  async function paintBrandContext(pageSuffix, modKey, slug){
     await loadBrands();
-    const shellEl = document.getElementById('mb-shell-' + modKey);
+    const shellEl = document.getElementById('mb-shell-' + pageSuffix);
     if(shellEl) shellEl.innerHTML = shellHtml('brand', slug);
-    const btnsEl = document.getElementById('mb-modbtns-' + modKey);
+    const btnsEl = document.getElementById('mb-modbtns-' + pageSuffix);
     if(btnsEl) btnsEl.innerHTML = moduleBarButtons(modKey, slug);
   }
 
@@ -15125,15 +15119,14 @@ const MB = (() => {
     currentBrand = slug; // legacy global — existing pages (BRAND_CONFIG, BRAND_PRESETS, leads.brand inserts) read this
     try { localStorage.setItem('affiliateos_brand', slug); } catch(_){}
     try { applyBrandTheme(slug); } catch(_){}
+    location.hash = `#/brand/${slug}/${mod.key}`;
 
     if(mod.gotoPage){
-      location.hash = `#/brand/${slug}/${mod.key}`;
       goTo(mod.gotoPage);
-      await paintModulePage(mod.key, slug);
+      await paintBrandContext(mod.key, mod.key, slug);
     } else {
-      location.hash = `#/brand/${slug}/${mod.key}`;
       goTo('brand-overview');
-      await paintShell('brand-overview', 'brand', slug);
+      await paintBrandContext('brand-overview', mod.key, slug);
       renderBrandModule(slug, mod.key);
     }
   }
@@ -15169,10 +15162,10 @@ const MB = (() => {
       try { applyBrandTheme(r.slug); } catch(_){}
       if(mod.gotoPage){
         goTo(mod.gotoPage);
-        await paintModulePage(mod.key, r.slug);
+        await paintBrandContext(mod.key, mod.key, r.slug);
       } else {
         goTo('brand-overview');
-        await paintShell('brand-overview', 'brand', r.slug);
+        await paintBrandContext('brand-overview', mod.key, r.slug);
         renderBrandModule(r.slug, mod.key);
       }
     }
@@ -15501,11 +15494,23 @@ const MB = (() => {
 })();
 
 try {
-  // Только берёт управление при осмысленном мультибрендовом хэше — иначе
-  // не мешает существующему восстановлению lastPage чуть выше по файлу.
+  // Старое восстановление lastPage (чуть выше по файлу) знает только имя
+  // страницы, не про mb-shell/mb-modbtns — если оно уже переключило на одну
+  // из 7 мультибрендовых страниц (по хэшу от прошлого визита, ДО этого
+  // прохода), а актуальный хэш почему-то этого не отражает, шапка и строка
+  // модулей на ней остаются пустыми контейнерами: интерфейс "не догружен",
+  // хотя сама страница отрисована. Красим её принудительно вместо того чтобы
+  // полагаться только на совпадение хэша.
+  const MODKEY_BY_PAGE = {analytics:'automat', tg:'telegram', dfs:'dataforseo', brand:'traffic', yt:'youtube', bases:'bases'};
   const h = location.hash || '';
+  const activeEl = document.querySelector('.page.active');
+  const activePageId = activeEl ? activeEl.id.replace(/^page-/, '') : '';
+
   if(h === '' || h === '#' || h === '#/' || h.startsWith('#/brand/') || h === '#/rotation' || h === '#/settings'){
     MB.applyHash();
+  } else if(MODKEY_BY_PAGE[activePageId] || activePageId === 'brand-overview'){
+    const savedBrand = (localStorage.getItem('affiliateos_brand') === 'luckypari') ? '1xbet' : (localStorage.getItem('affiliateos_brand') || '1xbet');
+    MB.goto('brand', savedBrand, MODKEY_BY_PAGE[activePageId] || 'overview');
   }
 } catch(e){ console.error('MB init:', e); }
 
