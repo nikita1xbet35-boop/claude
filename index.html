@@ -62,6 +62,38 @@
   .sbrand-pill:hover:not(.active){border-color:var(--border2);color:var(--text2);}
   /* hide the inline copies inside topbars */
 
+  /* ══════════════════════════════════════════════════════════════
+     MULTIBRAND NAV (Block 3) — two-level: brand switcher (top) +
+     module rail (left), shared markup on the three new pages.
+     Reuses existing tokens only, no new color system.
+     ══════════════════════════════════════════════════════════════ */
+  .mb-topbar{display:flex;align-items:center;gap:6px;padding:10px 20px;border-bottom:1px solid var(--border);background:var(--bg);flex-wrap:wrap;}
+  .mb-topbar-x{display:flex;align-items:center;gap:4px;padding-right:10px;margin-right:6px;border-right:1px solid var(--border);}
+  .mb-topbar-brands{display:flex;align-items:center;gap:4px;flex:1;flex-wrap:wrap;}
+  .mb-xbtn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;font-size:12px;font-family:var(--font-mono);color:var(--text3);border:1px solid transparent;cursor:pointer;transition:all .15s;background:transparent;}
+  .mb-xbtn:hover{color:var(--text2);background:var(--glass);}
+  .mb-xbtn.active{color:var(--text);background:var(--glass2);border-color:var(--border2);}
+  .mb-brandbtn{display:inline-flex;align-items:center;gap:7px;padding:6px 13px;border-radius:8px;font-size:12px;font-family:var(--font-mono);font-weight:600;letter-spacing:.2px;cursor:pointer;transition:all .15s;border:1px solid var(--border);color:var(--text3);background:var(--bg3);}
+  .mb-brandbtn .mb-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+  .mb-brandbtn.active{color:var(--mbclr,var(--accent));border-color:var(--mbclr,var(--accent));background:var(--mbbg,var(--accent-glow));}
+  .mb-brandbtn:hover:not(.active){border-color:var(--border2);color:var(--text2);}
+  .mb-brandbtn.paused{opacity:.55;}
+  .mb-brandbtn.paused::after{content:'⏸';margin-left:2px;font-size:9px;}
+  .mb-body{display:flex;flex:1;min-height:0;overflow:hidden;}
+  .mb-rail{width:196px;flex-shrink:0;border-right:1px solid var(--border);background:var(--bg);padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .mb-rail-item{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;font-size:12.5px;color:var(--text2);cursor:pointer;transition:background .12s;text-decoration:none;}
+  .mb-rail-item:hover{background:var(--glass);color:var(--text);}
+  .mb-rail-item.active{background:var(--glass2);color:var(--text);font-weight:600;}
+  .mb-rail-item .mb-icon{width:16px;text-align:center;flex-shrink:0;opacity:.85;}
+  .mb-main{flex:1;overflow-y:auto;padding:24px 28px;min-width:0;}
+  .mb-card{background:var(--bg);border:1px solid var(--border2);border-radius:12px;padding:18px 20px;}
+  .mb-label{font-size:10px;color:var(--text3);font-family:var(--font-mono);letter-spacing:.6px;text-transform:uppercase;}
+  .mb-empty{color:var(--text3);font-size:12.5px;padding:16px 0;text-align:center;}
+  /* .progress-bar-fill's background is !important (line ~922) — brand-colored
+     bars on the Обзор card need their own class or that override wins. */
+  .mb-bar-wrap{background:var(--bg3);height:4px;border-radius:999px;overflow:hidden;}
+  .mb-bar-fill{height:100%;border-radius:999px;transition:width .4s ease;}
+
   /* PIPELINE LAYOUT */
   .pipeline-layout{display:grid;grid-template-columns:272px 1fr 356px;flex:1;overflow:hidden;}
   .sidebar{background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
@@ -977,6 +1009,45 @@
   </div>
   <div id="splash-bar" style="margin-top:40px;width:160px;height:2px;background:var(--bg3);border-radius:2px;overflow:hidden;opacity:0;transition:opacity .3s;">
     <div id="splash-fill" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .0s;"></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     МУЛЬТИБРЕНД (Block 3) — три новых экрана: кросс-брендовый Обзор,
+     Обзор бренда, Ротация. Навигация (mb-topbar + mb-rail) рендерится
+     в JS функцией MB.renderShell() — тот же паттерн дублирования, что
+     у остальных 18 страниц файла (каждая несёт свою nav-tabs), не
+     новая архитектура поверх старой.
+     ════════════════════════════════════════════════════════════════ -->
+
+<!-- PAGE: ОБЗОР (кросс-брендовый, /) -->
+<div class="page" id="page-x-overview">
+  <div id="mb-shell-x-overview" class="mb-topbar"></div>
+  <div class="mb-body">
+    <div id="mb-content-x-overview" class="mb-main" style="padding:24px 28px;">
+      <div class="mb-empty">Загрузка…</div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: ОБЗОР БРЕНДА (/brand/{slug}) -->
+<div class="page" id="page-brand-overview">
+  <div id="mb-shell-brand-overview" class="mb-topbar"></div>
+  <div class="mb-body">
+    <div id="mb-rail-brand-overview" class="mb-rail"></div>
+    <div id="mb-content-brand-overview" class="mb-main">
+      <div class="mb-empty">Загрузка…</div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: РОТАЦИЯ (кросс-брендовый, /rotation) -->
+<div class="page" id="page-x-rotation">
+  <div id="mb-shell-x-rotation" class="mb-topbar"></div>
+  <div class="mb-body">
+    <div id="mb-content-x-rotation" class="mb-main" style="padding:24px 28px;">
+      <div class="mb-empty">Загрузка…</div>
+    </div>
   </div>
 </div>
 
@@ -15075,6 +15146,495 @@ async function initDiag(){
     box.innerHTML = `<div style="padding:24px;color:var(--red);font-size:13px;">Не удалось загрузить диагностику: ${e.message||e}<div style="color:var(--text3);margin-top:8px;">Если таблицы funnel_stats ещё нет — миграция 034 не применилась.</div></div>`;
   }
 }
+
+// ══════════════════════════════════════════════════════════════════
+//  МУЛЬТИБРЕНД (Block 3) — /, /rotation, /settings, /brand/{slug}/{module}
+//
+//  Область этого прохода — п.1-3 из "Порядка работ" ТЗ (навигация,
+//  Обзор, Обзор бренда, Ротация). Модули 6.3-6.8 переиспользуют
+//  СУЩЕСТВУЮЩИЕ страницы (goTo('yt'), goTo('dfs') и т.д.) без изменений
+//  их внутренней логики — рейл только ссылается на них. Рассылка (6.9)
+//  и Настройки (6.10/6.12) — заглушки "в разработке", это следующий
+//  проход по ТЗ, не сделано сейчас.
+//
+//  ЧЕСТНОСТЬ ДАННЫХ (п.8 DoD): brand_id реально пишется сейчас только
+//  из find-and-queue.ts — в leads и funnel_stats(pipeline='search').
+//  error_log, email_log, funnel_stats других пайплайнов brand_id ещё не
+//  проставляют (см. аудит в PR). Экраны ниже НЕ фильтруют по колонкам,
+//  которые всегда NULL — там, где такой фильтр дал бы фальшивый ноль,
+//  вместо него стоит явная пометка "ожидает данных".
+// ══════════════════════════════════════════════════════════════════
+const MB = (() => {
+  let brandsCache = null;
+  const BRAND_COLORS = { '1xbet':'#7B61FF', '1xcasino':'#10b981', 'luckypari':'#f97316', 'melbet':'#60a5fa', 'coldbet':'#c084fc' };
+  const FALLBACK_COLORS = ['#7B61FF','#10b981','#f97316','#60a5fa','#f87171','#fbbf24'];
+
+  // gotoPage: reuses an EXISTING page verbatim (goTo hooks its own init).
+  // No gotoPage yet = new Block 3 screen not built in this pass — rail shows
+  // it, clicking renders an honest "in progress" placeholder, not a 404.
+  const MODULES = [
+    {key:'overview',   label:'Обзор бренда',    icon:'◈'},
+    {key:'automat',    label:'Автомат',         icon:'⚡', gotoPage:'analytics'},
+    {key:'youtube',    label:'YouTube',         icon:'▶',  gotoPage:'yt'},
+    {key:'telegram',   label:'Telegram',        icon:'✈',  gotoPage:'tg'},
+    {key:'dataforseo', label:'DataForSEO',      icon:'⌗',  gotoPage:'dfs'},
+    {key:'traffic',    label:'Brand-трафик',    icon:'◎',  gotoPage:'brand'},
+    {key:'bases',      label:'Базы партнёров',  icon:'🗂', gotoPage:'bases'},
+    {key:'outreach',   label:'Рассылка',        icon:'✉'},
+    {key:'config',     label:'Настройки',       icon:'⚙'},
+  ];
+
+  const state = { module: 'overview' }; // last module picked in a brand context, preserved across brand switches
+
+  async function loadBrands(force){
+    if(brandsCache && !force) return brandsCache;
+    const {data, error} = await sb.from('brands').select('*')
+      .in('status', ['active','paused']).order('cron_weight', {ascending:false});
+    if(error){ console.error('MB.loadBrands', error); brandsCache = []; }
+    else brandsCache = data || [];
+    return brandsCache;
+  }
+
+  function colorFor(slug, idx){ return BRAND_COLORS[slug] || FALLBACK_COLORS[idx % FALLBACK_COLORS.length]; }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  // ── Shell: top brand-switcher, shared by all three new pages ──────────
+  function shellHtml(kind, activeSlug){
+    const brands = brandsCache || [];
+    const xBtn = (k, label, hash) =>
+      `<button class="mb-xbtn ${kind===k?'active':''}" onclick="MB.gotoHash('${hash}')">${label}</button>`;
+    const brandBtns = brands.map((b,i) => {
+      const clr = colorFor(b.slug, i);
+      const active = kind==='brand' && activeSlug===b.slug;
+      return `<button class="mb-brandbtn ${active?'active':''} ${b.status==='paused'?'paused':''}"
+        style="--mbclr:${clr};--mbbg:${clr}22;"
+        onclick="MB.goto('brand','${b.slug}')">
+        <span class="mb-dot" style="background:${clr};"></span>${esc(b.name||b.slug).toUpperCase()}
+      </button>`;
+    }).join('');
+    return `<div class="mb-topbar-x">
+        ${xBtn('x-overview','◈ Обзор','#/')}
+        ${xBtn('x-rotation','⇄ Ротация','#/rotation')}
+      </div>
+      <div class="mb-topbar-brands">${brandBtns || '<span class="mb-empty" style="padding:0;">брендов нет</span>'}</div>
+      <button class="mb-xbtn" onclick="MB.gotoHash('#/settings')" title="Настройки системы">⚙</button>`;
+  }
+
+  function railHtml(activeSlug, activeModule){
+    return MODULES.map(m => `<div class="mb-rail-item ${activeModule===m.key?'active':''}"
+      onclick="MB.goto('brand','${activeSlug}','${m.key}')">
+      <span class="mb-icon">${m.icon}</span>${m.label}
+    </div>`).join('');
+  }
+
+  async function paintShell(pageSuffix, kind, activeSlug){
+    await loadBrands();
+    const el = document.getElementById('mb-shell-' + pageSuffix);
+    if(el) el.innerHTML = shellHtml(kind, activeSlug);
+    if(kind === 'brand'){
+      const rail = document.getElementById('mb-rail-brand-overview');
+      if(rail) rail.innerHTML = railHtml(activeSlug, state.module);
+    }
+  }
+
+  // ── Navigation ──────────────────────────────────────────────────────
+  // gotoHash: cross-brand destinations (#/  #/rotation  #/settings).
+  function gotoHash(hash){ location.hash = hash; }
+
+  // goto('brand', slug, moduleKey?) — moduleKey omitted preserves state.module,
+  // which is exactly the "переключение бренда не сбрасывает модуль" rule (§4 ТЗ).
+  async function goto(kind, slug, moduleKey){
+    if(kind !== 'brand'){ gotoHash(kind==='x-rotation' ? '#/rotation' : '#/'); return; }
+    if(moduleKey) state.module = moduleKey;
+    const mod = MODULES.find(m => m.key === state.module) || MODULES[0];
+
+    currentBrand = slug; // legacy global — existing pages (BRAND_CONFIG, BRAND_PRESETS, leads.brand inserts) read this
+    try { localStorage.setItem('affiliateos_brand', slug); } catch(_){}
+    try { applyBrandTheme(slug); } catch(_){}
+
+    if(mod.gotoPage){
+      location.hash = `#/brand/${slug}/${mod.key}`;
+      goTo(mod.gotoPage);
+      // Legacy pages don't carry the mb-rail yet (перенос — следующий проход),
+      // so there is no rail to repaint here. The brand switch itself (currentBrand,
+      // theme, localStorage) still applies.
+    } else {
+      location.hash = `#/brand/${slug}/${mod.key}`;
+      goTo('brand-overview');
+      await paintShell('brand-overview', 'brand', slug);
+      renderBrandModule(slug, mod.key);
+    }
+  }
+
+  // ── Hash router ─────────────────────────────────────────────────────
+  function parseHash(){
+    const h = (location.hash || '#/').replace(/^#/, '');
+    const parts = h.split('/').filter(Boolean);
+    if(parts[0] === 'rotation') return {kind:'x-rotation'};
+    if(parts[0] === 'settings') return {kind:'settings'};
+    if(parts[0] === 'brand' && parts[1]) return {kind:'brand', slug:parts[1], module:parts[2] || state.module};
+    return {kind:'x-overview'};
+  }
+
+  async function applyHash(){
+    const r = parseHash();
+    if(r.kind === 'x-overview'){
+      goTo('x-overview');
+      await paintShell('x-overview', 'x-overview', null);
+      renderOverview();
+    } else if(r.kind === 'x-rotation'){
+      goTo('x-rotation');
+      await paintShell('x-rotation', 'x-rotation', null);
+      renderRotation();
+    } else if(r.kind === 'settings'){
+      // 6.12 — не в этом проходе. Не 404: понятная заглушка на существующей diag-подобной странице не заведена,
+      // поэтому просто уводим на кросс-брендовый Обзор с пояснением через alert-free toast-less notice.
+      gotoHash('#/');
+    } else if(r.kind === 'brand'){
+      state.module = r.module || state.module || 'overview';
+      const mod = MODULES.find(m => m.key === state.module) || MODULES[0];
+      currentBrand = r.slug;
+      try { applyBrandTheme(r.slug); } catch(_){}
+      if(mod.gotoPage){
+        goTo(mod.gotoPage);
+      } else {
+        goTo('brand-overview');
+        await paintShell('brand-overview', 'brand', r.slug);
+        renderBrandModule(r.slug, mod.key);
+      }
+    }
+  }
+
+  // ── 6.1 Обзор (кросс-брендовый) ─────────────────────────────────────
+  async function renderOverview(){
+    const box = document.getElementById('mb-content-x-overview');
+    if(!box) return;
+    box.innerHTML = '<div class="mb-empty">Загрузка…</div>';
+    try {
+      const brands = await loadBrands(true);
+      if(!brands.length){
+        box.innerHTML = `<div class="mb-card"><div class="mb-empty">Активных брендов нет — проверить статус в brands (миграция 035).</div></div>`;
+        return;
+      }
+      const ids = brands.map(b => b.id);
+      const now = new Date();
+      const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
+      const weekStart = new Date(now.getTime() - 7*24*3600*1000);
+
+      const [fsToday, fs7d, smtpRows, repliesToday, replies7d] = await Promise.all([
+        sb.from('funnel_stats').select('brand_id, leads_created').in('brand_id', ids).gte('started_at', todayStart.toISOString()),
+        sb.from('funnel_stats').select('brand_id, leads_created').in('brand_id', ids).gte('started_at', weekStart.toISOString()),
+        sb.from('smtp_accounts').select('brand_id, daily_sent, daily_limit, status').in('brand_id', ids),
+        sb.from('leads').select('brand_id').in('brand_id', ids).gte('replied_at', todayStart.toISOString()),
+        sb.from('leads').select('brand_id').in('brand_id', ids).gte('replied_at', weekStart.toISOString()),
+      ]);
+
+      const sumBy = (rows, key) => {
+        const m = new Map();
+        for(const r of (rows.data||[])) m.set(r.brand_id, (m.get(r.brand_id)||0) + (Number(r[key])||0));
+        return m;
+      };
+      const countBy = (rows) => {
+        const m = new Map();
+        for(const r of (rows.data||[])) m.set(r.brand_id, (m.get(r.brand_id)||0) + 1);
+        return m;
+      };
+      const foundToday = sumBy(fsToday, 'leads_created');
+      const found7d = sumBy(fs7d, 'leads_created');
+      const repToday = countBy(repliesToday);
+      const rep7d = countBy(replies7d);
+      const smtpByBrand = new Map();
+      for(const r of (smtpRows.data||[])){
+        const cur = smtpByBrand.get(r.brand_id) || {sent:0, limit:0};
+        cur.sent += Number(r.daily_sent)||0; cur.limit += Number(r.daily_limit)||0;
+        smtpByBrand.set(r.brand_id, cur);
+      }
+
+      const totalWeight = brands.reduce((s,b) => s + (Number(b.cron_weight)||0), 0) || 1;
+
+      let html = `<div style="margin-bottom:18px;">
+        <div style="font-family:var(--font-head);font-size:20px;font-weight:600;color:var(--text);">Обзор — все бренды</div>
+        <div style="font-size:12px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">
+          Отправлено сегодня — по smtp_accounts.daily_sent; пока пул не подключён к реальной отправке (Блок 2, п.3), там 0.
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:20px;">`;
+
+      brands.forEach((b, i) => {
+        const clr = colorFor(b.slug, i);
+        const smtp = smtpByBrand.get(b.id) || {sent:0, limit:0};
+        const weightPct = Math.round((Number(b.cron_weight)||0) / totalWeight * 100);
+        const quotaPct = smtp.limit ? Math.min(100, Math.round(smtp.sent/smtp.limit*100)) : 0;
+        html += `<div class="mb-card" style="border-left:3px solid ${clr};cursor:pointer;" onclick="MB.goto('brand','${b.slug}')">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;">
+            <div style="font-weight:600;font-size:14.5px;color:var(--text);">${esc(b.name)}</div>
+            <span style="font-size:10px;font-family:var(--font-mono);padding:2px 8px;border-radius:20px;
+              background:${b.status==='active'?'var(--green-bg)':'var(--amber-bg)'};color:${b.status==='active'?'var(--green)':'var(--amber)'};">
+              ${b.status==='active'?'active':'paused'}
+            </span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+            <div><div class="mb-label">Найдено сегодня</div><div style="font-size:20px;font-family:var(--font-mono);color:var(--text);">${foundToday.get(b.id)||0}</div></div>
+            <div><div class="mb-label">За 7 дней</div><div style="font-size:20px;font-family:var(--font-mono);color:var(--text);">${found7d.get(b.id)||0}</div></div>
+          </div>
+          <div style="margin-bottom:10px;">
+            <div class="mb-label" style="margin-bottom:4px;">Отправлено / лимит</div>
+            <div class="mb-bar-wrap"><div class="mb-bar-fill" style="width:${quotaPct}%;background:${clr};"></div></div>
+            <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-top:3px;">${smtp.sent} / ${smtp.limit||'—'}</div>
+          </div>
+          <div style="margin-bottom:10px;">
+            <div class="mb-label" style="margin-bottom:4px;">Вес в кроне — ${weightPct}%</div>
+            <div class="mb-bar-wrap"><div class="mb-bar-fill" style="width:${weightPct}%;background:${clr};"></div></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text3);font-family:var(--font-mono);">
+            <span>Ответов 7д: ${rep7d.get(b.id)||0} (сегодня ${repToday.get(b.id)||0})</span>
+            <button class="mb-xbtn" style="padding:3px 9px;" onclick="event.stopPropagation();MB.toggleBrandStatus('${b.id}','${b.status}')">
+              ${b.status==='active'?'⏸ Пауза':'▶ Запуск'}
+            </button>
+          </div>
+        </div>`;
+      });
+      html += `</div>
+      <div class="mb-card">
+        <div class="mb-label" style="margin-bottom:10px;">Ответов по дням (7 дней, все бренды)</div>
+        <div style="font-size:12px;color:var(--text3);">Подневный график — следующий проход (нужна отдельная агрегация funnel_stats по датам); цифры выше уже реальные, не заглушка.</div>
+      </div>`;
+      box.innerHTML = html;
+    } catch(e){
+      box.innerHTML = `<div class="mb-card"><div style="color:var(--red);font-size:13px;">Не удалось загрузить обзор: ${esc(e.message||e)}</div></div>`;
+    }
+  }
+
+  async function toggleBrandStatus(brandId, curStatus){
+    const next = curStatus === 'active' ? 'paused' : 'active';
+    const {error} = await sb.from('brands').update({status: next, updated_at: new Date().toISOString()}).eq('id', brandId);
+    if(error){ alert('Не удалось изменить статус: ' + error.message); return; }
+    await loadBrands(true);
+    renderOverview();
+  }
+
+  // ── 6.2 Обзор бренда / заглушки для ненастроенных модулей ──────────
+  async function renderBrandModule(slug, moduleKey){
+    if(moduleKey === 'overview') return renderBrandOverview(slug);
+    const box = document.getElementById('mb-content-brand-overview');
+    if(!box) return;
+    const mod = MODULES.find(m => m.key === moduleKey);
+    box.innerHTML = `<div class="mb-card"><div style="font-weight:600;margin-bottom:6px;">${mod?.label||moduleKey} — в разработке</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.6;">Экран из следующего прохода по ТЗ (раздел 6.9/6.10). Данные для него уже есть в базе (smtp_accounts / brands / system_config), сама вёрстка ещё не сделана.</div></div>`;
+  }
+
+  async function renderBrandOverview(slug){
+    const box = document.getElementById('mb-content-brand-overview');
+    if(!box) return;
+    box.innerHTML = '<div class="mb-empty">Загрузка…</div>';
+    try {
+      const brands = await loadBrands();
+      const brand = brands.find(b => b.slug === slug);
+      if(!brand){
+        box.innerHTML = `<div class="mb-card"><div class="mb-empty">Бренд «${esc(slug)}» не найден или неактивен.</div></div>`;
+        return;
+      }
+      const since = new Date(Date.now() - 30*24*3600*1000).toISOString();
+      const [fsRows, geoRows] = await Promise.all([
+        sb.from('funnel_stats').select('pipeline, urls_returned, urls_after_dedup, passed_criteria, leads_created')
+          .eq('brand_id', brand.id).gte('started_at', since),
+        sb.from('leads').select('geo').eq('brand_id', brand.id).not('geo','is',null).limit(2000),
+      ]);
+
+      const byPipeline = new Map();
+      for(const r of (fsRows.data||[])){
+        const cur = byPipeline.get(r.pipeline) || {found:0, deduped:0, qualified:0, created:0};
+        cur.found    += Number(r.urls_returned)||0;
+        cur.deduped  += Number(r.urls_after_dedup)||0;
+        cur.qualified+= Number(r.passed_criteria)||0;
+        cur.created  += Number(r.leads_created)||0;
+        byPipeline.set(r.pipeline, cur);
+      }
+      const geoCounts = new Map();
+      for(const r of (geoRows.data||[])) geoCounts.set(r.geo, (geoCounts.get(r.geo)||0) + 1);
+      const topGeo = [...geoCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10);
+
+      const funnelHtml = byPipeline.size
+        ? [...byPipeline.entries()].map(([p, c]) => `
+          <div style="margin-bottom:14px;">
+            <div class="mb-label" style="margin-bottom:6px;">${esc(p)}</div>
+            <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;font-family:var(--font-mono);color:var(--text2);">
+              <span>found ${c.found}</span><span>→</span><span>deduped ${c.deduped}</span><span>→</span>
+              <span>qualified ${c.qualified}</span><span>→</span><span style="color:var(--text);">лидов ${c.created}</span>
+            </div>
+          </div>`).join('')
+        : `<div class="mb-empty">За 30 дней прогонов не было (pipeline_stats пока пишет только search — остальные не подключены, см. аудит).</div>`;
+
+      const geoHtml = topGeo.length
+        ? `<table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+            ${topGeo.map(([g,c]) => `<tr style="border-top:1px solid var(--border);">
+              <td style="padding:6px 0;color:var(--text2);">${esc(g)}</td>
+              <td style="padding:6px 0;text-align:right;font-family:var(--font-mono);color:var(--text);">${c}</td>
+            </tr>`).join('')}
+          </table>`
+        : `<div class="mb-empty">Нет лидов с проставленным brand_id и ГЕО — либо бренд ещё не запускался, либо это старые лиды без brand_id (см. аудит).</div>`;
+
+      box.innerHTML = `
+        <div style="margin-bottom:18px;">
+          <div style="font-family:var(--font-head);font-size:20px;font-weight:600;color:var(--text);">${esc(brand.name)}</div>
+          <div style="font-size:12px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">
+            ${(brand.geo_list||[]).length} ГЕО · RS ${brand.rs_start}–${brand.rs_cap}% · ${brand.vertical} · вес крона ${brand.cron_weight}
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:14px;">
+          <div class="mb-card">
+            <div class="mb-label" style="margin-bottom:12px;">Воронка (30 дней, по пайплайнам)</div>
+            ${funnelHtml}
+          </div>
+          <div class="mb-card">
+            <div class="mb-label" style="margin-bottom:12px;">ГЕО — топ-10 по числу лидов</div>
+            ${geoHtml}
+          </div>
+        </div>
+        <div class="mb-card">
+          <div class="mb-label" style="margin-bottom:8px;">Последние события</div>
+          <div class="mb-empty">Ожидает данных: error_log ещё не проставляет brand_id (см. аудит) — фильтрация по бренду сейчас вернула бы пустой список независимо от реальных событий, поэтому экран честно не показывает ленту вместо фейкового «событий нет».</div>
+        </div>`;
+    } catch(e){
+      box.innerHTML = `<div class="mb-card"><div style="color:var(--red);font-size:13px;">Не удалось загрузить: ${esc(e.message||e)}</div></div>`;
+    }
+  }
+
+  // ── 6.11 Ротация (кросс-брендовый) ──────────────────────────────────
+  let rotationFilter = { ownerSlug: '', status: '', q: '' };
+
+  async function renderRotation(){
+    const box = document.getElementById('mb-content-x-rotation');
+    if(!box) return;
+    box.innerHTML = '<div class="mb-empty">Загрузка…</div>';
+    try {
+      const brands = await loadBrands();
+      const brandById = new Map(brands.map(b => [b.id, b]));
+
+      let q = sb.from('contact_registry').select('*').order('updated_at', {ascending:false}).limit(500);
+      if(rotationFilter.status) q = q.eq('status', rotationFilter.status);
+      if(rotationFilter.ownerSlug){
+        const ownerId = brands.find(b => b.slug === rotationFilter.ownerSlug)?.id;
+        if(ownerId) q = q.eq('current_owner_brand_id', ownerId);
+      }
+      if(rotationFilter.q) q = q.ilike('domain', `%${rotationFilter.q}%`);
+      const {data, error} = await q;
+      if(error) throw error;
+      const rows = data || [];
+
+      const counts = {active:0, cooldown:0, frozen:0};
+      for(const r of rows) counts[r.status] = (counts[r.status]||0) + 1;
+
+      const brandOpts = brands.map(b => `<option value="${b.slug}" ${rotationFilter.ownerSlug===b.slug?'selected':''}>${esc(b.name)}</option>`).join('');
+
+      const rowsHtml = rows.length ? rows.map(r => {
+        const owner = brandById.get(r.current_owner_brand_id);
+        const next  = brandById.get(r.next_eligible_brand_id);
+        const statusColor = r.status==='frozen' ? 'var(--red)' : r.status==='cooldown' ? 'var(--amber)' : 'var(--green)';
+        return `<tr style="border-top:1px solid var(--border);">
+          <td style="padding:7px 10px 7px 0;font-family:var(--font-mono);font-size:11.5px;color:var(--text2);">
+            ${esc(r.domain || '—')}<div style="color:var(--text3);font-size:10px;">${esc((r.contact_hash||'').slice(0,12))}…</div>
+          </td>
+          <td style="padding:7px 10px 7px 0;">${owner ? esc(owner.name) : '—'}</td>
+          <td style="padding:7px 10px 7px 0;font-family:var(--font-mono);font-size:11.5px;color:var(--text3);">
+            ${r.owned_until ? new Date(r.owned_until).toLocaleString('ru',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}
+          </td>
+          <td style="padding:7px 10px 7px 0;">${next ? esc(next.name) : '<span style="color:var(--text3);">—</span>'}</td>
+          <td style="padding:7px 10px 7px 0;text-align:center;font-family:var(--font-mono);">${r.total_touches||0}</td>
+          <td style="padding:7px 10px 7px 0;">
+            <span style="font-size:10px;font-family:var(--font-mono);padding:2px 8px;border-radius:20px;background:${statusColor}22;color:${statusColor};">${r.status}</span>
+          </td>
+          <td style="padding:7px 0 7px 10px;text-align:right;white-space:nowrap;">
+            ${r.status!=='frozen' ? `<button class="mb-xbtn" style="padding:3px 8px;font-size:10.5px;" onclick="MB.releaseContact('${r.contact_hash}')">Освободить</button>` : ''}
+            ${r.status!=='frozen' ? `<button class="mb-xbtn" style="padding:3px 8px;font-size:10.5px;" onclick="MB.freezeContact('${r.contact_hash}')">Заморозить</button>` : ''}
+          </td>
+        </tr>`;
+      }).join('') : `<tr><td colspan="7" class="mb-empty">Нет записей под текущим фильтром.</td></tr>`;
+
+      box.innerHTML = `
+        <div style="margin-bottom:18px;">
+          <div style="font-family:var(--font-head);font-size:20px;font-weight:600;color:var(--text);">Ротация</div>
+          <div style="font-size:12px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">
+            В обороте: ${counts.active||0} · на cooldown: ${counts.cooldown||0} · заморожено: ${counts.frozen||0}
+          </div>
+          <div style="font-size:11.5px;color:var(--text3);margin-top:4px;">
+            Email не хранится в contact_registry (только домен + хэш) — показать реальный адрес здесь нельзя без правки схемы Блока 1. Флаг Нику.
+          </div>
+        </div>
+        <div class="mb-card" style="margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <select onchange="MB.setRotationFilter('ownerSlug', this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:12px;">
+            <option value="">Владелец — все</option>${brandOpts}
+          </select>
+          <select onchange="MB.setRotationFilter('status', this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:12px;">
+            <option value="">Статус — все</option>
+            <option value="active" ${rotationFilter.status==='active'?'selected':''}>active</option>
+            <option value="cooldown" ${rotationFilter.status==='cooldown'?'selected':''}>cooldown</option>
+            <option value="frozen" ${rotationFilter.status==='frozen'?'selected':''}>frozen</option>
+          </select>
+          <input type="text" placeholder="поиск по домену…" value="${esc(rotationFilter.q)}"
+            oninput="MB.setRotationFilter('q', this.value)"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:12px;flex:1;min-width:160px;">
+        </div>
+        <div class="mb-card" style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:720px;">
+            <thead><tr style="color:var(--text3);text-align:left;">
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Контакт</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Владелец</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;">До</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Следующий</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;text-align:center;">Касаний</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Статус</th>
+              <th style="padding:6px 0 6px 10px;font-weight:500;"></th>
+            </tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>`;
+    } catch(e){
+      box.innerHTML = `<div class="mb-card"><div style="color:var(--red);font-size:13px;">Не удалось загрузить ротацию: ${esc(e.message||e)}<div style="color:var(--text3);margin-top:8px;font-size:12px;">Если таблицы contact_registry ещё нет — миграция 035 не применилась.</div></div></div>`;
+    }
+  }
+
+  let rotationFilterTimer = null;
+  function setRotationFilter(key, val){
+    rotationFilter[key] = val;
+    clearTimeout(rotationFilterTimer);
+    rotationFilterTimer = setTimeout(renderRotation, key === 'q' ? 300 : 0);
+  }
+
+  async function releaseContact(hash){
+    if(!confirm('Освободить контакт досрочно? Он сразу станет доступен следующему по ротации бренду.')) return;
+    const {error} = await sb.from('contact_registry')
+      .update({owned_until: new Date().toISOString(), updated_at: new Date().toISOString()})
+      .eq('contact_hash', hash);
+    if(error){ alert('Не удалось: ' + error.message); return; }
+    renderRotation();
+  }
+  async function freezeContact(hash){
+    if(!confirm('Заморозить контакт вручную? Ни один бренд больше не сможет ему писать.')) return;
+    const {error} = await sb.from('contact_registry')
+      .update({status:'frozen', updated_at: new Date().toISOString()})
+      .eq('contact_hash', hash);
+    if(error){ alert('Не удалось: ' + error.message); return; }
+    renderRotation();
+  }
+
+  window.addEventListener('hashchange', applyHash);
+
+  return {
+    goto, gotoHash, applyHash, loadBrands,
+    renderOverview, renderBrandOverview, renderRotation,
+    toggleBrandStatus, setRotationFilter, releaseContact, freezeContact,
+  };
+})();
+
+try {
+  // Только берёт управление при осмысленном мультибрендовом хэше — иначе
+  // не мешает существующему восстановлению lastPage чуть выше по файлу.
+  const h = location.hash || '';
+  if(h === '' || h === '#' || h === '#/' || h.startsWith('#/brand/') || h === '#/rotation' || h === '#/settings'){
+    MB.applyHash();
+  }
+} catch(e){ console.error('MB init:', e); }
 
 </script>
 
