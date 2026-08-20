@@ -105,6 +105,61 @@ function randInterval(): number {
   return MIN_INTERVAL_MS + Math.floor(Math.random() * (MAX_INTERVAL_MS - MIN_INTERVAL_MS));
 }
 
+// ── Block 2 (§4.4 ТЗ): contact_registry gate before a lead reaches send_queue ──
+// This is the one check that physically stops two brands writing to the same
+// contact at once — everything else in Block 1/2 (brand_id columns, cron_weight,
+// weighted brand pick) is bookkeeping around it. Wiring THIS is the precondition
+// for ever setting a second brand's cron_weight above 0; without it, turning on
+// 1xCasino/LuckyPari volume is a direct hole in the isolation Block 1 exists for.
+function domainOf(url: string | null | undefined): string {
+  if (!url) return '';
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); }
+  catch { return String(url).toLowerCase().replace(/^www\./, ''); }
+}
+
+/** brand_id -> cooldown_days, loaded once per run so the gate below is a single
+ *  RPC call per lead rather than a join. Falls back to 3 days (the shared
+ *  default in the 035 seed) if the brands table can't be reached at all. */
+async function loadCooldownMap(): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  try {
+    const { data } = await supabase.from('brands').select('id, cooldown_days');
+    for (const b of (data || [])) map.set(String(b.id), Number(b.cooldown_days) || 3);
+  } catch (_) { /* empty map — capture falls back to 3 below */ }
+  return map;
+}
+
+/** Returns true if this lead is allowed to be queued for ITS brand right now.
+ *  False means contact_registry is holding the contact for someone else (still
+ *  owned, or free but rotation named a different brand next) — the lead is
+ *  simply left out of this run, not marked in any special way: the same
+ *  candidate query runs again in 15 minutes and picks it up the moment
+ *  ownership clears, so no separate reclaim job is needed. */
+async function captureAllowed(
+  email: string, url: string, brandId: string | null, cooldownDays: number,
+): Promise<boolean> {
+  if (!brandId) return true; // no brand_id yet (pre-Block-1 row) — don't block on a gate that can't resolve
+  try {
+    const { data, error } = await supabase.rpc('fn_capture_contact', {
+      p_email: email, p_domain: domainOf(url), p_brand_id: brandId, p_cooldown_days: cooldownDays,
+    });
+    if (error) {
+      // Fail OPEN, not closed: with only 1xBet active today this gate is a
+      // structural no-op anyway (same brand on both sides of every check, see
+      // the migration's own reasoning), so an outage here must not silently
+      // zero out the one pipeline that actually sends. Logged, not swallowed —
+      // an error that never surfaces is exactly how quiet() went missing once.
+      await supabase.from('error_log').insert([{
+        level: 'warning', service: 'generate-queue',
+        message: `fn_capture_contact RPC failed, allowing through: ${error.message}`,
+      }]);
+      return true;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.allowed !== false;
+  } catch (_) { return true; }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
@@ -208,7 +263,7 @@ Deno.serve(async (req: Request) => {
 
     // Fill remaining capacity with new eligible leads
     const newQuota = Math.max(0, capacity - futurePending.length - overduePending.length);
-    let newLeads: Array<{ id: string; brand: string; source: string }> = [];
+    let newLeads: Array<{ id: string; brand: string; brand_id: string | null; source: string }> = [];
 
     if (newQuota > 0) {
       // Hard dedup: ALL-TIME — never re-contact anyone we've ever emailed
@@ -232,9 +287,11 @@ Deno.serve(async (req: Request) => {
       const { data: suppressed } = await supabase.from('suppression_list').select('email');
       const suppressedSet = new Set((suppressed || []).map(s => String(s.email).toLowerCase()));
 
+      const cooldownMap = await loadCooldownMap();
+
       const { data: candidates, error: leadsErr } = await supabase
         .from('leads')
-        .select('id, brand, contact_email, url, geo, source, fit_score, email_status, exclude_reason')
+        .select('id, brand, brand_id, contact_email, url, geo, source, fit_score, email_status, exclude_reason')
         .in('stage', ['new', 'ready', 'researched', 'followup'])
         .not('contact_email', 'is', null)
         .neq('contact_email', '')
@@ -265,7 +322,10 @@ Deno.serve(async (req: Request) => {
         // P0.1 gate: anything proven undeliverable or throwaway never goes out.
         if (l.email_status === 'invalid' || l.email_status === 'disposable') continue;
         if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;     // geo blacklist
-        newLeads.push({ id: l.id, brand: l.brand, source: l.source || 'seo' });
+        // §4.4 ТЗ: contact_registry gate — see captureAllowed above.
+        const bid = l.brand_id ? String(l.brand_id) : null;
+        if (!(await captureAllowed(l.contact_email, l.url || '', bid, bid ? (cooldownMap.get(bid) ?? 3) : 3))) continue;
+        newLeads.push({ id: l.id, brand: l.brand, brand_id: bid, source: l.source || 'seo' });
       }
 
       // ── Gentle backlog drain ────────────────────────────────────────────────
@@ -278,7 +338,7 @@ Deno.serve(async (req: Request) => {
         const pickedIds = new Set(newLeads.map(n => n.id));
         const { data: backlog } = await supabase
           .from('leads')
-          .select('id, brand, contact_email, url, geo, source')
+          .select('id, brand, brand_id, contact_email, url, geo, source')
           .in('stage', ['new', 'ready', 'researched', 'followup'])
           .not('contact_email', 'is', null)
           .neq('contact_email', '')
@@ -294,7 +354,9 @@ Deno.serve(async (req: Request) => {
           if (!isSendableEmail(l.contact_email)) continue;
           if (emailedSet.has(l.contact_email.toLowerCase())) continue;
           if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;
-          newLeads.push({ id: l.id, brand: l.brand, source: l.source || 'seo' });
+          const bid = l.brand_id ? String(l.brand_id) : null;
+          if (!(await captureAllowed(l.contact_email, l.url || '', bid, bid ? (cooldownMap.get(bid) ?? 3) : 3))) continue;
+          newLeads.push({ id: l.id, brand: l.brand, brand_id: bid, source: l.source || 'seo' });
           pickedIds.add(l.id);
           backlogAdded++;
         }
@@ -325,6 +387,7 @@ Deno.serve(async (req: Request) => {
       inserts.push({
         lead_id:       l.id,
         brand:         l.brand,
+        brand_id:      l.brand_id,
         gmail_account: 'main', // LP account disabled — all sends via main
         scheduled_at:  new Date(cursor).toISOString(),
         status:        'pending',
