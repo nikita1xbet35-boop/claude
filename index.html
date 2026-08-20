@@ -15041,10 +15041,27 @@ const MB = (() => {
 
   const state = { module: 'overview' }; // last module picked in a brand context, preserved across brand switches
 
+  // Supabase-js resolves (never rejects) on a normal API error like a missing
+  // table, so those cases were already handled — checked via `.error`. What
+  // wasn't handled: a genuinely hung connection (DNS/edge outage on Supabase's
+  // side, seen firsthand during this deploy) leaves the promise pending
+  // forever, and every screen here starts from a static "Загрузка…"
+  // placeholder — so a hang looks identical to a slow load, indefinitely,
+  // with nothing on screen to say otherwise. 12s is generous for a same-region
+  // query; past that it's not "still loading".
+  function withTimeout(promise, ms, label){
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`${label || 'запрос'}: нет ответа за ${ms/1000}с`)), ms)),
+    ]);
+  }
+
   async function loadBrands(force){
     if(brandsCache && !force) return brandsCache;
-    const {data, error} = await sb.from('brands').select('*')
-      .in('status', ['active','paused']).order('cron_weight', {ascending:false});
+    const {data, error} = await withTimeout(
+      sb.from('brands').select('*').in('status', ['active','paused']).order('cron_weight', {ascending:false}),
+      12000, 'brands',
+    );
     if(error){ console.error('MB.loadBrands', error); brandsCache = []; }
     else brandsCache = data || [];
     return brandsCache;
@@ -15075,10 +15092,16 @@ const MB = (() => {
       <button class="mb-xbtn" onclick="MB.gotoHash('#/settings')" title="Настройки системы">⚙</button>`;
   }
 
+  // Best-effort: a failed/timed-out brands fetch here must not stop whatever
+  // called this from going on to render its own content (and its own error,
+  // if IT also can't reach the network) — a blank header is a cosmetic
+  // problem, a page frozen on "Загрузка…" forever is not.
   async function paintShell(pageSuffix, kind, activeSlug){
-    await loadBrands();
-    const el = document.getElementById('mb-shell-' + pageSuffix);
-    if(el) el.innerHTML = shellHtml(kind, activeSlug);
+    try {
+      await loadBrands();
+      const el = document.getElementById('mb-shell-' + pageSuffix);
+      if(el) el.innerHTML = shellHtml(kind, activeSlug);
+    } catch(e){ console.error('MB.paintShell', e); }
   }
 
   // Единственный стиль строки модулей — горизонтальная, сверху, ВЕЗДЕ (было:
@@ -15098,11 +15121,13 @@ const MB = (() => {
   // шесть перенесённых модулей) — то, из-за чего Обзор бренда не красился,
   // было именно расхождением этой функции по разным путям для разных страниц.
   async function paintBrandContext(pageSuffix, modKey, slug){
-    await loadBrands();
-    const shellEl = document.getElementById('mb-shell-' + pageSuffix);
-    if(shellEl) shellEl.innerHTML = shellHtml('brand', slug);
-    const btnsEl = document.getElementById('mb-modbtns-' + pageSuffix);
-    if(btnsEl) btnsEl.innerHTML = moduleBarButtons(modKey, slug);
+    try {
+      await loadBrands();
+      const shellEl = document.getElementById('mb-shell-' + pageSuffix);
+      if(shellEl) shellEl.innerHTML = shellHtml('brand', slug);
+      const btnsEl = document.getElementById('mb-modbtns-' + pageSuffix);
+      if(btnsEl) btnsEl.innerHTML = moduleBarButtons(modKey, slug);
+    } catch(e){ console.error('MB.paintBrandContext', e); }
   }
 
   // ── Navigation ──────────────────────────────────────────────────────
@@ -15187,13 +15212,13 @@ const MB = (() => {
       const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
       const weekStart = new Date(now.getTime() - 7*24*3600*1000);
 
-      const [fsToday, fs7d, smtpRows, repliesToday, replies7d] = await Promise.all([
+      const [fsToday, fs7d, smtpRows, repliesToday, replies7d] = await withTimeout(Promise.all([
         sb.from('funnel_stats').select('brand_id, leads_created').in('brand_id', ids).gte('started_at', todayStart.toISOString()),
         sb.from('funnel_stats').select('brand_id, leads_created').in('brand_id', ids).gte('started_at', weekStart.toISOString()),
         sb.from('smtp_accounts').select('brand_id, daily_sent, daily_limit, status').in('brand_id', ids),
         sb.from('leads').select('brand_id').in('brand_id', ids).gte('replied_at', todayStart.toISOString()),
         sb.from('leads').select('brand_id').in('brand_id', ids).gte('replied_at', weekStart.toISOString()),
-      ]);
+      ]), 15000, 'обзор');
 
       const sumBy = (rows, key) => {
         const m = new Map();
@@ -15301,11 +15326,11 @@ const MB = (() => {
         return;
       }
       const since = new Date(Date.now() - 30*24*3600*1000).toISOString();
-      const [fsRows, geoRows] = await Promise.all([
+      const [fsRows, geoRows] = await withTimeout(Promise.all([
         sb.from('funnel_stats').select('pipeline, urls_returned, urls_after_dedup, passed_criteria, leads_created')
           .eq('brand_id', brand.id).gte('started_at', since),
         sb.from('leads').select('geo').eq('brand_id', brand.id).not('geo','is',null).limit(2000),
-      ]);
+      ]), 15000, 'обзор бренда');
 
       const byPipeline = new Map();
       for(const r of (fsRows.data||[])){
@@ -15384,7 +15409,7 @@ const MB = (() => {
         if(ownerId) q = q.eq('current_owner_brand_id', ownerId);
       }
       if(rotationFilter.q) q = q.ilike('domain', `%${rotationFilter.q}%`);
-      const {data, error} = await q;
+      const {data, error} = await withTimeout(q, 15000, 'ротация');
       if(error) throw error;
       const rows = data || [];
 
