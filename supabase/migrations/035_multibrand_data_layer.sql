@@ -89,9 +89,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.contact_registry TO anon, authent
 -- ════════════════════════════════════════════════════════════════════════════
 -- 3. CONTACT_TOUCHES — журнал касаний
 -- ════════════════════════════════════════════════════════════════════════════
+-- ON UPDATE CASCADE — контакт, найденный сперва без email, лежит под
+-- sha256(domain). Когда email находится позже, fn_capture_contact переносит
+-- запись на sha256(email) (п. 4.2 ТЗ: "на upsert смотреть сначала по email,
+-- потом по домену"), а история в contact_touches должна поехать вместе с ней,
+-- а не остаться висеть на старом хэше.
 CREATE TABLE IF NOT EXISTS public.contact_touches (
   id            BIGSERIAL PRIMARY KEY,
-  contact_hash  TEXT NOT NULL REFERENCES public.contact_registry(contact_hash),
+  contact_hash  TEXT NOT NULL REFERENCES public.contact_registry(contact_hash) ON UPDATE CASCADE,
   brand_id      UUID NOT NULL REFERENCES public.brands(id),
   pipeline      TEXT NOT NULL,                    -- search | dataforseo | brand | conference
   channel       TEXT NOT NULL DEFAULT 'email',     -- email | telegram
@@ -176,51 +181,84 @@ $$;
 -- Захват контакта под бренд (п. 4.4 ТЗ). SECURITY DEFINER + один UPDATE/INSERT
 -- под общей блокировкой строки — нужен, чтобы два пайплайна не могли захватить
 -- один и тот же контакт в одну и ту же миллисекунду мимо друг друга.
--- Возвращает allowed=false с reason, когда слать нельзя.
+--
+-- Принимает email И domain отдельно (не готовый хэш), потому что п. 4.2 ТЗ
+-- требует смотреть сначала по email, потом по домену: контакт мог быть
+-- заведён домен-хэшем, когда email ещё не был найден, и теперь, когда email
+-- есть, запись нужно НАЙТИ под старым (доменным) хэшем и перенести на
+-- email-хэш, а не создать вторую строку с нулевой историей.
+--
+-- Возвращает allowed=false с reason, когда слать нельзя, и resolved_hash —
+-- каким contact_hash в итоге записан этот контакт (передавать в fn_record_touch).
 CREATE OR REPLACE FUNCTION public.fn_capture_contact(
-  p_contact_hash TEXT,
+  p_email        TEXT,
   p_domain       TEXT,
   p_brand_id     UUID,
   p_cooldown_days INTEGER
-) RETURNS TABLE(allowed BOOLEAN, reason TEXT)
+) RETURNS TABLE(allowed BOOLEAN, reason TEXT, resolved_hash TEXT)
 LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   v_row public.contact_registry%ROWTYPE;
   v_max_touches INTEGER;
+  v_email_hash TEXT;
+  v_domain_hash TEXT;
+  v_contact_hash TEXT;
 BEGIN
+  v_email_hash  := CASE WHEN p_email IS NOT NULL AND trim(p_email) <> ''
+                        THEN public.fn_contact_hash(p_email, NULL) END;
+  v_domain_hash := CASE WHEN p_domain IS NOT NULL AND trim(p_domain) <> ''
+                        THEN public.fn_contact_hash(NULL, p_domain) END;
+
   SELECT (value #>> '{}')::INTEGER INTO v_max_touches
     FROM public.system_config WHERE key = 'max_touches_per_contact';
   v_max_touches := COALESCE(v_max_touches, 5);
 
-  SELECT * INTO v_row FROM public.contact_registry
-    WHERE contact_hash = p_contact_hash FOR UPDATE;
+  -- Сначала по email (если он есть).
+  IF v_email_hash IS NOT NULL THEN
+    SELECT * INTO v_row FROM public.contact_registry
+      WHERE contact_hash = v_email_hash FOR UPDATE;
+  END IF;
+
+  -- Не нашли по email (или email не передали) — пробуем по домену. Найденная
+  -- здесь строка при наличии email переносится на email-хэш ниже.
+  IF NOT FOUND AND v_domain_hash IS NOT NULL THEN
+    SELECT * INTO v_row FROM public.contact_registry
+      WHERE contact_hash = v_domain_hash FOR UPDATE;
+    IF FOUND AND v_email_hash IS NOT NULL THEN
+      UPDATE public.contact_registry SET contact_hash = v_email_hash, updated_at = now()
+        WHERE contact_hash = v_domain_hash;  -- ON UPDATE CASCADE переносит contact_touches
+      v_row.contact_hash := v_email_hash;
+    END IF;
+  END IF;
+
+  v_contact_hash := COALESCE(v_email_hash, v_domain_hash);
 
   -- Новый контакт — захватываем сразу.
   IF NOT FOUND THEN
     INSERT INTO public.contact_registry
       (contact_hash, domain, first_seen_brand_id, current_owner_brand_id, owned_until, total_touches, status)
     VALUES
-      (p_contact_hash, p_domain, p_brand_id, p_brand_id, now() + make_interval(days => p_cooldown_days), 0, 'active');
-    RETURN QUERY SELECT TRUE, 'new'::TEXT;
+      (v_contact_hash, p_domain, p_brand_id, p_brand_id, now() + make_interval(days => p_cooldown_days), 0, 'active');
+    RETURN QUERY SELECT TRUE, 'new'::TEXT, v_contact_hash;
     RETURN;
   END IF;
 
   IF v_row.status = 'frozen' THEN
-    RETURN QUERY SELECT FALSE, 'frozen: max_touches reached'::TEXT;
+    RETURN QUERY SELECT FALSE, 'frozen: max_touches reached'::TEXT, v_contact_hash;
     RETURN;
   END IF;
 
   IF v_row.total_touches >= v_max_touches THEN
     UPDATE public.contact_registry SET status = 'frozen', updated_at = now()
-      WHERE contact_hash = p_contact_hash;
-    RETURN QUERY SELECT FALSE, 'frozen: max_touches reached'::TEXT;
+      WHERE contact_hash = v_contact_hash;
+    RETURN QUERY SELECT FALSE, 'frozen: max_touches reached'::TEXT, v_contact_hash;
     RETURN;
   END IF;
 
   -- Тот же бренд, ещё в окне владения — можно слать в рамках той же кампании.
   IF v_row.current_owner_brand_id = p_brand_id
      AND (v_row.owned_until IS NULL OR v_row.owned_until > now()) THEN
-    RETURN QUERY SELECT TRUE, 'same_brand_active_ownership'::TEXT;
+    RETURN QUERY SELECT TRUE, 'same_brand_active_ownership'::TEXT, v_contact_hash;
     RETURN;
   END IF;
 
@@ -229,7 +267,7 @@ BEGIN
   IF v_row.current_owner_brand_id IS DISTINCT FROM p_brand_id THEN
     IF (v_row.owned_until IS NOT NULL AND v_row.owned_until > now())
        OR v_row.next_eligible_brand_id IS DISTINCT FROM p_brand_id THEN
-      RETURN QUERY SELECT FALSE, 'owned_by_other_brand'::TEXT;
+      RETURN QUERY SELECT FALSE, 'owned_by_other_brand'::TEXT, v_contact_hash;
       RETURN;
     END IF;
 
@@ -238,8 +276,8 @@ BEGIN
       owned_until              = now() + make_interval(days => p_cooldown_days),
       next_eligible_brand_id   = NULL,
       updated_at               = now()
-    WHERE contact_hash = p_contact_hash;
-    RETURN QUERY SELECT TRUE, 'rotated_to_this_brand'::TEXT;
+    WHERE contact_hash = v_contact_hash;
+    RETURN QUERY SELECT TRUE, 'rotated_to_this_brand'::TEXT, v_contact_hash;
     RETURN;
   END IF;
 
@@ -247,12 +285,15 @@ BEGIN
   UPDATE public.contact_registry SET
     owned_until = now() + make_interval(days => p_cooldown_days),
     updated_at  = now()
-  WHERE contact_hash = p_contact_hash;
-  RETURN QUERY SELECT TRUE, 'renewed'::TEXT;
+  WHERE contact_hash = v_contact_hash;
+  RETURN QUERY SELECT TRUE, 'renewed'::TEXT, v_contact_hash;
 END;
 $$;
 
 -- Записать факт отправки (последняя часть п. 4.4) — total_touches++ и журнал.
+-- Замораживает контакт СРАЗУ по достижении max_touches, а не лениво на
+-- следующей попытке fn_capture_contact — DoD-тест "5 касаний → status=frozen"
+-- проверяет состояние сразу после пятого касания, до всякой шестой попытки.
 CREATE OR REPLACE FUNCTION public.fn_record_touch(
   p_contact_hash TEXT,
   p_brand_id     UUID,
@@ -260,12 +301,26 @@ CREATE OR REPLACE FUNCTION public.fn_record_touch(
   p_channel      TEXT DEFAULT 'email',
   p_outcome      TEXT DEFAULT 'sent'
 ) RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_max_touches INTEGER;
+  v_total INTEGER;
 BEGIN
+  SELECT (value #>> '{}')::INTEGER INTO v_max_touches
+    FROM public.system_config WHERE key = 'max_touches_per_contact';
+  v_max_touches := COALESCE(v_max_touches, 5);
+
   INSERT INTO public.contact_touches (contact_hash, brand_id, pipeline, channel, outcome)
     VALUES (p_contact_hash, p_brand_id, p_pipeline, p_channel, p_outcome);
+
   UPDATE public.contact_registry
     SET total_touches = total_touches + 1, updated_at = now()
-    WHERE contact_hash = p_contact_hash;
+    WHERE contact_hash = p_contact_hash
+    RETURNING total_touches INTO v_total;
+
+  IF v_total >= v_max_touches THEN
+    UPDATE public.contact_registry SET status = 'frozen', updated_at = now()
+      WHERE contact_hash = p_contact_hash;
+  END IF;
 END;
 $$;
 
@@ -336,7 +391,62 @@ BEGIN
 END;
 $$;
 
+-- ── п. 4.6 ТЗ: пул API-ключей ────────────────────────────────────────────────
+-- Три функции, а не одна — потому что "взять ключ" (частый вызов, каждый
+-- Groq/SerpApi запрос) и "забанить ключ" (редкий, на 401/403/429-с-баном)
+-- бьются разными правами и разной частотой; смешивать их в одну — то же, что
+-- смешивать дедуп и шумовые фильтры одним счётчиком (034), которое здесь уже
+-- один раз аукнулось.
+
+-- Взять следующий рабочий ключ для провайдера (п. 4.6.1). brand_id=NULL в
+-- строке ключа значит "общий пул, доступен всем" — поэтому OR, не AND.
+CREATE OR REPLACE FUNCTION public.fn_next_api_key(p_provider TEXT, p_brand_id UUID DEFAULT NULL)
+RETURNS public.api_keys
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_key public.api_keys%ROWTYPE;
+BEGIN
+  SELECT * INTO v_key FROM public.api_keys
+    WHERE provider = p_provider
+      AND status = 'active'
+      AND (brand_id = p_brand_id OR brand_id IS NULL)
+      AND (daily_limit IS NULL OR daily_used < daily_limit)
+    ORDER BY last_used_at ASC NULLS FIRST
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED;
+
+  IF FOUND THEN
+    UPDATE public.api_keys
+      SET daily_used = daily_used + 1, last_used_at = now()
+      WHERE id = v_key.id;
+  END IF;
+
+  RETURN v_key;
+END;
+$$;
+
+-- Забанить ключ (п. 4.6.2). Алерт в TG — задача воркера, не этой функции: она
+-- только помечает статус, чтобы следующий SELECT в fn_next_api_key его больше
+-- не увидел.
+CREATE OR REPLACE FUNCTION public.fn_ban_api_key(p_key_id UUID, p_reason TEXT)
+RETURNS VOID LANGUAGE sql SECURITY DEFINER AS $$
+  UPDATE public.api_keys
+    SET status = 'banned', banned_at = now(), ban_reason = p_reason
+    WHERE id = p_key_id;
+$$;
+
+-- Сброс дневных счётчиков в полночь UTC (п. 4.6.3) — тот же паттерн, что
+-- daily-сброс api_usage в check-limits.ts, отдельная функция вместо
+-- дублирования этой логики внутри каждого воркера, который берёт ключ.
+CREATE OR REPLACE FUNCTION public.fn_reset_api_key_usage()
+RETURNS VOID LANGUAGE sql SECURITY DEFINER AS $$
+  UPDATE public.api_keys SET daily_used = 0;
+$$;
+
 GRANT EXECUTE ON FUNCTION public.fn_contact_hash(TEXT, TEXT) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.fn_capture_contact(TEXT, TEXT, UUID, INTEGER) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.fn_record_touch(TEXT, UUID, TEXT, TEXT, TEXT) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.fn_rotate_contacts() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.fn_next_api_key(TEXT, UUID) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.fn_ban_api_key(UUID, TEXT) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.fn_reset_api_key_usage() TO anon, authenticated, service_role;
