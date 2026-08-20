@@ -1051,6 +1051,21 @@
   </div>
 </div>
 
+<!-- Плавающая кнопка возврата в мультибрендовую навигацию. Существует ОТДЕЛЬНО
+     от .page-блоков (не внутри ни одного из них), поэтому видна всегда — в том
+     числе на старых страницах (Автомат/YouTube/Telegram/DataForSEO/Brand/Базы),
+     которые пока не несут новую шапку сами (см. комментарий в MB-модуле, п.4
+     "Порядка работ" ещё не сделан). Без неё уйти в Автомат из рейла — путь в
+     один конец, обратно только руками менять #-хэш в адресной строке. -->
+<button id="mb-back-fab" onclick="MB.gotoHash('#/')"
+  style="position:fixed;bottom:18px;right:18px;z-index:500;display:flex;align-items:center;gap:6px;
+  padding:9px 16px;border-radius:999px;background:var(--bg3);border:1px solid var(--border2);
+  color:var(--text2);font-size:12px;font-family:var(--font-mono);cursor:pointer;
+  box-shadow:var(--shadow-lg,0 8px 24px rgba(0,0,0,.4));transition:all .15s;"
+  onmouseover="this.style.color='var(--text)';this.style.borderColor='var(--accent)';"
+  onmouseout="this.style.color='var(--text2)';this.style.borderColor='var(--border2)';"
+  title="Обзор — мультибренд">◈ Обзор</button>
+
 <!-- PAGE 0: DASHBOARD -->
 <div class="page active" id="page-dashboard">
   <header class="topbar">
