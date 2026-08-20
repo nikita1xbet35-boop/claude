@@ -60,6 +60,43 @@ async function quiet(p: PromiseLike<unknown>): Promise<void> {
   try { await p; } catch { /* bookkeeping is best-effort */ }
 }
 
+// ── Block 2 (§4.4 ТЗ): contact_registry gate — see generate-queue.ts for the
+// full reasoning.
+function domainOf(url: string | null | undefined): string {
+  if (!url) return '';
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); }
+  catch { return String(url).toLowerCase().replace(/^www\./, ''); }
+}
+
+async function loadCooldownMap(): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  try {
+    const { data } = await supabase.from('brands').select('id, cooldown_days');
+    for (const b of (data || [])) map.set(String(b.id), Number(b.cooldown_days) || 3);
+  } catch (_) { /* empty map — capture falls back to 3 below */ }
+  return map;
+}
+
+async function captureAllowed(
+  email: string, url: string, brandId: string | null, cooldownDays: number,
+): Promise<boolean> {
+  if (!brandId) return true;
+  try {
+    const { data, error } = await supabase.rpc('fn_capture_contact', {
+      p_email: email, p_domain: domainOf(url), p_brand_id: brandId, p_cooldown_days: cooldownDays,
+    });
+    if (error) {
+      await quiet(supabase.from('error_log').insert([{
+        level: 'warning', service: 'generate-queue-dfs',
+        message: `fn_capture_contact RPC failed, allowing through: ${error.message}`,
+      }]));
+      return true;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.allowed !== false;
+  } catch (_) { return true; }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
@@ -143,8 +180,10 @@ Deno.serve(async (req: Request) => {
     const suppressedSet = new Set((suppressed || [])
       .map((s: any) => String(s.email || '').toLowerCase()));
 
+    const cooldownMap = await loadCooldownMap();
+
     const { data: candidates, error: leadsErr } = await supabase.from('leads')
-      .select('id, brand, contact_email, fit_score, email_status, exclude_reason, affiliate_maturity')
+      .select('id, brand, brand_id, url, contact_email, fit_score, email_status, exclude_reason, affiliate_maturity')
       .eq('pipeline', PIPELINE)
       .in('stage', ['new', 'ready', 'researched', 'followup'])
       .not('contact_email', 'is', null)
@@ -162,7 +201,7 @@ Deno.serve(async (req: Request) => {
                            + ((l.fit_score ?? 35) as number);
     const ranked = [...(candidates || [])].sort((a, b) => rank(b) - rank(a));
 
-    const picked: Array<{ id: string; brand: string }> = [];
+    const picked: Array<{ id: string; brand: string; brand_id: string | null }> = [];
     for (const l of ranked) {
       if (picked.length >= capacity) break;
       if (queuedLeadIds.has(String(l.id))) continue;
@@ -172,7 +211,9 @@ Deno.serve(async (req: Request) => {
       if (emailed.has(em)) continue;
       if (suppressedSet.has(em)) continue;
       if (l.email_status === 'invalid' || l.email_status === 'disposable') continue;
-      picked.push({ id: String(l.id), brand: l.brand || '1xbet' });
+      const bid = l.brand_id ? String(l.brand_id) : null;
+      if (!(await captureAllowed(l.contact_email, l.url || '', bid, bid ? (cooldownMap.get(bid) ?? 3) : 3))) continue;
+      picked.push({ id: String(l.id), brand: l.brand || '1xbet', brand_id: bid });
     }
 
     if (!picked.length) { stats.reason = 'no eligible leads'; return json(stats); }
@@ -185,6 +226,7 @@ Deno.serve(async (req: Request) => {
       inserts.push({
         lead_id:       l.id,
         brand:         l.brand,
+        brand_id:      l.brand_id,
         gmail_account: 'main',
         scheduled_at:  new Date(cursor).toISOString(),
         status:        'pending',

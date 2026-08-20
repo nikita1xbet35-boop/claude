@@ -669,6 +669,23 @@ Deno.serve(async (req: Request) => {
 
         await supabase.from('leads').update({ stage: 'waiting' }).eq('id', item.lead_id);
 
+        // §4.4 ТЗ (Block 1/2): record the touch now that the send actually
+        // happened. fn_capture_contact (called before this lead reached
+        // send_queue) already reserved ownership; this is what makes
+        // total_touches/max_touches and the rotation gap check (min_gap_after,
+        // read from contact_touches) mean anything in practice. Best-effort —
+        // a failure here must not turn a successful send into a failed run.
+        if (lead.brand_id) {
+          try {
+            let domain = '';
+            try { domain = new URL(String(lead.url || '')).hostname.toLowerCase().replace(/^www\./, ''); } catch {}
+            await supabase.rpc('fn_record_touch_by_contact', {
+              p_email: lead.contact_email, p_domain: domain, p_brand_id: lead.brand_id,
+              p_pipeline: (item.pipeline as string) || 'search', p_channel: 'email', p_outcome: 'sent',
+            });
+          } catch (_) { /* best-effort — see comment above */ }
+        }
+
         accountQuotaCache[account]++;
         stats.sent++;
       } else {

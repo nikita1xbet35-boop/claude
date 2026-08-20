@@ -64,8 +64,7 @@ function groqModelGone(status: number, text: string): boolean {
 }
 
 const GROQ_KEYS = [
-  Deno.env.get('GROQ_API_KEY') ||
-    ['gsk_9DKnaMxmKm8WEPDDjtZbWGdyb3FYX', 'R6kIEWkpNsjz6BlDlvj347v'].join(''),
+  Deno.env.get('GROQ_API_KEY') || '',
   Deno.env.get('GROQ_KEY_2') || '',
   Deno.env.get('GROQ_KEY_3') || '',
 ].filter(Boolean);
@@ -972,15 +971,100 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
   return null;
 }
 
+// Block 2 (multibrand execution layer) — brand config needed to build the
+// qualification prompt. Loaded once per run from `brands` (see loadBrandConfig
+// below) and threaded through instead of the bare slug that used to be here.
+interface BrandConfig {
+  id: string | null;
+  slug: string;
+  name: string;
+  geo_list: string[];
+  vertical: string; // 'standard' | 'casino_slots'
+}
+
+// §4.2 ТЗ, sentinel used by 1xBet's seed row. geo_list for 1xbet is
+// `["worldwide_ex_tier1_brazil"]` — a flag meaning "keep the old broad
+// Tier-1-exclusion behaviour", not a literal country list. Feeding that string
+// to the LLM as "TARGET GEO: worldwide_ex_tier1_brazil" would be gibberish, so
+// this one value is special-cased to the pre-Block-2 exclusion wording instead
+// of the new allowlist wording. Any brand with a REAL geo_list (1xcasino,
+// luckypari) gets the new allowlist prompt.
+const GEO_SENTINEL_WORLDWIDE_EX_TIER1 = 'worldwide_ex_tier1_brazil';
+
+// §4.2 ТЗ vertical_block — two fixed variants, picked by brand.vertical.
+function verticalBlock(vertical: string): string {
+  if (vertical === 'casino_slots') {
+    return `We want: sites that OWN an audience around online casino and slots specifically.
+PRIORITIZE: casino review/comparison portals, slot review sites, casino bonus/promo-code
+sites, slot-streaming content (Twitch/YouTube casino streamers with a blog or landing page),
+"best online casino {geo}" content sites, jackpot/RTP guide sites.
+Pure sportsbook-only tipsters with no casino content are LOWER priority (still relevant=true
+if they own a betting audience, but score should reflect the vertical mismatch) — do not
+mark them audience_owner=false only for this reason, adjust score instead.
+Promoting casino bonuses or writing slot reviews is a POSITIVE signal.`;
+  }
+  return `We want: sites that OWN an audience and can promote a bookmaker. That includes:
+tipsters, prediction sites, betting review/comparison sites, sports blogs, sports media,
+news portals with a sports vertical, content sites that write betting guides,
+bonus/promo-code sites, and anyone already promoting a bookmaker.
+Writing guides, tutorials or promoting bookmakers is a POSITIVE signal — it proves they
+own betting audience and know how to monetise it.`;
+}
+
+// §4.2 ТЗ operator_exclusion_note. `brands` (Block 1) has no column for this —
+// it's a short, brand-specific list of structural exclusions (partner
+// territory / competitor-owned networks), not config data that changes per
+// deploy. Hardcoded map instead of a DB column for the same reason
+// COMPETITOR_OWNED/PARTNER_TERRITORY in score-leads.ts are code, not data:
+// this is a business rule someone reasons about, not a knob someone turns.
+const OPERATOR_EXCLUSION_NOTES: Record<string, string> = {
+  '1xbet': 'Additionally exclude: sites structurally tied to the Pulse Sports network (Pulse Sports / Pulse.ng and its affiliated properties) — partner territory, not a target.',
+};
+
+// Loads the brand row selected for this run and reduces it to what the prompt
+// needs. Falls back to the pre-Block-2 1xBet defaults on any DB error so a
+// broken lookup degrades to old behaviour instead of killing the run.
+async function loadBrandConfig(brandSlug: string): Promise<BrandConfig> {
+  try {
+    const { data } = await supabase.from('brands').select('id, slug, name, geo_list, vertical')
+      .eq('slug', brandSlug).single();
+    if (data) {
+      return {
+        id: data.id, slug: data.slug, name: data.name,
+        geo_list: Array.isArray(data.geo_list) ? data.geo_list : [],
+        vertical: data.vertical || 'standard',
+      };
+    }
+  } catch (_) { /* fall through to default below */ }
+  return { id: null, slug: '1xbet', name: '1xBet', geo_list: [GEO_SENTINEL_WORLDWIDE_EX_TIER1], vertical: 'standard' };
+}
+
 // Analyzes a BATCH of sites in ONE Groq call using title+snippet only.
 // Returns a map: batch index → Analysis. Missing index = Groq failed for that site.
 async function analyzeBatchWithGroq(
-  cands: Array<{ url: string; title: string; snippet: string }>, brand: string,
+  cands: Array<{ url: string; title: string; snippet: string }>, brandCfg: BrandConfig,
 ): Promise<Map<number, Analysis>> {
   const out = new Map<number, Analysis>();
   if (cands.length === 0) return out;
-  const partnerBrand = brand === '1xcasino' ? '1xCasino'
-                     : brand === 'luckypari' ? 'LuckyPari' : '1xBet';
+
+  const isSentinelGeo = brandCfg.geo_list.length === 1
+    && brandCfg.geo_list[0] === GEO_SENTINEL_WORLDWIDE_EX_TIER1;
+  // Two things need to agree on the same rule: the header block (only shown
+  // for a real geo_list) and the geo_excluded line inside FIELD RULES (always
+  // shown). Keeping this in one variable is the same "one place, not two
+  // copies to drift apart" reasoning as the funnel_24h view — a prompt that
+  // told the model "target GEO is X" up top and "excluded if in Y" in FIELD
+  // RULES would just be quietly self-contradictory.
+  const geoHeaderBlock = isSentinelGeo ? '' :
+    `TARGET GEO for this brand: ${brandCfg.geo_list.join(', ')}.
+If the site's audience is clearly outside this list, set geo_excluded=true.
+
+`;
+  const geoFieldRuleLine = isSentinelGeo
+    ? `- geo_excluded: primary audience is US/UK/Western Europe/Ukraine/Brazil/Australia.`
+    : `- geo_excluded: true if the site's audience is clearly outside this brand's target GEO (${brandCfg.geo_list.join(', ')}).`;
+  const operatorNote = OPERATOR_EXCLUSION_NOTES[brandCfg.slug]
+    ? `\n${OPERATOR_EXCLUSION_NOTES[brandCfg.slug]}\n` : '';
 
   // v6: the model no longer just classifies a site type — it judges PARTNER FITNESS.
   // Owning an audience and already monetising it matter more than polish, because a
@@ -989,28 +1073,28 @@ async function analyzeBatchWithGroq(
   // NB: the brief asks for a bare JSON array, but Groq's json_object mode rejects a
   // top-level array, so results stay wrapped in {"results":[...]} and are matched by
   // the numeric index rather than by url (the model sometimes rewrites urls).
-  const sys = `You are a partner-acquisition analyst for a betting affiliate program (${partnerBrand}).
-You evaluate websites as POTENTIAL PARTNERS who could send us betting traffic.
+  //
+  // §4.2 ТЗ: one template, brand.geo_list/vertical/name substituted at call time —
+  // no per-brand copies of this prompt to drift apart from each other.
+  const sys = `You are a partner-acquisition analyst for a betting affiliate program (${brandCfg.name}).
+You evaluate websites as POTENTIAL PARTNERS who could send us traffic.
 
-We want: sites that OWN an audience and can promote a bookmaker.
-That includes: tipsters, prediction sites, betting review/comparison sites, sports blogs,
-sports media, news portals with a sports vertical, content sites that write betting guides,
-bonus/promo-code sites, and anyone already promoting a bookmaker.
-
-Writing guides, tutorials or promoting bookmakers is a POSITIVE signal — it proves they own
-betting audience and know how to monetise it.
+${geoHeaderBlock}${verticalBlock(brandCfg.vertical)}
 
 We do NOT want (set audience_owner=false AND relevant=false for ALL of these):
-- the bookmakers themselves (operators) AND their official affiliate PROGRAM pages
+- the bookmaker/operator itself (any brand) AND official affiliate PROGRAM pages
 - banks, microfinance, SACCOs, insurance, loan/mortgage sites, payment providers, fintech
 - academic / research / journal / university sites, .edu, papers, theses
 - government, regulatory, ministry, NGO and official-body sites (.gov, .gouv, .go.*)
 - law firms, attorneys, legal-services sites
 - livescore/stats-only services, streaming sites, forums, app-download pages,
-  marketplaces, job boards, and any page with no owned audience.
+  marketplaces, job boards, and any page with no owned audience
+- sites structurally owned by a competitor operator group (e.g. Sporty Group -> SportyBet)
+- sites already displaying a "${brandCfg.name}" promo code (already occupied by another manager)
+${operatorNote}
 It is a serious error to pitch a partnership to a bank, a law firm, a university,
 a government body, or a competitor's own affiliate programme. When unsure whether a
-site OWNS a betting audience, answer audience_owner=false.
+site OWNS an audience matching this brand, answer audience_owner=false.
 
 You get ${cands.length} numbered sites. Return ONLY JSON, one entry per site, same numbering:
 {"results":[{
@@ -1042,7 +1126,7 @@ FIELD RULES:
 - promotes_competitor: competitor bookmaker name if the site promotes one, "" if none.
 - has_partnership_path: partner/advertise/media/press page or B2B contact visible.
 - is_operator: the site IS the bookmaker/casino itself or its official mirror.
-- geo_excluded: primary audience is US/UK/Western Europe/Ukraine/Brazil/Australia.
+${geoFieldRuleLine}
 - score: content quality + audience depth.
 
 RULES for "relevant":
@@ -1356,7 +1440,7 @@ Deno.serve(async (req: Request) => {
   jinaCount = 0;
   groqCount = 0;
   const stats = {
-    brand: '', preset: '', layer: '', keywords_run: 0,
+    brand: '', brand_id: null as string | null, preset: '', layer: '', keywords_run: 0,
     found: 0, analyzed: 0, irrelevant: 0, competitors: 0, geo_excluded: 0,
     not_audience_owner: 0,
     saved: 0, contacts: 0, errors: [] as string[],
@@ -1397,10 +1481,30 @@ Deno.serve(async (req: Request) => {
     // 2. Determine brand + preset — slot advances every 3 min (matches the find-and-queue
     //    cron) so each run picks a fresh set of keywords rather than re-searching the same ones.
     const slotIndex = Math.floor(Date.now() / (3 * 60 * 1000));
-    // 1xcasino paused — hunt 1xBet affiliates only
-    const BRANDS    = ['1xbet'] as const;
-    const brand     = BRANDS[slotIndex % BRANDS.length];
+
+    // §4.1 ТЗ (Block 2): weighted random over active brands by cron_weight,
+    // replacing the single-element BRANDS array. Falls back to '1xbet' if the
+    // RPC errors or every brand's weight sums to zero — a lookup failure must
+    // degrade to the one brand with a proven keyword pool, not stop the run.
+    //
+    // BRAND_DIVISOR replaces the old `BRANDS.length` in the preset/visit-cycle
+    // arithmetic below. That arithmetic was tuned around a length-1 array —
+    // keeping the divisor at 1 preserves 1xBet's exact cycling behaviour.
+    // Brands other than 1xbet have no entry in DEFAULT_PRESETS yet (§7.9 ТЗ:
+    // their brand_keywords pool is not populated), so allPresets comes back
+    // empty and the run skips cleanly below — the weighted pick itself is
+    // still real and observable in stats.brand/funnel_stats even while the
+    // picked brand has nothing to search yet.
+    const BRAND_DIVISOR = 1;
+    let brand = '1xbet';
+    try {
+      const { data: pickedBrand } = await supabase.rpc('fn_pick_active_brand');
+      const row = Array.isArray(pickedBrand) ? pickedBrand[0] : pickedBrand;
+      if (row?.slug) brand = row.slug;
+    } catch (_) { /* keep 1xbet default */ }
     stats.brand = brand;
+    const brandCfg = await loadBrandConfig(brand);
+    stats.brand_id = brandCfg.id;
 
     const { data: customRaw } = await supabase
       .from('search_presets').select('*').eq('is_default', false).order('created_at');
@@ -1418,7 +1522,7 @@ Deno.serve(async (req: Request) => {
         { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    const presetIndex = Math.floor(slotIndex / BRANDS.length) % allPresets.length;
+    const presetIndex = Math.floor(slotIndex / BRAND_DIVISOR) % allPresets.length;
     const preset      = allPresets[presetIndex];
     stats.preset      = preset.name;
 
@@ -1454,7 +1558,7 @@ Deno.serve(async (req: Request) => {
     const keywordSource = new Map<string, string>();
     const keywordLang   = new Map<string, string>();
     if (poolRows.length) {
-      const cycle   = Math.floor(slotIndex / (BRANDS.length * allPresets.length));
+      const cycle   = Math.floor(slotIndex / (BRAND_DIVISOR * allPresets.length));
       // Window start advances by KW_PER_RUN, PLUS one extra position per full
       // sweep of the pool. Without that `+ sweeps` the stride and the pool size
       // share a divisor whenever the pool is a multiple of KW_PER_RUN — a pool
@@ -1477,7 +1581,7 @@ Deno.serve(async (req: Request) => {
         if (p.lang) keywordLang.set(p.keyword, p.lang);
       });
     } else if (layer === 'A' && preset.keywords.length) {
-      const kwStart = (Math.floor(slotIndex / (BRANDS.length * allPresets.length)) * KW_PER_RUN) % preset.keywords.length;
+      const kwStart = (Math.floor(slotIndex / (BRAND_DIVISOR * allPresets.length)) * KW_PER_RUN) % preset.keywords.length;
       const rawKw   = preset.keywords.slice(kwStart, kwStart + KW_PER_RUN);
       if (rawKw.length < KW_PER_RUN) rawKw.push(...preset.keywords.slice(0, KW_PER_RUN - rawKw.length));
       keywords = [...new Set(rawKw)];
@@ -1538,7 +1642,7 @@ Deno.serve(async (req: Request) => {
     //    there its domains are already in our base and the dedup throws the
     //    whole page away. It was consuming a third of all runs (23 of 55) to
     //    produce three leads.
-    const visitNum   = Math.floor(slotIndex / (BRANDS.length * allPresets.length));
+    const visitNum   = Math.floor(slotIndex / (BRAND_DIVISOR * allPresets.length));
     const DDG_PAGE   = (visitNum % 3) + 2; // 2, 3, 4 cycling per visit
     const cityList   = PRESET_CITIES[preset.id] || [];
     const cityIdx    = Math.floor(visitNum / 3) % (cityList.length + 1); // +1 for base (no city)
@@ -1762,7 +1866,7 @@ Deno.serve(async (req: Request) => {
       if (Date.now() > deadline) break;
       lastGroqCallMs = Date.now();
 
-      const analyses = await analyzeBatchWithGroq(batch, brand);
+      const analyses = await analyzeBatchWithGroq(batch, brandCfg);
 
       // 4b. Classify — only relevant sites proceed to (slow) contact extraction
       const toExtract: Array<{ cand: typeof batch[number]; analysis: Analysis }> = [];
@@ -1803,6 +1907,7 @@ Deno.serve(async (req: Request) => {
           url,
           name:     nameFromTitle(title),
           brand,
+          brand_id: brandCfg.id,
           stage:    'new',
           geo:      preset.geo,
           type:     analysis.type,
@@ -1941,6 +2046,7 @@ Deno.serve(async (req: Request) => {
       await supabase.from('funnel_stats').insert([{
         run_id:           fs.run_id,
         pipeline:         'search',
+        brand_id:         stats.brand_id,
         started_at:       new Date(startedAt).toISOString(),
         finished_at:      new Date().toISOString(),
         duration_ms:      Date.now() - startedAt,
