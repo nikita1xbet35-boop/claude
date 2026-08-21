@@ -268,6 +268,22 @@ async function verifyPassword(input, env) {
   return null;
 }
 
+// ── Порог и окно защиты от перебора ─────────────────────────────────────────
+// Было: 2 промаха → час блокировки. Для четырёхзначного PIN'а, который вводит
+// один человек, это ловушка, а не защита — одна опечатка мимо цифры запирала
+// на час, что уже случилось на ровном месте.
+//
+// Кнопка смены роли (⇄ в углу дашборда) делает такое куда вероятнее: она бьёт
+// в этот же /__auth и жмётся по несколько раз в день. Оставить порог как есть
+// значило бы выкатить фичу, которая регулярно запирает владельца снаружи.
+//
+// 5 попыток на 15 минут — это 20 в час, то есть перебор 10 000 комбинаций
+// занял бы 500 часов. Для приватного дашборда за паролем этого достаточно, а
+// цена опечатки падает с часа до четверти часа, причём наступает она только
+// на пятой подряд.
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
 async function getFailedAttempts(ip) {
   const url = `${SUPABASE_URL_W}/rest/v1/login_attempts?ip=eq.${encodeURIComponent(ip)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id`;
   const res = await fetch(url, {
@@ -287,7 +303,7 @@ async function recordFailedAttempt(ip) {
       'Content-Type': 'application/json',
       'Prefer': 'return=minimal',
     },
-    body: JSON.stringify({ ip, failed_at: new Date().toISOString(), expires_at: new Date(Date.now() + 3600_000).toISOString() }),
+    body: JSON.stringify({ ip, failed_at: new Date().toISOString(), expires_at: new Date(Date.now() + LOGIN_WINDOW_MS).toISOString() }),
   }).catch(() => null);
 }
 
@@ -433,7 +449,7 @@ function loginPage(error, blocked) {
       <input class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="1" id="p2">
       <input class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="1" id="p3">
     </div>
-    <div class="err${(error || blocked) ? ' show' : ''}" id="err">${blocked ? 'Слишком много попыток. Подождите 1 час.' : 'Неверный PIN'}</div>
+    <div class="err${(error || blocked) ? ' show' : ''}" id="err">${blocked ? `Слишком много попыток. Подождите ${LOGIN_WINDOW_MS / 60000} мин.` : 'Неверный PIN'}</div>
   </form>
 </div>
 <script>
@@ -495,8 +511,8 @@ async function gate(request, env) {
   if (request.method === 'POST' && url.pathname === '/__auth') {
     const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
 
-    // Rate limiting: block after 2 failed attempts
-    if (await getFailedAttempts(ip) >= 2) {
+    // Rate limiting — порог и окно см. у LOGIN_MAX_ATTEMPTS.
+    if (await getFailedAttempts(ip) >= LOGIN_MAX_ATTEMPTS) {
       return htmlResponse(loginPage(false, true), 429);
     }
 
