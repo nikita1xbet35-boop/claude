@@ -240,17 +240,32 @@ async function hashPassword(password, salt) {
   return hashArr.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Returns the ROLE the password grants, or null when nothing matched.
+// Block 4: two passwords, two access levels. AUTH_FULL_HASH is checked first
+// so that if someone ever configures the same value in both, the stronger role
+// wins rather than depending on evaluation order.
+//
+// Unset AUTH_* secrets fall back to the existing single-password behaviour and
+// grant 'standard' — a deploy must not lock the dashboard out, and 'standard'
+// is the safe default (it is the role that sees LESS).
 async function verifyPassword(input, env) {
+  const matches = async (stored) => {
+    if (!stored) return false;
+    if (stored.includes(':')) {
+      const [salt, hash] = stored.split(':');
+      return safeEqual(await hashPassword(input, salt || ''), hash);
+    }
+    return safeEqual(input, stored);
+  };
+
+  if (await matches(env.AUTH_FULL_HASH)) return 'full';
+  if (await matches(env.AUTH_STANDARD_HASH)) return 'standard';
+
   const storedHash = env.DASHBOARD_PASSWORD_HASH; // "salt:hash" format
   const plainPw    = env.DASHBOARD_PASSWORD;       // legacy plain fallback
-  if (!storedHash && !plainPw) return false;
-  if (storedHash) {
-    const [salt, hash] = storedHash.split(':');
-    const inputHash = await hashPassword(input, salt || '');
-    return safeEqual(inputHash, hash);
-  }
-  // Legacy plain text fallback (still works if only DASHBOARD_PASSWORD is set)
-  return safeEqual(input, plainPw);
+  if (!storedHash && !plainPw) return null;
+  if (await matches(storedHash) || await matches(plainPw)) return 'standard';
+  return null;
 }
 
 async function getFailedAttempts(ip) {
@@ -301,23 +316,71 @@ async function hmac(secret, data) {
   return b64urlEncode(sig);
 }
 
-async function makeSession(env) {
-  const payload = b64urlEncode(new TextEncoder().encode(JSON.stringify({ exp: Date.now() + SESSION_TTL_MS })));
+// ── Supabase-совместимый JWT (Блок 4) ───────────────────────────────────────
+// Ключевое свойство: этот токен НИКОГДА не покидает воркер. Браузер шлёт свои
+// запросы на /db, воркер сверяет подписанную сессионную куку, сам подписывает
+// JWT нужной роли и подставляет его в Authorization уже по дороге в Supabase.
+//
+// Отдай мы токен фронту — клиент смог бы его прочитать, сохранить и переиспользовать
+// напрямую против supabase.co, и вся серверная проверка роли превратилась бы в
+// формальность. Здесь подделать brand_role нельзя: значение берётся из куки,
+// подписанной SESSION_SECRET, а сам JWT подписан секретом Supabase, которого у
+// браузера нет.
+//
+// TTL короткий (5 минут): токен и живёт-то только на время одного проксируемого
+// запроса, а не хранится.
+const SB_JWT_TTL_SEC = 300;
+
+async function mintSupabaseJwt(env, brandRole) {
+  const secret = env.SUPABASE_JWT_SECRET;
+  if (!secret) return null;   // не настроен — вызывающий откатится на anon-ключ
+  const now = Math.floor(Date.now() / 1000);
+  const header  = b64urlEncode(new TextEncoder().encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+  const payload = b64urlEncode(new TextEncoder().encode(JSON.stringify({
+    iss: 'supabase',
+    // role — это РОЛЬ БАЗЫ, под которой PostgREST выполнит запрос. Именно к ней
+    // применяются RLS-политики. brand_role — наш собственный claim, его читают
+    // сами политики через auth.jwt().
+    role: 'authenticated',
+    aud: 'authenticated',
+    brand_role: brandRole === 'full' ? 'full' : 'standard',
+    iat: now,
+    exp: now + SB_JWT_TTL_SEC,
+  })));
+  const data = `${header}.${payload}`;
+  return `${data}.${await hmac(secret, data)}`;
+}
+
+async function makeSession(env, role) {
+  const payload = b64urlEncode(new TextEncoder().encode(JSON.stringify({
+    exp: Date.now() + SESSION_TTL_MS,
+    role: role === 'full' ? 'full' : 'standard',
+  })));
   return `${payload}.${await hmac(authSecret(env), payload)}`;
 }
 
-async function verifySession(token, env) {
-  if (!token) return false;
+// Returns the decoded session payload when the signature and expiry check out,
+// otherwise null. Callers that only need a yes/no use verifySession below; the
+// /db proxy needs the role, which is why this exists separately.
+async function readSession(token, env) {
+  if (!token) return null;
   const dot = token.lastIndexOf('.');
-  if (dot < 0) return false;
+  if (dot < 0) return null;
   const payload = token.slice(0, dot);
-  if (!safeEqual(token.slice(dot + 1), await hmac(authSecret(env), payload))) return false;
+  if (!safeEqual(token.slice(dot + 1), await hmac(authSecret(env), payload))) return null;
   try {
-    const { exp } = JSON.parse(new TextDecoder().decode(b64urlDecode(payload)));
-    return typeof exp === 'number' && Date.now() < exp;
+    const claims = JSON.parse(new TextDecoder().decode(b64urlDecode(payload)));
+    if (typeof claims.exp !== 'number' || Date.now() >= claims.exp) return null;
+    // Sessions minted before roles existed have no role — treat as standard,
+    // never as full: an old cookie must not silently confer more access.
+    return { exp: claims.exp, role: claims.role === 'full' ? 'full' : 'standard' };
   } catch {
-    return false;
+    return null;
   }
+}
+
+async function verifySession(token, env) {
+  return (await readSession(token, env)) !== null;
 }
 
 function getCookie(request, name) {
@@ -439,10 +502,11 @@ async function gate(request, env) {
 
     const form = await request.formData();
     const submittedPassword = String(form.get('password') || '');
-    if (await verifyPassword(submittedPassword, env)) {
+    const role = await verifyPassword(submittedPassword, env);
+    if (role) {
       return new Response(null, {
         status: 303,
-        headers: { 'Location': '/', 'Set-Cookie': sessionCookie(await makeSession(env)) },
+        headers: { 'Location': '/', 'Set-Cookie': sessionCookie(await makeSession(env, role)) },
       });
     }
     // Record failed attempt
@@ -597,6 +661,30 @@ async function handleRequest(request, env, ctx) {
         fwd.set(k, v);
       }
 
+      // ── Здесь проходит граница доступа (Блок 4) ──────────────────────────
+      // Раньше прокси был чистым транспортом: он пересылал наверх тот ключ,
+      // который прислал браузер, то есть встроенный в страницу anon-ключ. При
+      // выключенном RLS этот ключ даёт полный доступ ко всем таблицам, и
+      // пароль на входе защищал только сам HTML-файл, но не данные.
+      //
+      // Теперь запрос уходит наверх ПОД РОЛЬЮ ИЗ СЕССИИ. Клиентский
+      // Authorization отбрасывается целиком — если бы мы его уважали, любой мог
+      // бы прислать service_role-ключ и обойти всё разграничение.
+      //
+      // apikey остаётся anon: его требует шлюз Supabase до всякого PostgREST,
+      // и сам по себе, при включённом RLS, он не даёт ничего.
+      const sess = await readSession(getCookie(request, COOKIE_NAME), env);
+      const jwt  = sess ? await mintSupabaseJwt(env, sess.role) : null;
+      if (jwt) {
+        fwd.set('apikey', env.SUPABASE_ANON_KEY || DEFAULT_ANON_KEY);
+        fwd.set('Authorization', 'Bearer ' + jwt);
+      }
+      // Если SUPABASE_JWT_SECRET не задан, jwt === null и заголовки клиента
+      // идут как раньше. Это сознательный откат: включить RLS до настройки
+      // секрета — значит получить пустой дашборд, а деплой не должен ронять
+      // рабочую систему. Проверка схемы в CI отдельно следит за тем, чтобы RLS
+      // и секрет включались согласованно.
+
       const upstream = await fetch(target, {
         method: request.method,
         headers: fwd,
@@ -618,7 +706,10 @@ async function handleRequest(request, env, ctx) {
     // inactivity window rolling). Only when the gate is active.
     if (env.DASHBOARD_PASSWORD) {
       const res = new Response(assetRes.body, assetRes);
-      res.headers.append('Set-Cookie', sessionCookie(await makeSession(env)));
+      // Роль переносится из текущей сессии: иначе каждое продление молча
+      // понижало бы 'full' до 'standard' на первом же обращении к странице.
+      const cur = await readSession(getCookie(request, COOKIE_NAME), env);
+      res.headers.append('Set-Cookie', sessionCookie(await makeSession(env, cur?.role)));
       return res;
     }
     return assetRes;

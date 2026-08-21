@@ -2954,15 +2954,30 @@ const SUPABASE_DIRECT = 'https://lxsyrserfuighwxuymgb.supabase.co';
 // from one country the proxy is the only one that works, from another the
 // direct hop is a round trip shorter. This makes it measurable instead of
 // guessed: open the page both ways and keep whichever loads.
-// DEFAULT IS DIRECT. The proxy is opt-in via ?direct=0, not the other way
-// round: routing everyone through an untested path to fix one network is how
-// the dashboard ended up broken from every IP at once. Direct is the
-// configuration that has worked all along; the proxy is there for the network
-// where it does not.
+// DEFAULT IS NOW THE PROXY, and this is a deliberate reversal of the note
+// above — the reason changed.
+//
+// The old default was direct because the proxy was the untested path and
+// performance was the only thing at stake. It is no longer only about
+// performance: the anon key shipped in this file grants full read/write on
+// every table (RLS is off), so a browser talking straight to supabase.co is
+// answering to nobody. The password gate protects this HTML file, not the data
+// behind it.
+//
+// /db is where access control now lives: the worker checks the signed session
+// cookie and swaps in a JWT carrying the session's role before forwarding
+// upstream. That check only exists on requests that actually go through the
+// worker — so going direct is not a performance preference any more, it is a
+// way around the boundary.
+//
+// ?direct=1 still works FOR NOW, deliberately: this stage flips the default so
+// the proxy path proves itself on real traffic BEFORE RLS makes the anon key
+// useless. Once RLS is on, direct mode stops working on its own — anon will be
+// denied by policy — and the escape hatch goes away with it.
 const _directParam = new URLSearchParams(location.search).get('direct');
 if (_directParam !== null) { try { localStorage.setItem('db_direct', _directParam); } catch(_){} }
-let _useDirect = true;
-try { _useDirect = (localStorage.getItem('db_direct') || '1') === '1'; } catch(_){}
+let _useDirect = false;
+try { _useDirect = (localStorage.getItem('db_direct') || '0') === '1'; } catch(_){}
 const SUPABASE_URL  = (!location.protocol.startsWith('http') || _useDirect)
   ? SUPABASE_DIRECT
   : location.origin + '/db';
