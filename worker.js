@@ -509,12 +509,34 @@ const proxyCors = request => ({
 const htmlResponse = (body, status) =>
   new Response(body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 
+// Включён ли пароль на дашборд.
+//
+// Раньше это условие было записано прямо в gate() и смотрело ТОЛЬКО на
+// DASHBOARD_PASSWORD. Пока он был единственным паролем, разницы не было; с
+// появлением AUTH_FULL_HASH / AUTH_STANDARD_HASH она стала опасной. Удаление
+// старого пароля — совершенно естественный шаг после перехода на два PIN'а —
+// возвращало из gate() null на КАЖДЫЙ запрос, и это значит сразу три вещи:
+//
+//   1. дашборд открывался вообще без пароля, хотя два PIN'а настроены;
+//   2. /__auth переставал обрабатываться и уходил в Assets — там его нет,
+//      отсюда «Ошибка 404» при смене роли;
+//   3. /__role при выключённом гейте отдаёт 'full' всем подряд.
+//
+// Ни одно из трёх не выглядит как поломка со стороны: дашборд просто
+// открывается. Проверено на воркере в Node — GET / отдавал страницу дашборда
+// с кодом 200, без куки и без пароля.
+//
+// Поэтому проверка одна и живёт в одном месте: гейт включён, если настроен
+// ХОТЬ ОДИН пароль.
+function gateEnabled(env) {
+  return !!(env.DASHBOARD_PASSWORD || env.DASHBOARD_PASSWORD_HASH ||
+            env.AUTH_FULL_HASH || env.AUTH_STANDARD_HASH);
+}
+
 // Returns null when the request may proceed to the assets, or a Response (login
 // page / redirect) when the gate intercepts it. Disabled while no password set.
 async function gate(request, env) {
-  const password = env.DASHBOARD_PASSWORD;
-  const passwordHash = env.DASHBOARD_PASSWORD_HASH;
-  if (!password && !passwordHash) return null; // gate disabled until the secret is configured
+  if (!gateEnabled(env)) return null; // ни одного пароля не настроено — см. gateEnabled
 
   const url = new URL(request.url);
 
@@ -641,7 +663,7 @@ async function handleRequest(request, env, ctx) {
     // дашборд и так открыт целиком, и урезать его до 'standard' значило бы
     // спрятать экраны от установки, которая просто ещё не настраивала пароли.
     if (url.pathname === '/__role') {
-      const gateOn = !!(env.DASHBOARD_PASSWORD || env.DASHBOARD_PASSWORD_HASH);
+      const gateOn = gateEnabled(env);
       const sess = gateOn ? await readSession(getCookie(request, COOKIE_NAME), env) : null;
       const role = gateOn ? (sess && sess.role === 'full' ? 'full' : 'standard') : 'full';
 
@@ -772,7 +794,7 @@ async function handleRequest(request, env, ctx) {
 
     // Refresh the sliding session on every authed asset hit (keeps the 3h
     // inactivity window rolling). Only when the gate is active.
-    if (env.DASHBOARD_PASSWORD) {
+    if (gateEnabled(env)) {
       const res = new Response(assetRes.body, assetRes);
       // Роль переносится из текущей сессии: иначе каждое продление молча
       // понижало бы 'full' до 'standard' на первом же обращении к странице.
