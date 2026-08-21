@@ -29,6 +29,19 @@ const cors = {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// brand_id для luckypari — резолвится один раз за прогон. Вся эта функция по
+// определению шлёт от одного бренда, поэтому значение константно, но хранить
+// UUID в коде нельзя: он генерится при первом накате миграции 035.
+let _lpBrandId: string | null | undefined;
+async function lpBrandId(): Promise<string | null> {
+  if (_lpBrandId !== undefined) return _lpBrandId;
+  try {
+    const { data } = await supabase.from('brands').select('id').eq('slug', 'luckypari').single();
+    _lpBrandId = data?.id ?? null;
+  } catch (_) { _lpBrandId = null; }
+  return _lpBrandId;
+}
+
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 function toGMT3(date: Date) {
@@ -272,6 +285,7 @@ Deno.serve(async (req: Request) => {
           lead_id:       null,
           email:         item.email,
           brand:         'luckypari',
+          brand_id:      await lpBrandId(),
           subject,
           gmail_account: 'gmail_lp',
           sent_at:       sentAt,

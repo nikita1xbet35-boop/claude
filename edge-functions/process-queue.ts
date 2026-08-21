@@ -642,6 +642,9 @@ Deno.serve(async (req: Request) => {
           lead_id:       item.lead_id,
           email:         lead.contact_email,
           brand:         item.brand,
+          // Атрибуция построчная: бренд берём у самого лида, а не по умолчанию —
+          // это единственное место, где известно, ЧЕЙ конкретно был этот лид.
+          brand_id:      lead.brand_id ?? item.brand_id ?? null,
           subject,
           gmail_account: account,
           sent_at:       sentAt,

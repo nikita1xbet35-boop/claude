@@ -110,7 +110,7 @@ Deno.serve(async (req: Request) => {
 
     // ── 2. Advance leads whose next step is due ──────────────────────────
     const { data: due } = await supabase.from('leads')
-      .select('id, brand, contact_email, sequence_id, current_step, gmail_account, replied_at, exclude_reason')
+      .select('id, brand, brand_id, contact_email, sequence_id, current_step, gmail_account, replied_at, exclude_reason')
       .eq('sequence_status', 'active')
       .not('next_action_at', 'is', null)
       .lte('next_action_at', now.toISOString())
@@ -162,6 +162,7 @@ Deno.serve(async (req: Request) => {
         const { error: qErr } = await supabase.from('send_queue').insert([{
           lead_id: lead.id,
           brand: lead.brand || '1xbet',
+          brand_id: lead.brand_id ?? null,   // follow-up принадлежит тому же бренду, что и лид
           gmail_account: lead.gmail_account || 'main',
           scheduled_at: nextSlot(now).toISOString(),
           status: 'pending',

@@ -268,10 +268,15 @@ jobs:
           echo "── Таблицы мультибренда ──"
           q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('brands','contact_registry','contact_touches','api_keys','system_config','multibrand_keywords','smtp_accounts','brand_keywords') ORDER BY table_name;"
           echo; echo "── brand_id: где ещё NOT NULL (должно быть пусто) ──"
-          # Только семь таблиц, которые ломала 037. brand_id NOT NULL на
-          # contact_touches/multibrand_keywords/smtp_accounts — это ЗАМЫСЕЛ:
-          # они заведены уже мультибрендовыми, строка без бренда там бессмысленна.
-          NN=$(q "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='brand_id' AND is_nullable='NO' AND table_name IN ('leads','send_queue','email_log','api_usage','error_log','funnel_stats','dfs_domains');")
+          # После 044 картина обратная: на leads/send_queue/email_log/funnel_stats
+          # NOT NULL — это ЦЕЛЬ, а не авария. Ломает прод обратный случай — если
+          # ограничение уехало на error_log/api_usage/dfs_domains, которые по
+          # смыслу бренду не принадлежат (системные логи, счётчики на сервис,
+          # сырая выгрузка до квалификации). Их и проверяем.
+          NN=$(q "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='brand_id' AND is_nullable='NO' AND table_name IN ('api_usage','error_log','dfs_domains');")
+          echo "── brand_id NOT NULL там, где и должен (ожидаем 4) ──"
+          q "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='brand_id' AND is_nullable='NO' AND table_name IN ('leads','send_queue','email_log','funnel_stats') ORDER BY table_name;"
+          echo; echo "── brand_id NOT NULL там, где НЕ должен (должно быть пусто) ──"
           echo "$NN"
           echo; echo "── Функции ──"
           q "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'fn_%' ORDER BY 1;"
@@ -282,7 +287,7 @@ jobs:
 
           # Единственная проверка, которая валит деплой: см. комментарий выше.
           if echo "$NN" | grep -q '"table_name"'; then
-            echo "::error::brand_id снова NOT NULL — прод не сможет писать ни в одну из этих таблиц"
+            echo "::error::brand_id стал NOT NULL на таблице, которая бренду не принадлежит — системные вставки начнут падать"
             exit 1
           fi
-          echo "OK: brand_id nullable везде."
+          echo "OK: ограничение стоит ровно там, где задумано."
