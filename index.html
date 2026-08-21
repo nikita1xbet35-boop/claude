@@ -1119,13 +1119,20 @@
   <div style="width:250px;padding:24px 22px;border-radius:16px;background:var(--bg2,#171a21);
     border:1px solid var(--border2);box-shadow:0 18px 50px rgba(0,0,0,.55);text-align:center;">
     <div style="font-size:22px;color:var(--text3);margin-bottom:12px;">⇄</div>
-    <input id="role-switch-pin" type="password" inputmode="numeric" pattern="[0-9]*"
-      maxlength="4" autocomplete="off"
+    <!-- Без maxlength. Страница входа собирает ровно 4 цифры из четырёх
+         окошек, и то же ограничение здесь означало бы, что пароль длиннее
+         четырёх знаков ввести некуда — ни тут, ни там. Ограничение формы не
+         должно решать, каким может быть секрет. -->
+    <input id="role-switch-pin" type="password" inputmode="numeric" autocomplete="off"
       onkeydown="if(event.key==='Enter')RoleSwitch.submit();if(event.key==='Escape')RoleSwitch.close();"
-      style="width:100%;padding:11px 0;text-align:center;font-size:24px;letter-spacing:12px;
-      text-indent:12px;font-family:var(--font-mono);border-radius:11px;border:2px solid var(--border2);
+      style="width:100%;padding:11px 8px;text-align:center;font-size:21px;letter-spacing:7px;
+      text-indent:7px;font-family:var(--font-mono);border-radius:11px;border:2px solid var(--border2);
       background:var(--bg,#0f1115);color:var(--text);outline:none;">
     <div id="role-switch-err" style="height:17px;margin-top:9px;font-size:12px;color:#ff6b6b;"></div>
+    <!-- Говорит, какие пароли воркер реально видит. Без этого «не подходит»
+         и «секрет не доехал до Cloudflare» выглядят одинаково. -->
+    <div id="role-switch-hint" style="margin-top:2px;font-size:11px;line-height:1.45;
+      color:var(--text3);font-family:var(--font-mono);"></div>
     <button id="role-switch-go" onclick="RoleSwitch.submit()"
       style="width:100%;margin-top:6px;padding:9px;border-radius:10px;border:1px solid var(--border2);
       background:var(--bg3);color:var(--text2);font-size:12.5px;font-family:var(--font-mono);
@@ -1143,10 +1150,32 @@ const RoleSwitch = (() => {
   function open(){
     const m = $('role-switch-modal'); if(!m) return;
     $('role-switch-err').textContent = '';
+    $('role-switch-hint').textContent = '';
     $('role-switch-pin').value = '';
     $('role-switch-go').disabled = false;
     m.style.display = 'flex';
     setTimeout(() => $('role-switch-pin').focus(), 30);
+    showConfig();   // не ждём: окно открывается сразу, подсказка догоняет
+  }
+
+  // Показывает, какие пароли воркер видит, и текущую роль. Смысл узкий и
+  // конкретный: если AUTH_FULL_HASH не доехал до Cloudflare, смена роли
+  // молча принимает только старый пароль и всегда выдаёт standard — снаружи
+  // это неотличимо от «ввёл не тот PIN», и искать можно долго.
+  async function showConfig(){
+    const hint = $('role-switch-hint');
+    try {
+      const r = await fetch('/__role', {credentials:'same-origin'});
+      if(!r.ok) return;
+      const j = await r.json();
+      const c = j.configured || {};
+      const missing = [];
+      if(!c.full)     missing.push('AUTH_FULL_HASH');
+      if(!c.standard) missing.push('AUTH_STANDARD_HASH');
+      hint.innerHTML = missing.length
+        ? `<span style="color:#f0a">не задан в Cloudflare: ${missing.join(', ')}</span>`
+        : `сейчас: ${j.role === 'full' ? 'полный' : 'обычный'}`;
+    } catch(_){ /* подсказка необязательна — молчим */ }
   }
   function close(){ const m = $('role-switch-modal'); if(m) m.style.display = 'none'; }
 
@@ -1180,7 +1209,7 @@ const RoleSwitch = (() => {
       go.disabled = false;
     }
   }
-  return {open, close, submit};
+  return {open, close, submit, showConfig};
 })();
 </script>
 
