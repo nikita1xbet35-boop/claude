@@ -220,8 +220,20 @@ const COOKIE_NAME = 'aos_session';
 const SUPABASE_URL_W = 'https://lxsyrserfuighwxuymgb.supabase.co';
 const SUPABASE_ANON  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
 
+// Ключ, которым подписывается сессионная кука.
+//
+// Знала только про SESSION_SECRET и DASHBOARD_PASSWORD — та же слепота, что и
+// у gate(), и с теми же последствиями. Когда оба удалены, а вход настроен на
+// AUTH_FULL_HASH / AUTH_STANDARD_HASH, функция возвращала ПУСТУЮ СТРОКУ, и
+// куки подписывались пустым ключом. Подпись на пустом ключе воспроизводит кто
+// угодно: достаточно собрать payload с role:'full', и /db выдаст по нему
+// полноправный JWT к базе. Пароль на входе при этом выглядит рабочим.
+//
+// Поэтому список источников тот же, что у gateEnabled, и в том же порядке
+// приоритета: отдельный SESSION_SECRET, иначе любой из настроенных паролей.
 function authSecret(env) {
-  return env.SESSION_SECRET || env.DASHBOARD_PASSWORD || '';
+  return env.SESSION_SECRET || env.DASHBOARD_PASSWORD || env.DASHBOARD_PASSWORD_HASH ||
+         env.AUTH_FULL_HASH || env.AUTH_STANDARD_HASH || '';
 }
 
 // constant-time string compare (avoids password/signature timing leaks)
@@ -390,6 +402,12 @@ async function makeSession(env, role) {
 // /db proxy needs the role, which is why this exists separately.
 async function readSession(token, env) {
   if (!token) return null;
+  // Совсем без ключа сессию не проверяем, а отвергаем. Иначе HMAC считался бы
+  // на пустом ключе — то есть проверялся бы тем, что любой может повторить, и
+  // «подписанная кука» перестала бы что-либо значить. Отказ здесь означает
+  // всего лишь показ формы входа; пропуск означал бы выдачу доступа к базе по
+  // самодельной куке.
+  if (!authSecret(env)) return null;
   const dot = token.lastIndexOf('.');
   if (dot < 0) return null;
   const payload = token.slice(0, dot);
