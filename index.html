@@ -15134,6 +15134,60 @@ const MB = (() => {
   // gotoHash: cross-brand destinations (#/  #/rotation  #/settings).
   function gotoHash(hash){ location.hash = hash; }
 
+  // ── Изоляция брендов на перенесённых модулях ────────────────────────────
+  // Шесть страниц-модулей (Автомат/YouTube/Telegram/DataForSEO/Brand-трафик/
+  // Базы) — это ИСХОДНЫЕ страницы, их загрузчики (loadAutomatToday, loadDFS,
+  // loadBrand, initYT, initTG, loadPbBases) не фильтруют по brand_id ВООБЩЕ:
+  // они писались, когда бренд был один. Показать их под шапкой 1xCasino —
+  // значит выдать цифры 1xBet за чужие.
+  //
+  // Почему именно 1xbet — не произвол: миграция 036 проставила brand_id =
+  // 1xbet КАЖДОЙ существующей строке (leads/send_queue/email_log/dfs_domains/
+  // funnel_stats/...), а поиск под другими брендами ещё ни разу не запускался.
+  // Значит нефильтрованная выборка на этих страницах по построению равна
+  // выборке 1xBet и ничьей больше — для него она корректна, для остальных
+  // была бы ложью.
+  //
+  // Снимать это условие нужно не «когда дойдут руки», а когда конкретный
+  // загрузчик начнёт фильтровать по brand_id (и когда под брендом реально
+  // пойдёт поиск) — тогда бренд убирается из проверки ниже.
+  const LEGACY_UNSCOPED_BRAND = '1xbet';
+  function moduleHasBrandScopedData(slug){ return slug === LEGACY_UNSCOPED_BRAND; }
+
+  // Единственное место, где решается «куда вести и что рисовать» для
+  // brand-контекста. goto() и applyHash() обязаны звать именно её —
+  // предыдущая версия дублировала эту развилку в двух местах, и они разошлись
+  // (Обзор бренда не красился). Второй раз наступать не будем.
+  async function enterBrandModule(slug, modKey){
+    const mod = MODULES.find(m => m.key === modKey) || MODULES[0];
+    if(mod.gotoPage && moduleHasBrandScopedData(slug)){
+      goTo(mod.gotoPage);
+      await paintBrandContext(mod.key, mod.key, slug);
+      return;
+    }
+    // Либо экран ещё не построен (Рассылка/Настройки), либо построен, но
+    // не умеет фильтровать по этому бренду — в обоих случаях честный пустой
+    // стейт на странице Обзора бренда, а не чужие цифры.
+    goTo('brand-overview');
+    await paintBrandContext('brand-overview', mod.key, slug);
+    if(mod.gotoPage) renderNoBrandData(slug, mod);
+    else renderBrandModule(slug, mod.key);
+  }
+
+  function renderNoBrandData(slug, mod){
+    const box = document.getElementById('mb-content-brand-overview');
+    if(!box) return;
+    const brand = (brandsCache || []).find(b => b.slug === slug);
+    box.innerHTML = `<div class="mb-card">
+      <div style="font-weight:600;margin-bottom:8px;">${mod.icon} ${esc(mod.label)} — данных по бренду ${esc(brand?.name || slug)} нет</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.65;">
+        Поиск под этим брендом ещё ни разу не запускался, поэтому здесь ноль — это реальное состояние, а не сбой загрузки.
+        <br><br>
+        Экран модуля намеренно не открыт: его загрузчик пока не фильтрует по бренду и показал бы цифры 1xBet под шапкой ${esc(brand?.name || slug)}.
+      </div>
+    </div>`;
+  }
+
   // goto('brand', slug, moduleKey?) — moduleKey omitted preserves state.module,
   // which is exactly the "переключение бренда не сбрасывает модуль" rule (§4 ТЗ).
   async function goto(kind, slug, moduleKey){
@@ -15146,14 +15200,7 @@ const MB = (() => {
     try { applyBrandTheme(slug); } catch(_){}
     location.hash = `#/brand/${slug}/${mod.key}`;
 
-    if(mod.gotoPage){
-      goTo(mod.gotoPage);
-      await paintBrandContext(mod.key, mod.key, slug);
-    } else {
-      goTo('brand-overview');
-      await paintBrandContext('brand-overview', mod.key, slug);
-      renderBrandModule(slug, mod.key);
-    }
+    await enterBrandModule(slug, mod.key);
   }
 
   // ── Hash router ─────────────────────────────────────────────────────
@@ -15185,14 +15232,10 @@ const MB = (() => {
       const mod = MODULES.find(m => m.key === state.module) || MODULES[0];
       currentBrand = r.slug;
       try { applyBrandTheme(r.slug); } catch(_){}
-      if(mod.gotoPage){
-        goTo(mod.gotoPage);
-        await paintBrandContext(mod.key, mod.key, r.slug);
-      } else {
-        goTo('brand-overview');
-        await paintBrandContext('brand-overview', mod.key, r.slug);
-        renderBrandModule(r.slug, mod.key);
-      }
+      // Та же самая enterBrandModule, что и в goto() — раньше здесь лежала
+      // копия развилки, и именно её расхождение с оригиналом ломало Обзор
+      // бренда. Одна функция, два вызова.
+      await enterBrandModule(r.slug, mod.key);
     }
   }
 
@@ -15311,7 +15354,7 @@ const MB = (() => {
     if(!box) return;
     const mod = MODULES.find(m => m.key === moduleKey);
     box.innerHTML = `<div class="mb-card"><div style="font-weight:600;margin-bottom:6px;">${mod?.label||moduleKey} — в разработке</div>
-      <div style="font-size:13px;color:var(--text2);line-height:1.6;">Экран из следующего прохода по ТЗ (раздел 6.9/6.10). Данные для него уже есть в базе (smtp_accounts / brands / system_config), сама вёрстка ещё не сделана.</div></div>`;
+      <div style="font-size:13px;color:var(--text2);line-height:1.6;">Экран из следующего прохода по ТЗ (раздел 6.9/6.10) — вёрстка ещё не сделана. Таблицы под него (smtp_accounts / system_config) заводит миграция 038; пока она не применилась, данных для него нет и в базе.</div></div>`;
   }
 
   async function renderBrandOverview(slug){
@@ -15413,8 +15456,19 @@ const MB = (() => {
       if(error) throw error;
       const rows = data || [];
 
-      const counts = {active:0, cooldown:0, frozen:0};
-      for(const r of rows) counts[r.status] = (counts[r.status]||0) + 1;
+      // Счётчики считаются ОТДЕЛЬНЫМИ count-запросами по всей таблице, а не по
+      // `rows`: та выборка обрезана .limit(500) и сужена текущим фильтром,
+      // поэтому «в обороте: N» по ней показывал бы размер видимой страницы, а
+      // не реальный итог по ~4700 контактам — а читают её именно как итог.
+      const countStatus = async (st) => {
+        const {count} = await sb.from('contact_registry')
+          .select('contact_hash', {count:'exact', head:true}).eq('status', st);
+        return count || 0;
+      };
+      const [cActive, cCooldown, cFrozen] = await withTimeout(
+        Promise.all([countStatus('active'), countStatus('cooldown'), countStatus('frozen')]),
+        15000, 'счётчики ротации');
+      const counts = {active:cActive, cooldown:cCooldown, frozen:cFrozen};
 
       const brandOpts = brands.map(b => `<option value="${b.slug}" ${rotationFilter.ownerSlug===b.slug?'selected':''}>${esc(b.name)}</option>`).join('');
 

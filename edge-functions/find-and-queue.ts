@@ -1496,27 +1496,49 @@ Deno.serve(async (req: Request) => {
     // still real and observable in stats.brand/funnel_stats even while the
     // picked brand has nothing to search yet.
     const BRAND_DIVISOR = 1;
-    let brand = '1xbet';
+    const FALLBACK_BRAND = '1xbet';
+    let brand = FALLBACK_BRAND;
     try {
       const { data: pickedBrand } = await supabase.rpc('fn_pick_active_brand');
       const row = Array.isArray(pickedBrand) ? pickedBrand[0] : pickedBrand;
       if (row?.slug) brand = row.slug;
     } catch (_) { /* keep 1xbet default */ }
+
+    // Presets for whichever brand came out of the weighted pick.
+    const { data: customRaw } = await supabase
+      .from('search_presets').select('*').eq('is_default', false).order('created_at');
+    const presetsFor = (b: string): Preset[] => [
+      ...(DEFAULT_PRESETS[b] || []),
+      ...(customRaw || [])
+        // A preset with no brand set belongs to nobody in particular, so it
+        // must NOT be handed to a brand it was not written for: its keywords
+        // would produce leads tagged 1xcasino/luckypari that the send path
+        // then mails the 1xBet letter to. Default-brand only.
+        .filter((p: any) => (p.brand || FALLBACK_BRAND) === b)
+        .map((p: any) => ({
+          id: `custom-${p.id}`, name: p.name, geo: p.geo || '',
+          keywords: Array.isArray(p.keywords) ? p.keywords : [],
+        }))
+        .filter((p: Preset) => p.keywords.length > 0),
+    ];
+
+    // A brand with no keyword pool cannot be searched — and cron_weight for
+    // 1xcasino/luckypari is 25 each out of 100 (migration 035), so honouring
+    // the pick blindly would turn HALF of every heavy run into an immediate
+    // "no presets" return. That is not a paused brand costing nothing; it is
+    // 1xBet's own search volume being halved by brands that cannot yet run.
+    // Fall back to the brand that does have a pool instead of wasting the tick.
+    let allPresets = presetsFor(brand);
+    if (allPresets.length === 0 && brand !== FALLBACK_BRAND) {
+      stats.errors.push(`no keyword pool for ${brand} — fell back to ${FALLBACK_BRAND}`);
+      brand = FALLBACK_BRAND;
+      allPresets = presetsFor(brand);
+    }
+
     stats.brand = brand;
     const brandCfg = await loadBrandConfig(brand);
     stats.brand_id = brandCfg.id;
 
-    const { data: customRaw } = await supabase
-      .from('search_presets').select('*').eq('is_default', false).order('created_at');
-    const customPresets: Preset[] = (customRaw || [])
-      .filter((p: any) => !p.brand || p.brand === brand)
-      .map((p: any) => ({
-        id: `custom-${p.id}`, name: p.name, geo: p.geo || '',
-        keywords: Array.isArray(p.keywords) ? p.keywords : [],
-      }))
-      .filter((p: Preset) => p.keywords.length > 0);
-
-    const allPresets = [...(DEFAULT_PRESETS[brand] || []), ...customPresets];
     if (allPresets.length === 0) {
       return new Response(JSON.stringify({ ...stats, skipped: true, reason: 'no presets' }),
         { headers: { ...cors, 'Content-Type': 'application/json' } });
