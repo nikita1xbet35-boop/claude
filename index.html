@@ -1086,14 +1086,103 @@
      которые пока не несут новую шапку сами (см. комментарий в MB-модуле, п.4
      "Порядка работ" ещё не сделан). Без неё уйти в Автомат из рейла — путь в
      один конец, обратно только руками менять #-хэш в адресной строке. -->
-<button id="mb-back-fab" onclick="MB.gotoHash('#/')"
-  style="position:fixed;bottom:18px;right:18px;z-index:500;display:flex;align-items:center;gap:6px;
-  padding:9px 16px;border-radius:999px;background:var(--bg3);border:1px solid var(--border2);
-  color:var(--text2);font-size:12px;font-family:var(--font-mono);cursor:pointer;
-  box-shadow:var(--shadow-lg,0 8px 24px rgba(0,0,0,.4));transition:all .15s;"
+<!-- ── Переключатель роли (Блок 4) ─────────────────────────────────────────
+     Здесь была кнопка «◈ Обзор». Она появилась потому, что шесть страниц-
+     модулей не несли собственной шапки: уйти в Автомат из рейла означало
+     застрять там без обратного пути. Это больше не так — контейнеры
+     mb-shell-automat / -telegram / -dataforseo / -traffic / -youtube / -bases
+     стоят на всех шести, и shellHtml рисует в них ту же самую «◈ Обзор».
+     Кнопка дублировала существующую и освободила угол.
+
+     Подписи у новой намеренно нет, и tooltip'а тоже: значок ничего не
+     объясняет тому, кто не знает, зачем он. Секретом это не является и быть
+     не может — роль всё равно не сменится без PIN'а, а PIN проверяет воркер.
+     Это удобство, а не защита. -->
+<!-- Правый нижний угол уже занят кнопкой Tweaks (.tw-fab: 42×42, z-index 8990).
+     Старая «◈ Обзор» стояла ровно под ней с z-index 500 и уцелела только
+     потому, что была широкой плашкой — из-под круглой Tweaks торчал левый край
+     с текстом, по нему и попадали. Круглая кнопка на том же месте скрылась бы
+     целиком: проверено headless-браузером, клик перехватывался #tw-fab.
+     Поэтому левее на ширину соседа (42) плюс зазор, и в его же габаритах —
+     две кнопки рядом читаются как пара, а не как наложение. -->
+<button id="role-switch-fab" onclick="RoleSwitch.open()"
+  style="position:fixed;bottom:18px;right:68px;z-index:8990;display:flex;align-items:center;
+  justify-content:center;width:42px;height:42px;border-radius:14px;background:var(--bg3);
+  border:1px solid var(--border2);color:var(--text2);font-size:17px;font-family:var(--font-mono);
+  cursor:pointer;box-shadow:var(--shadow-lg,0 8px 24px rgba(0,0,0,.4));transition:all .2s;"
   onmouseover="this.style.color='var(--text)';this.style.borderColor='var(--accent)';"
-  onmouseout="this.style.color='var(--text2)';this.style.borderColor='var(--border2)';"
-  title="Обзор — мультибренд">◈ Обзор</button>
+  onmouseout="this.style.color='var(--text2)';this.style.borderColor='var(--border2)';">⇄</button>
+
+<div id="role-switch-modal" onclick="if(event.target===this)RoleSwitch.close()"
+  style="display:none;position:fixed;inset:0;z-index:9500;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.72);backdrop-filter:blur(3px);">
+  <div style="width:250px;padding:24px 22px;border-radius:16px;background:var(--bg2,#171a21);
+    border:1px solid var(--border2);box-shadow:0 18px 50px rgba(0,0,0,.55);text-align:center;">
+    <div style="font-size:22px;color:var(--text3);margin-bottom:12px;">⇄</div>
+    <input id="role-switch-pin" type="password" inputmode="numeric" pattern="[0-9]*"
+      maxlength="4" autocomplete="off"
+      onkeydown="if(event.key==='Enter')RoleSwitch.submit();if(event.key==='Escape')RoleSwitch.close();"
+      style="width:100%;padding:11px 0;text-align:center;font-size:24px;letter-spacing:12px;
+      text-indent:12px;font-family:var(--font-mono);border-radius:11px;border:2px solid var(--border2);
+      background:var(--bg,#0f1115);color:var(--text);outline:none;">
+    <div id="role-switch-err" style="height:17px;margin-top:9px;font-size:12px;color:#ff6b6b;"></div>
+    <button id="role-switch-go" onclick="RoleSwitch.submit()"
+      style="width:100%;margin-top:6px;padding:9px;border-radius:10px;border:1px solid var(--border2);
+      background:var(--bg3);color:var(--text2);font-size:12.5px;font-family:var(--font-mono);
+      cursor:pointer;">Сменить</button>
+  </div>
+</div>
+
+<script>
+// Смена роли идёт через тот же /__auth, что и страница входа: он проверяет PIN
+// и кладёт новую сессионную куку с ролью, которую этот PIN даёт. Отдельного
+// эндпоинта «сменить роль» нет СОЗНАТЕЛЬНО — иначе появилось бы второе место,
+// где решается, что кому можно, и рано или поздно эти два места разошлись бы.
+const RoleSwitch = (() => {
+  const $ = id => document.getElementById(id);
+  function open(){
+    const m = $('role-switch-modal'); if(!m) return;
+    $('role-switch-err').textContent = '';
+    $('role-switch-pin').value = '';
+    $('role-switch-go').disabled = false;
+    m.style.display = 'flex';
+    setTimeout(() => $('role-switch-pin').focus(), 30);
+  }
+  function close(){ const m = $('role-switch-modal'); if(m) m.style.display = 'none'; }
+
+  async function submit(){
+    const pin = ($('role-switch-pin').value || '').trim();
+    if(!pin) return;
+    const err = $('role-switch-err'), go = $('role-switch-go');
+    go.disabled = true; err.textContent = '';
+    try {
+      const fd = new FormData(); fd.set('password', pin);
+      // 303 от /__auth fetch проследует сам, и Set-Cookie из него браузер
+      // применит — поэтому к моменту reload кука уже новая.
+      const res = await fetch('/__auth', {method:'POST', body:fd, credentials:'same-origin'});
+      if(res.status === 401){
+        err.textContent = 'Неверный PIN';
+        $('role-switch-pin').value = ''; $('role-switch-pin').focus();
+        go.disabled = false; return;
+      }
+      if(res.status === 429){
+        err.textContent = 'Слишком много попыток';
+        go.disabled = false; return;
+      }
+      if(!res.ok){ err.textContent = 'Ошибка ' + res.status; go.disabled = false; return; }
+      // Перезагрузка, а не точечная перерисовка: роль лежит в roleCache внутри
+      // замыкания MB, и снаружи его не сбросить. Полный reload заодно гарантирует,
+      // что ни один экран не остался нарисованным под прошлую роль.
+      location.reload();
+    } catch(e){
+      console.error('RoleSwitch', e);
+      err.textContent = 'Сеть недоступна';
+      go.disabled = false;
+    }
+  }
+  return {open, close, submit};
+})();
+</script>
 
 <!-- PAGE 0: DASHBOARD -->
 <div class="page active" id="page-dashboard">
@@ -15102,6 +15191,38 @@ const MB = (() => {
     return brandsCache;
   }
 
+  // ── Роль сессии (Блок 4) ────────────────────────────────────────────────
+  // Два PIN-кода дают две роли: full видит скрытые бренды (Melbet/Coldbet) и
+  // экран настроек системы, standard — нет. Роль приходит с воркера
+  // (/__role), а не из localStorage и не из самой страницы: всё, что лежит в
+  // браузере, правится в браузере, и «повысить себя до full» было бы делом
+  // одной строки в консоли.
+  //
+  // Это разделение — ВТОРОЙ слой. Первый — политики brands_select/brands_modify
+  // (миграция 046): они режут скрытые бренды на стороне Postgres, по claim
+  // brand_role в подписанном JWT. Поэтому ошибка здесь портит интерфейс, но
+  // не открывает данные — запрос за скрытым брендом вернётся пустым и так.
+  //
+  // Недоступный /__role трактуется как standard: отказ должен закрывать, а не
+  // открывать. Цена ошибки в эту сторону — full временно не видит настройки,
+  // и это заметно сразу; ошибка в другую сторону тихо показала бы standard'у
+  // чужие бренды.
+  let roleCache = null;
+  async function loadRole(){
+    if(roleCache) return roleCache;
+    try {
+      const res = await withTimeout(
+        fetch('/__role', {credentials:'same-origin'}), 8000, 'роль сессии');
+      const j = res.ok ? await res.json() : null;
+      roleCache = (j && j.role === 'full') ? 'full' : 'standard';
+    } catch(e){
+      console.error('MB.loadRole', e);
+      roleCache = 'standard';
+    }
+    return roleCache;
+  }
+  function isFull(){ return roleCache === 'full'; }
+
   function colorFor(slug, idx){ return BRAND_COLORS[slug] || FALLBACK_COLORS[idx % FALLBACK_COLORS.length]; }
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -15119,12 +15240,19 @@ const MB = (() => {
         <span class="mb-dot" style="background:${clr};"></span>${esc(b.name||b.slug).toUpperCase()}
       </button>`;
     }).join('');
+    // Настройки системы — единственный экран, где вообще видны скрытые бренды
+    // (Melbet/Coldbet). Для standard кнопки просто нет; маршрут #/settings
+    // закрыт отдельно в applyHash, чтобы адрес, набранный руками, тоже не
+    // открывал экран.
+    const settingsBtn = isFull()
+      ? `<button class="mb-xbtn ${kind==='settings'?'active':''}" onclick="MB.gotoHash('#/settings')" title="Настройки системы">⚙</button>`
+      : '';
     return `<div class="mb-topbar-x">
         ${xBtn('x-overview','◈ Обзор','#/')}
         ${xBtn('x-rotation','⇄ Ротация','#/rotation')}
       </div>
       <div class="mb-topbar-brands">${brandBtns || '<span class="mb-empty" style="padding:0;">брендов нет</span>'}</div>
-      <button class="mb-xbtn ${kind==='settings'?'active':''}" onclick="MB.gotoHash('#/settings')" title="Настройки системы">⚙</button>`;
+      ${settingsBtn}`;
   }
 
   // Best-effort: a failed/timed-out brands fetch here must not stop whatever
@@ -15133,7 +15261,7 @@ const MB = (() => {
   // problem, a page frozen on "Загрузка…" forever is not.
   async function paintShell(pageSuffix, kind, activeSlug){
     try {
-      await loadBrands();
+      await Promise.all([loadBrands(), loadRole()]);
       const el = document.getElementById('mb-shell-' + pageSuffix);
       if(el) el.innerHTML = shellHtml(kind, activeSlug);
     } catch(e){ console.error('MB.paintShell', e); }
@@ -15157,7 +15285,7 @@ const MB = (() => {
   // было именно расхождением этой функции по разным путям для разных страниц.
   async function paintBrandContext(pageSuffix, modKey, slug){
     try {
-      await loadBrands();
+      await Promise.all([loadBrands(), loadRole()]);
       const shellEl = document.getElementById('mb-shell-' + pageSuffix);
       if(shellEl) shellEl.innerHTML = shellHtml('brand', slug);
       const btnsEl = document.getElementById('mb-modbtns-' + pageSuffix);
@@ -15250,6 +15378,19 @@ const MB = (() => {
 
   async function applyHash(){
     const r = parseHash();
+    // Роль нужна ДО развилки: ниже по ней решается, пускать ли на #/settings,
+    // а loadRole кэширует — на остальных маршрутах это бесплатно.
+    await loadRole();
+    // Адрес, набранный руками (или сохранённый в закладке с прошлой сессии под
+    // full), не должен открывать экран, которого у этой роли нет. Молча
+    // уводим на Обзор и чистим хэш, чтобы перезагрузка не вернула сюда же.
+    if(r.kind === 'settings' && !isFull()){
+      // Только меняем хэш и выходим. Смена хэша сама позовёт applyHash
+      // повторно — уже с маршрутом обзора, который и нарисует экран. Рисовать
+      // тут же означало бы отрисовать Обзор дважды и дважды сходить в базу.
+      location.replace(location.pathname + location.search + '#/');
+      return;
+    }
     if(r.kind === 'x-overview'){
       goTo('x-overview');
       await paintShell('x-overview', 'x-overview', null);
@@ -15702,12 +15843,17 @@ const MB = (() => {
     box.innerHTML = '<div class="mb-empty">Загрузка…</div>';
     try {
       // ВСЕ бренды, включая draft — этим экран и отличается от шапки, где
-      // draft скрыт (§4 ТЗ: Melbet/Coldbet видны только здесь).
+      // draft скрыт (§4 ТЗ: Melbet/Coldbet видны только здесь И только роли
+      // full). Сюда standard не доходит — маршрут закрыт в applyHash, — а
+      // если бы дошёл, политика brands_select (046) всё равно не отдала бы
+      // ему скрытые строки: запрос вернулся бы без них, а не с
+      // ошибкой. Фильтр ниже — третий слой, на случай прямого вызова
+      // MB.renderSystemSettings() из консоли.
       const [allRes, cfgRes] = await withTimeout(Promise.all([
         sb.from('brands').select('*').order('cron_weight', {ascending:false}),
         sb.from('system_config').select('*'),
       ]), 15000, 'настройки системы');
-      const all = allRes.data || [];
+      const all = (allRes.data || []).filter(b => isFull() || b.visibility !== 'hidden');
       const cfg = {}; for(const r of (cfgRes.data||[])) cfg[r.key] = r.value;
 
       const activeSum = all.filter(b => b.status==='active')
