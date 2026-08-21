@@ -213,7 +213,7 @@ Deno.serve(async (req: Request) => {
     };
     const ranked = [...(candidates || [])].sort((a, b) => rank(b) - rank(a));
 
-    const picked: Array<{ id: string; brand: string; brand_id: string | null }> = [];
+    const picked: Array<{ id: string; brand: string; brand_id: string | null; contact_email: string; url: string }> = [];
     for (const l of ranked) {
       if (picked.length >= capacity) break;
       if (queuedLeadIds.has(String(l.id))) continue;
@@ -228,9 +228,14 @@ Deno.serve(async (req: Request) => {
       // that got the flag without the reason being written must still never be
       // mailed automatically.
       if (l.suspected_official) continue;
-      const bid = l.brand_id ? String(l.brand_id) : null;
-      if (!(await captureAllowed(l.contact_email, l.url || '', bid, bid ? (cooldownMap.get(bid) ?? 3) : 3))) continue;
-      picked.push({ id: String(l.id), brand: l.brand || '1xbet', brand_id: bid });
+      // NB: contact_registry gate moved to the scheduling loop below — see the
+      // comment there. Capturing during selection extended ownership for
+      // candidates this run then never queues.
+      picked.push({
+        id: String(l.id), brand: l.brand || '1xbet',
+        brand_id: l.brand_id ? String(l.brand_id) : null,
+        contact_email: l.contact_email, url: l.url || '',
+      });
     }
 
     if (!picked.length) { stats.reason = 'no eligible leads'; return json(stats); }
@@ -238,8 +243,17 @@ Deno.serve(async (req: Request) => {
     // ── Schedule ──────────────────────────────────────────────────────────
     let cursor = nowMs + START_DELAY_MS;
     const inserts: Array<Record<string, unknown>> = [];
+    // §4.4 ТЗ: the contact_registry gate belongs HERE, not in the selection loop.
+    // fn_capture_contact extends owned_until as a side effect, so calling it
+    // while merely considering a candidate handed this brand ownership over
+    // leads the loop below then drops on `cursor >= workEndMs` — re-extended
+    // every run, starving the rotation the gate exists to enforce. A denied
+    // lead does not advance `cursor`, so it costs no slot.
+    let blockedByRotation = 0;
     for (const l of picked) {
       if (cursor >= workEndMs) break;
+      const cd = l.brand_id ? (cooldownMap.get(l.brand_id) ?? 3) : 3;
+      if (!(await captureAllowed(l.contact_email, l.url, l.brand_id, cd))) { blockedByRotation++; continue; }
       inserts.push({
         lead_id:       l.id,
         brand:         l.brand,
@@ -262,7 +276,8 @@ Deno.serve(async (req: Request) => {
     await quiet(supabase.from('error_log').insert([{
       level: 'info', service: 'generate-queue-brand',
       message: `added ${stats.generated} (sent ${stats.sent_today} + queued ${stats.pending} `
-        + `/ limit ${stats.daily_limit})`,
+        + `/ limit ${stats.daily_limit})`
+        + (blockedByRotation ? `, ${blockedByRotation} blocked by rotation` : ''),
     }]));
 
     return json(stats);

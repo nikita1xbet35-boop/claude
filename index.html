@@ -100,6 +100,16 @@
   .mb-modbtn:hover{background:var(--glass);color:var(--text);}
   .mb-modbtn.active{background:var(--glass2);color:var(--text);border-color:var(--border2);font-weight:600;}
   .mb-bar-fill{height:100%;border-radius:999px;transition:width .4s ease;}
+  /* Поля ввода в формах Настроек/Рассылки — те же токены, что у остальной
+     системы; отдельный класс нужен, потому что глобального стиля для input
+     в файле нет и браузерный дефолт светлый. */
+  .mb-input{width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);
+    color:var(--text);border-radius:var(--radius-xs,6px);padding:8px 11px;font-size:13px;
+    font-family:var(--font-body);transition:border-color .15s;}
+  .mb-input:focus{outline:none;border-color:var(--accent);}
+  .mb-input::placeholder{color:var(--text3);}
+  select.mb-input{cursor:pointer;}
+  textarea.mb-input{resize:vertical;line-height:1.5;}
 
   /* PIPELINE LAYOUT */
   .pipeline-layout{display:grid;grid-template-columns:272px 1fr 356px;flex:1;overflow:hidden;}
@@ -1045,6 +1055,16 @@
   </div>
   <div class="mb-body">
     <div id="mb-content-brand-overview" class="mb-main">
+      <div class="mb-empty">Загрузка…</div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: НАСТРОЙКИ СИСТЕМЫ (кросс-брендовый, /settings) -->
+<div class="page" id="page-x-settings">
+  <div id="mb-shell-x-settings" class="mb-topbar"></div>
+  <div class="mb-body">
+    <div id="mb-content-x-settings" class="mb-main" style="padding:24px 28px;">
       <div class="mb-empty">Загрузка…</div>
     </div>
   </div>
@@ -15089,7 +15109,7 @@ const MB = (() => {
         ${xBtn('x-rotation','⇄ Ротация','#/rotation')}
       </div>
       <div class="mb-topbar-brands">${brandBtns || '<span class="mb-empty" style="padding:0;">брендов нет</span>'}</div>
-      <button class="mb-xbtn" onclick="MB.gotoHash('#/settings')" title="Настройки системы">⚙</button>`;
+      <button class="mb-xbtn ${kind==='settings'?'active':''}" onclick="MB.gotoHash('#/settings')" title="Настройки системы">⚙</button>`;
   }
 
   // Best-effort: a failed/timed-out brands fetch here must not stop whatever
@@ -15224,9 +15244,9 @@ const MB = (() => {
       await paintShell('x-rotation', 'x-rotation', null);
       renderRotation();
     } else if(r.kind === 'settings'){
-      // 6.12 — не в этом проходе. Не 404: понятная заглушка на существующей diag-подобной странице не заведена,
-      // поэтому просто уводим на кросс-брендовый Обзор с пояснением через alert-free toast-less notice.
-      gotoHash('#/');
+      goTo('x-settings');
+      await paintShell('x-settings', 'settings', null);
+      renderSystemSettings();
     } else if(r.kind === 'brand'){
       state.module = r.module || state.module || 'overview';
       const mod = MODULES.find(m => m.key === state.module) || MODULES[0];
@@ -15350,6 +15370,8 @@ const MB = (() => {
   // ── 6.2 Обзор бренда / заглушки для ненастроенных модулей ──────────
   async function renderBrandModule(slug, moduleKey){
     if(moduleKey === 'overview') return renderBrandOverview(slug);
+    if(moduleKey === 'outreach') return renderOutreach(slug);
+    if(moduleKey === 'config')   return renderBrandConfig(slug);
     const box = document.getElementById('mb-content-brand-overview');
     if(!box) return;
     const mod = MODULES.find(m => m.key === moduleKey);
@@ -15432,6 +15454,379 @@ const MB = (() => {
     } catch(e){
       box.innerHTML = `<div class="mb-card"><div style="color:var(--red);font-size:13px;">Не удалось загрузить: ${esc(e.message||e)}</div></div>`;
     }
+  }
+
+  // ── 6.9 Рассылка (/brand/{slug}/outreach) ───────────────────────────
+  async function renderOutreach(slug){
+    const box = document.getElementById('mb-content-brand-overview');
+    if(!box) return;
+    box.innerHTML = '<div class="mb-empty">Загрузка…</div>';
+    try {
+      const brands = await loadBrands();
+      const brand = brands.find(b => b.slug === slug);
+      if(!brand){ box.innerHTML = `<div class="mb-card"><div class="mb-empty">Бренд «${esc(slug)}» не найден.</div></div>`; return; }
+
+      const dayStart = new Date(); dayStart.setHours(0,0,0,0);
+      const cnt = async (t, build) => {
+        let q = sb.from(t).select('id', {count:'exact', head:true});
+        q = build(q);
+        const {count} = await q; return count || 0;
+      };
+      const [smtpRes, pending, sentToday, heldByOthers, frozen] = await withTimeout(Promise.all([
+        sb.from('smtp_accounts').select('*').eq('brand_id', brand.id).order('email'),
+        cnt('send_queue', q => q.eq('brand_id', brand.id).eq('status','pending')),
+        cnt('email_log',  q => q.eq('brand_id', brand.id).gte('sent_at', dayStart.toISOString())),
+        // Контакты, которые СЕЙЧАС держит другой бренд — то, что физически не
+        // даст этому бренду им написать. Считаем по реестру напрямую: связать
+        // это с конкретными лидами одним запросом PostgREST не даёт, а
+        // вызывать fn_capture_contact ради подсчёта нельзя — она меняет
+        // владение как побочный эффект.
+        sb.from('contact_registry').select('contact_hash', {count:'exact', head:true})
+          .neq('current_owner_brand_id', brand.id).gt('owned_until', new Date().toISOString()),
+        sb.from('contact_registry').select('contact_hash', {count:'exact', head:true}).eq('status','frozen'),
+      ]), 15000, 'рассылка');
+
+      const accounts = smtpRes.data || [];
+      const accRows = accounts.length ? accounts.map(a => {
+        const rate = a.sent_count_7d ? (a.bounce_count_7d / a.sent_count_7d * 100) : 0;
+        const rateColor = rate > 3 ? 'var(--red)' : rate > 1 ? 'var(--amber)' : 'var(--green)';
+        const stColor = a.status==='active' ? 'var(--green)' : a.status==='ramping' ? 'var(--blue)'
+                      : a.status==='paused' ? 'var(--amber)' : 'var(--red)';
+        const pct = a.daily_limit ? Math.min(100, Math.round(a.daily_sent / a.daily_limit * 100)) : 0;
+        return `<tr style="border-top:1px solid var(--border);">
+          <td style="padding:9px 10px 9px 0;">${esc(a.email)}</td>
+          <td style="padding:9px 10px 9px 0;">
+            <span style="font-size:10px;font-family:var(--font-mono);padding:2px 8px;border-radius:20px;background:${stColor}22;color:${stColor};">${esc(a.status)}</span>
+            ${a.status==='ramping' ? `<span style="color:var(--text3);font-size:10px;margin-left:6px;">стадия ${a.ramp_stage}/5</span>` : ''}
+          </td>
+          <td style="padding:9px 10px 9px 0;min-width:130px;">
+            <div class="mb-bar-wrap"><div class="mb-bar-fill" style="width:${pct}%;background:var(--accent);"></div></div>
+            <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-top:3px;">${a.daily_sent} / ${a.daily_limit}</div>
+          </td>
+          <td style="padding:9px 10px 9px 0;font-family:var(--font-mono);color:${rateColor};">
+            ${a.sent_count_7d ? rate.toFixed(1)+'%' : '—'}
+            <div style="color:var(--text3);font-size:10px;">${a.bounce_count_7d}/${a.sent_count_7d} за 7д</div>
+          </td>
+          <td style="padding:9px 0 9px 10px;text-align:right;white-space:nowrap;">
+            <button class="mb-xbtn" style="padding:3px 9px;font-size:11px;" onclick="MB.toggleSmtp('${a.id}','${esc(a.status)}','${esc(slug)}')">
+              ${a.status==='paused' ? '▶ Включить' : '⏸ Пауза'}
+            </button>
+          </td>
+        </tr>`;
+      }).join('') : `<tr><td colspan="5" class="mb-empty">У бренда нет ни одного SMTP-аккаунта. Их заводит миграция 038 (для 1xBet и 1xCasino); LuckyPari ждёт реальный адрес.</td></tr>`;
+
+      box.innerHTML = `
+        <div style="margin-bottom:18px;">
+          <div style="font-family:var(--font-head);font-size:20px;font-weight:600;color:var(--text);">Рассылка — ${esc(brand.name)}</div>
+          <div style="font-size:12px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">SMTP-пул бренда и состояние очереди</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
+          <div class="mb-card"><div class="mb-label">В очереди</div><div style="font-size:24px;font-family:var(--font-mono);color:var(--text);">${pending}</div></div>
+          <div class="mb-card"><div class="mb-label">Отправлено сегодня</div><div style="font-size:24px;font-family:var(--font-mono);color:var(--text);">${sentToday}</div></div>
+          <div class="mb-card"><div class="mb-label">Держит другой бренд</div><div style="font-size:24px;font-family:var(--font-mono);color:var(--amber);">${heldByOthers.count||0}</div></div>
+          <div class="mb-card"><div class="mb-label">Заморожено навсегда</div><div style="font-size:24px;font-family:var(--font-mono);color:var(--red);">${frozen.count||0}</div></div>
+        </div>
+
+        <div class="mb-card" style="overflow-x:auto;">
+          <div class="mb-label" style="margin-bottom:12px;">SMTP-аккаунты бренда</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:620px;">
+            <thead><tr style="color:var(--text3);text-align:left;">
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Email</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Статус</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Сегодня / лимит</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Bounce 7д</th>
+              <th style="padding:6px 0 6px 10px;font-weight:500;"></th>
+            </tr></thead>
+            <tbody>${accRows}</tbody>
+          </table>
+          <div style="font-size:11.5px;color:var(--text3);margin-top:12px;line-height:1.55;">
+            Пул пока не подключён к реальной отправке: process-queue до сих пор жёстко шлёт через один аккаунт «main».
+            Цифры «сегодня/лимит» здесь — то, что записано в smtp_accounts, а не фактическая отправка.
+          </div>
+        </div>`;
+    } catch(e){
+      box.innerHTML = `<div class="mb-card"><div style="color:var(--red);font-size:13px;">Не удалось загрузить: ${esc(e.message||e)}</div></div>`;
+    }
+  }
+
+  async function toggleSmtp(id, curStatus, slug){
+    const next = curStatus === 'paused' ? 'active' : 'paused';
+    const {error} = await sb.from('smtp_accounts').update({status: next}).eq('id', id);
+    if(error){ alert('Не удалось: ' + error.message); return; }
+    renderOutreach(slug);
+  }
+
+  // ── 6.10 Настройки бренда (/brand/{slug}/config) ────────────────────
+  async function renderBrandConfig(slug){
+    const box = document.getElementById('mb-content-brand-overview');
+    if(!box) return;
+    box.innerHTML = '<div class="mb-empty">Загрузка…</div>';
+    try {
+      // Отдельный запрос, а не brandsCache: кэш держит только active/paused,
+      // а сюда можно попасть и для draft-бренда из Настроек системы.
+      const {data: b, error} = await withTimeout(
+        sb.from('brands').select('*').eq('slug', slug).single(), 12000, 'бренд');
+      if(error || !b){ box.innerHTML = `<div class="mb-card"><div class="mb-empty">Бренд «${esc(slug)}» не найден.</div></div>`; return; }
+
+      const all = await loadBrands();
+      const weightSum = all.reduce((s,x) => s + (Number(x.cron_weight)||0), 0);
+      const others = all.filter(x => x.slug !== slug);
+
+      const fld = (label, id, val, type='text', hint='') => `
+        <div style="margin-bottom:14px;">
+          <label class="mb-label" style="display:block;margin-bottom:5px;">${label}</label>
+          <input id="${id}" type="${type}" value="${esc(val==null?'':val)}" class="mb-input">
+          ${hint ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">${hint}</div>` : ''}
+        </div>`;
+      const sel = (label, id, val, opts) => `
+        <div style="margin-bottom:14px;">
+          <label class="mb-label" style="display:block;margin-bottom:5px;">${label}</label>
+          <select id="${id}" class="mb-input">
+            ${opts.map(o => `<option value="${o}" ${o===val?'selected':''}>${o}</option>`).join('')}
+          </select>
+        </div>`;
+
+      const gapRows = others.map(o => {
+        const cur = (b.min_gap_after || {})[o.slug];
+        return `<tr style="border-top:1px solid var(--border);">
+          <td style="padding:7px 10px 7px 0;">после ${esc(o.name)}</td>
+          <td style="padding:7px 0;text-align:right;">
+            <input class="mb-input mb-gap" data-slug="${esc(o.slug)}" type="number" min="0"
+              value="${cur==null?'':Number(cur)}" placeholder="—" style="width:90px;text-align:right;">
+          </td>
+        </tr>`;
+      }).join('');
+
+      box.innerHTML = `
+        <div style="margin-bottom:18px;">
+          <div style="font-family:var(--font-head);font-size:20px;font-weight:600;color:var(--text);">Настройки — ${esc(b.name)}</div>
+          <div style="font-size:12px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">Строка в таблице brands · slug ${esc(b.slug)}</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;">
+          <div class="mb-card">
+            <div class="mb-label" style="margin-bottom:14px;">Основное</div>
+            ${fld('Название', 'bc-name', b.name)}
+            ${sel('Статус', 'bc-status', b.status, ['active','paused','draft'])}
+            ${sel('Вертикаль', 'bc-vertical', b.vertical, ['standard','casino_slots'])}
+            ${fld('RS старт, %', 'bc-rsstart', b.rs_start, 'number')}
+            ${fld('RS потолок, %', 'bc-rscap', b.rs_cap, 'number')}
+          </div>
+
+          <div class="mb-card">
+            <div class="mb-label" style="margin-bottom:14px;">Отправитель</div>
+            ${fld('Email', 'bc-email', b.sender_email)}
+            ${fld('Telegram', 'bc-tg', b.sender_tg)}
+            ${fld('Домен', 'bc-domain', b.sender_domain)}
+          </div>
+
+          <div class="mb-card">
+            <div class="mb-label" style="margin-bottom:14px;">Крон и ротация</div>
+            ${fld('Вес в кроне', 'bc-weight', b.cron_weight, 'number',
+                  `Сумма весов активных брендов сейчас: <b style="color:${weightSum===100?'var(--green)':'var(--amber)'}">${weightSum}</b>${weightSum===100?'':' — не 100'}`)}
+            ${fld('Cooldown, дней', 'bc-cooldown', b.cooldown_days, 'number',
+                  'Через сколько дней контакт освобождается для следующего бренда')}
+            <div class="mb-label" style="margin:16px 0 6px;">Запрет идти сразу после бренда</div>
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px;">${gapRows || '<tr><td class="mb-empty">других брендов нет</td></tr>'}</table>
+            <div style="font-size:11px;color:var(--text3);margin-top:6px;">Пусто = ограничения нет. Число = столько дней после этого бренда контакт недоступен.</div>
+          </div>
+
+          <div class="mb-card">
+            <div class="mb-label" style="margin-bottom:8px;">ГЕО-список</div>
+            <textarea id="bc-geo" class="mb-input" style="min-height:190px;font-family:var(--font-mono);font-size:12px;">${esc((b.geo_list||[]).join('\n'))}</textarea>
+            <div style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5;">
+              По одному значению в строке. Хранится как JSONB-массив строк — свободный формат, не справочник стран.
+              У 1xBet это единственное значение-флаг <code>worldwide_ex_tier1_brazil</code>: промпт квалификации понимает его особо и оставляет старое правило Tier-1-исключений.
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;display:flex;gap:10px;align-items:center;">
+          <button class="mb-xbtn" style="background:var(--accent);color:#fff;border-color:var(--accent);padding:8px 18px;"
+            onclick="MB.saveBrandConfig('${esc(slug)}')">Сохранить</button>
+          <span id="bc-msg" style="font-size:12px;color:var(--text3);"></span>
+        </div>`;
+    } catch(e){
+      box.innerHTML = `<div class="mb-card"><div style="color:var(--red);font-size:13px;">Не удалось загрузить: ${esc(e.message||e)}</div></div>`;
+    }
+  }
+
+  async function saveBrandConfig(slug){
+    const msg = document.getElementById('bc-msg');
+    const v = id => (document.getElementById(id)?.value ?? '').trim();
+    const num = id => { const x = v(id); return x === '' ? null : Number(x); };
+
+    const gap = {};
+    document.querySelectorAll('.mb-gap').forEach(el => {
+      const n = el.value.trim();
+      if(n !== '') gap[el.dataset.slug] = Number(n);
+    });
+
+    const patch = {
+      name: v('bc-name'), status: v('bc-status'), vertical: v('bc-vertical'),
+      rs_start: num('bc-rsstart'), rs_cap: num('bc-rscap'),
+      sender_email: v('bc-email') || null, sender_tg: v('bc-tg') || null, sender_domain: v('bc-domain') || null,
+      cron_weight: num('bc-weight'), cooldown_days: num('bc-cooldown'),
+      min_gap_after: gap,
+      geo_list: v('bc-geo').split('\n').map(x => x.trim()).filter(Boolean),
+      updated_at: new Date().toISOString(),
+    };
+    if(msg){ msg.textContent = 'Сохраняю…'; msg.style.color = 'var(--text3)'; }
+    const {error} = await sb.from('brands').update(patch).eq('slug', slug);
+    if(error){ if(msg){ msg.textContent = 'Ошибка: ' + error.message; msg.style.color = 'var(--red)'; } return; }
+    await loadBrands(true);
+    if(msg){ msg.textContent = 'Сохранено. Крон подхватит на следующем тике.'; msg.style.color = 'var(--green)'; }
+    await paintBrandContext('brand-overview', 'config', slug);
+  }
+
+  // ── 6.12 Настройки системы (/settings) ──────────────────────────────
+  async function renderSystemSettings(){
+    const box = document.getElementById('mb-content-x-settings');
+    if(!box) return;
+    box.innerHTML = '<div class="mb-empty">Загрузка…</div>';
+    try {
+      // ВСЕ бренды, включая draft — этим экран и отличается от шапки, где
+      // draft скрыт (§4 ТЗ: Melbet/Coldbet видны только здесь).
+      const [allRes, cfgRes] = await withTimeout(Promise.all([
+        sb.from('brands').select('*').order('cron_weight', {ascending:false}),
+        sb.from('system_config').select('*'),
+      ]), 15000, 'настройки системы');
+      const all = allRes.data || [];
+      const cfg = {}; for(const r of (cfgRes.data||[])) cfg[r.key] = r.value;
+
+      const activeSum = all.filter(b => b.status==='active')
+        .reduce((s,b) => s + (Number(b.cron_weight)||0), 0);
+
+      const rows = all.map((b,i) => {
+        const clr = colorFor(b.slug, i);
+        const stColor = b.status==='active' ? 'var(--green)' : b.status==='paused' ? 'var(--amber)' : 'var(--text3)';
+        return `<tr style="border-top:1px solid var(--border);">
+          <td style="padding:9px 10px 9px 0;">
+            <span class="mb-dot" style="display:inline-block;background:${clr};margin-right:7px;"></span>${esc(b.name)}
+            <span style="color:var(--text3);font-family:var(--font-mono);font-size:11px;margin-left:6px;">${esc(b.slug)}</span>
+          </td>
+          <td style="padding:9px 10px 9px 0;"><span style="font-size:10px;font-family:var(--font-mono);padding:2px 8px;border-radius:20px;background:${stColor}22;color:${stColor};">${esc(b.status)}</span></td>
+          <td style="padding:9px 10px 9px 0;color:var(--text3);font-size:11.5px;">${esc(b.visibility)} · ${esc(b.role)}</td>
+          <td style="padding:9px 10px 9px 0;text-align:right;font-family:var(--font-mono);">${b.cron_weight}</td>
+          <td style="padding:9px 10px 9px 0;text-align:right;font-family:var(--font-mono);">${b.cooldown_days}д</td>
+          <td style="padding:9px 0 9px 10px;text-align:right;">
+            <button class="mb-xbtn" style="padding:3px 9px;font-size:11px;" onclick="MB.goto('brand','${esc(b.slug)}','config')">Настроить</button>
+          </td>
+        </tr>`;
+      }).join('');
+
+      const rotation = Array.isArray(cfg.rotation_order) ? cfg.rotation_order.join(', ') : '';
+      const maxTouches = cfg.max_touches_per_contact == null ? '' : String(cfg.max_touches_per_contact);
+
+      box.innerHTML = `
+        <div style="margin-bottom:18px;">
+          <div style="font-family:var(--font-head);font-size:20px;font-weight:600;color:var(--text);">Настройки системы</div>
+          <div style="font-size:12px;color:var(--text3);font-family:var(--font-mono);margin-top:2px;">
+            Все бренды, включая draft — в шапке они не показываются
+          </div>
+        </div>
+
+        <div class="mb-card" style="overflow-x:auto;margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;">
+            <div class="mb-label">Бренды (${all.length})</div>
+            <div style="font-size:11.5px;color:${activeSum===100?'var(--text3)':'var(--amber)'};font-family:var(--font-mono);">
+              сумма весов активных: ${activeSum}${activeSum===100?'':' — не 100'}
+            </div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px;">
+            <thead><tr style="color:var(--text3);text-align:left;">
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Бренд</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Статус</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;">Видимость · роль</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;text-align:right;">Вес</th>
+              <th style="padding:6px 10px 6px 0;font-weight:500;text-align:right;">Cooldown</th>
+              <th style="padding:6px 0 6px 10px;font-weight:500;"></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;">
+          <div class="mb-card">
+            <div class="mb-label" style="margin-bottom:14px;">Глобальные константы (system_config)</div>
+            <div style="margin-bottom:14px;">
+              <label class="mb-label" style="display:block;margin-bottom:5px;">Максимум касаний на контакт</label>
+              <input id="sc-touches" class="mb-input" type="number" min="1" value="${esc(maxTouches)}">
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">После этого числа писем любыми брендами контакт замораживается навсегда.</div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <label class="mb-label" style="display:block;margin-bottom:5px;">Порядок ротации</label>
+              <input id="sc-rotation" class="mb-input" value="${esc(rotation)}">
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Слаги через запятую. Определяет, какой бренд получает контакт следующим.</div>
+            </div>
+            <button class="mb-xbtn" style="background:var(--accent);color:#fff;border-color:var(--accent);padding:8px 18px;"
+              onclick="MB.saveSystemConfig()">Сохранить</button>
+            <span id="sc-msg" style="font-size:12px;color:var(--text3);margin-left:10px;"></span>
+          </div>
+
+          <div class="mb-card">
+            <div class="mb-label" style="margin-bottom:14px;">Добавить бренд</div>
+            <div style="margin-bottom:12px;">
+              <label class="mb-label" style="display:block;margin-bottom:5px;">Slug</label>
+              <input id="nb-slug" class="mb-input" placeholder="melbet">
+            </div>
+            <div style="margin-bottom:12px;">
+              <label class="mb-label" style="display:block;margin-bottom:5px;">Название</label>
+              <input id="nb-name" class="mb-input" placeholder="Melbet">
+            </div>
+            <div style="margin-bottom:12px;">
+              <label class="mb-label" style="display:block;margin-bottom:5px;">RS потолок, %</label>
+              <input id="nb-rscap" class="mb-input" type="number" value="40">
+            </div>
+            <button class="mb-xbtn" style="padding:8px 18px;" onclick="MB.addBrand()">Создать</button>
+            <span id="nb-msg" style="font-size:12px;color:var(--text3);margin-left:10px;"></span>
+            <div style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.5;">
+              Создаётся как <code>draft</code> с весом 0 — то есть не участвует в кроне и не появляется в шапке,
+              пока ГЕО и условия не заполнены здесь же через «Настроить».
+            </div>
+          </div>
+        </div>`;
+    } catch(e){
+      box.innerHTML = `<div class="mb-card"><div style="color:var(--red);font-size:13px;">Не удалось загрузить: ${esc(e.message||e)}</div></div>`;
+    }
+  }
+
+  async function saveSystemConfig(){
+    const msg = document.getElementById('sc-msg');
+    const touches = (document.getElementById('sc-touches')?.value || '').trim();
+    const rotation = (document.getElementById('sc-rotation')?.value || '')
+      .split(',').map(x => x.trim()).filter(Boolean);
+    if(msg){ msg.textContent = 'Сохраняю…'; msg.style.color = 'var(--text3)'; }
+    // value — JSONB, поэтому число кладём числом, а список массивом: строка
+    // "5" тоже прочиталась бы (#>>'{}' даёт текст в обоих случаях), но
+    // хранить скаляр строкой значит рано или поздно сравнить его как строку.
+    const rows = [
+      {key:'max_touches_per_contact', value: touches === '' ? 5 : Number(touches)},
+      {key:'rotation_order', value: rotation},
+    ];
+    const {error} = await sb.from('system_config').upsert(rows, {onConflict:'key'});
+    if(error){ if(msg){ msg.textContent = 'Ошибка: ' + error.message; msg.style.color = 'var(--red)'; } return; }
+    if(msg){ msg.textContent = 'Сохранено.'; msg.style.color = 'var(--green)'; }
+  }
+
+  async function addBrand(){
+    const msg = document.getElementById('nb-msg');
+    const slug = (document.getElementById('nb-slug')?.value || '').trim().toLowerCase();
+    const name = (document.getElementById('nb-name')?.value || '').trim();
+    const rsCap = Number(document.getElementById('nb-rscap')?.value || 40);
+    if(!slug || !name){ if(msg){ msg.textContent = 'Нужны и slug, и название.'; msg.style.color = 'var(--red)'; } return; }
+    if(msg){ msg.textContent = 'Создаю…'; msg.style.color = 'var(--text3)'; }
+    // draft + вес 0: новый бренд не должен начать забирать тики крона и
+    // контакты у работающих раньше, чем у него появятся ГЕО и ключи.
+    const {error} = await sb.from('brands').insert([{
+      slug, name, status:'draft', visibility:'public', role:'affiliate_manager',
+      geo_list: [], rs_start: 25, rs_cap: rsCap, vertical: 'standard',
+      cron_weight: 0, cooldown_days: 3, min_gap_after: {},
+    }]);
+    if(error){ if(msg){ msg.textContent = 'Ошибка: ' + error.message; msg.style.color = 'var(--red)'; } return; }
+    await loadBrands(true);
+    renderSystemSettings();
   }
 
   // ── 6.11 Ротация (кросс-брендовый) ──────────────────────────────────
@@ -15569,6 +15964,8 @@ const MB = (() => {
     goto, gotoHash, applyHash, loadBrands,
     renderOverview, renderBrandOverview, renderRotation,
     toggleBrandStatus, setRotationFilter, releaseContact, freezeContact,
+    renderOutreach, toggleSmtp, renderBrandConfig, saveBrandConfig,
+    renderSystemSettings, saveSystemConfig, addBrand,
   };
 })();
 
