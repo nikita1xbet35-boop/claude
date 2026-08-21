@@ -274,8 +274,16 @@ jobs:
           # смыслу бренду не принадлежат (системные логи, счётчики на сервис,
           # сырая выгрузка до квалификации). Их и проверяем.
           NN=$(q "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='brand_id' AND is_nullable='NO' AND table_name IN ('api_usage','error_log','dfs_domains');")
-          echo "── brand_id NOT NULL там, где и должен (ожидаем 4) ──"
-          q "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='brand_id' AND is_nullable='NO' AND table_name IN ('leads','send_queue','email_log','funnel_stats') ORDER BY table_name;"
+          # leads выбыла из списка NOT NULL намеренно (045): конференционный лид
+          # живёт без бренда, пока ротация не назначит владельца. Гарантия для
+          # него держится CHECK-ограничением leads_brand_required, а не NOT NULL,
+          # поэтому проверяются оба механизма — иначе исчезновение CHECK прошло
+          # бы незамеченным.
+          echo "── brand_id NOT NULL там, где и должен (ожидаем 3) ──"
+          q "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='brand_id' AND is_nullable='NO' AND table_name IN ('send_queue','email_log','funnel_stats') ORDER BY table_name;"
+          echo; echo "── leads: CHECK вместо NOT NULL (ожидаем leads_brand_required) ──"
+          CHK=$(q "SELECT conname FROM pg_constraint WHERE conrelid='public.leads'::regclass AND conname='leads_brand_required';")
+          echo "$CHK"
           echo; echo "── brand_id NOT NULL там, где НЕ должен (должно быть пусто) ──"
           echo "$NN"
           echo; echo "── Функции ──"
@@ -288,6 +296,10 @@ jobs:
           # Единственная проверка, которая валит деплой: см. комментарий выше.
           if echo "$NN" | grep -q '"table_name"'; then
             echo "::error::brand_id стал NOT NULL на таблице, которая бренду не принадлежит — системные вставки начнут падать"
+            exit 1
+          fi
+          if ! echo "$CHK" | grep -q 'leads_brand_required'; then
+            echo "::error::на leads пропал CHECK leads_brand_required — лиды снова могут вставляться без бренда"
             exit 1
           fi
           echo "OK: ограничение стоит ровно там, где задумано."

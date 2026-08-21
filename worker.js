@@ -489,8 +489,41 @@ export default {
 async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
 
-    // Telegram webhook endpoint
+    // Telegram webhook endpoint.
+    //
+    // This route sits BEFORE the password gate by necessity — Telegram calls it,
+    // and Telegram cannot log in. That makes it the one publicly reachable entry
+    // point in the worker, so what it is allowed to do matters.
+    //
+    // It is not inert: a callback_query matching `wd:approve:<id>` invokes
+    // watchdogApply(), which calls the watchdog-agent edge function and applies
+    // a system change. The only check on that path was
+    // `cq.from?.id === TG_MY_USER_ID(env)` — but `from.id` is a field of the
+    // REQUEST BODY, so anyone who knows this URL could send a hand-written
+    // "callback" carrying the right id and approve watchdog actions without
+    // any credential at all.
+    //
+    // Telegram signs its deliveries with a secret you register alongside the
+    // webhook and it replays on every call in this header. Verifying it is the
+    // actual authentication for this route; the from.id check stays as a second
+    // condition, not as the boundary.
     if (request.method === 'POST' && url.pathname === '/tg-webhook') {
+      const expected = env.TG_WEBHOOK_SECRET;
+      if (expected) {
+        const got = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
+        if (got !== expected) {
+          console.error('tg-webhook: bad or missing secret token — rejected');
+          // 401, not 403: an unauthenticated caller, and Telegram itself never
+          // sees this because it always sends the header once registered.
+          return new Response('unauthorized', { status: 401 });
+        }
+      } else {
+        // Unset secret keeps the webhook working rather than silently killing
+        // Telegram integration on deploy — but it is a hole, so it is loud in
+        // the logs instead of invisible. Register it with setWebhook's
+        // secret_token parameter and set TG_WEBHOOK_SECRET to the same value.
+        console.error('tg-webhook: TG_WEBHOOK_SECRET is not set — route is UNAUTHENTICATED');
+      }
       try {
         const update = await request.json();
         ctx.waitUntil(handleTgUpdate(update, env));
