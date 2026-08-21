@@ -3132,6 +3132,33 @@ const BRAND_CONFIG = {
     signature:'Andreas, Lucky Pari Partners',
     partnerBrand:'Lucky Pari', partnerProgram:'Lucky Pari Partners',
     revshare:'25–40%',
+  },
+  // Melbet и Coldbet видны только роли full (visibility='hidden' + политика
+  // brands_select из 046). Цвета совпадают с BRAND_COLORS в MB-модуле — иначе
+  // точка в шапке и подсветка страницы разъезжаются по палитре.
+  // Без записи здесь applyBrandTheme() выходит по `if(!cfg) return`, и бренд
+  // открывался бы в акценте предыдущего — экран Melbet в фиолетовом 1xBet.
+  'melbet': {
+    label:'MELBET', display:'Melbet',
+    accent:'#60a5fa', accent2:'#93c5fd',
+    accentGlow:'rgba(96,165,250,0.18)',
+    accentGrad:'linear-gradient(135deg,#60a5fa,#93c5fd)',
+    bgGlow:'radial-gradient(ellipse 80% 50% at 50% -10%,rgba(96,165,250,0.10) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(96,165,250,0.05) 0%,transparent 60%)',
+    managerName:'Nick', managerTg:'@aff_manager_xbet',
+    signature:'Nick, Melbet Partners',
+    partnerBrand:'Melbet', partnerProgram:'Melbet Partners',
+    revshare:'25%',
+  },
+  'coldbet': {
+    label:'COLDBET', display:'Coldbet',
+    accent:'#c084fc', accent2:'#d8b4fe',
+    accentGlow:'rgba(192,132,252,0.18)',
+    accentGrad:'linear-gradient(135deg,#c084fc,#d8b4fe)',
+    bgGlow:'radial-gradient(ellipse 80% 50% at 50% -10%,rgba(192,132,252,0.10) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(192,132,252,0.05) 0%,transparent 60%)',
+    managerName:'Nick', managerTg:'@aff_manager_xbet',
+    signature:'Nick, Coldbet Partners',
+    partnerBrand:'Coldbet', partnerProgram:'Coldbet Partners',
+    revshare:'25%',
   }
 };
 
@@ -9310,7 +9337,16 @@ async function markLeadEvent(id, field){
 // ══════════════════════════════════════════
 //  ПРЕСЕТЫ ЗАПРОСОВ
 // ══════════════════════════════════════════
-function getDefaultPresets(){ return BRAND_PRESETS[currentBrand] || BRAND_PRESETS['1xbet']; }
+// Откат на пресеты 1xBet работал, пока каждый бренд в шапке имел свои. С
+// появлением Melbet и Coldbet (у них своего пула ещё нет — ключи заводятся
+// отдельно) он превратился бы в подлог: экран подписан текущим брендом, и
+// ключи 1xBet под шапкой Melbet читаются как ключи Melbet. Пустой список —
+// честный ответ «пула нет». Откат остаётся ровно на случай, когда бренд не
+// выбран вообще: тогда показать что-то лучше, чем пустой экран.
+function getDefaultPresets(){
+  if(!currentBrand) return BRAND_PRESETS['1xbet'];
+  return BRAND_PRESETS[currentBrand] || [];
+}
 
 let customPresets = [];
 let selectedPreset = null;
