@@ -263,7 +263,7 @@ Deno.serve(async (req: Request) => {
 
     // Fill remaining capacity with new eligible leads
     const newQuota = Math.max(0, capacity - futurePending.length - overduePending.length);
-    let newLeads: Array<{ id: string; brand: string; brand_id: string | null; source: string }> = [];
+    let newLeads: Array<{ id: string; brand: string; brand_id: string | null; source: string; contact_email: string; url: string }> = [];
 
     if (newQuota > 0) {
       // Hard dedup: ALL-TIME — never re-contact anyone we've ever emailed
@@ -322,10 +322,12 @@ Deno.serve(async (req: Request) => {
         // P0.1 gate: anything proven undeliverable or throwaway never goes out.
         if (l.email_status === 'invalid' || l.email_status === 'disposable') continue;
         if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;     // geo blacklist
-        // §4.4 ТЗ: contact_registry gate — see captureAllowed above.
-        const bid = l.brand_id ? String(l.brand_id) : null;
-        if (!(await captureAllowed(l.contact_email, l.url || '', bid, bid ? (cooldownMap.get(bid) ?? 3) : 3))) continue;
-        newLeads.push({ id: l.id, brand: l.brand, brand_id: bid, source: l.source || 'seo' });
+        // NB: the contact_registry gate is deliberately NOT here — see the
+        // comment above the scheduling loop for why it moved.
+        newLeads.push({
+          id: l.id, brand: l.brand, brand_id: l.brand_id ? String(l.brand_id) : null,
+          source: l.source || 'seo', contact_email: l.contact_email, url: l.url || '',
+        });
       }
 
       // ── Gentle backlog drain ────────────────────────────────────────────────
@@ -354,9 +356,10 @@ Deno.serve(async (req: Request) => {
           if (!isSendableEmail(l.contact_email)) continue;
           if (emailedSet.has(l.contact_email.toLowerCase())) continue;
           if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;
-          const bid = l.brand_id ? String(l.brand_id) : null;
-          if (!(await captureAllowed(l.contact_email, l.url || '', bid, bid ? (cooldownMap.get(bid) ?? 3) : 3))) continue;
-          newLeads.push({ id: l.id, brand: l.brand, brand_id: bid, source: l.source || 'seo' });
+          newLeads.push({
+            id: l.id, brand: l.brand, brand_id: l.brand_id ? String(l.brand_id) : null,
+            source: l.source || 'seo', contact_email: l.contact_email, url: l.url || '',
+          });
           pickedIds.add(l.id);
           backlogAdded++;
         }
@@ -382,8 +385,23 @@ Deno.serve(async (req: Request) => {
     //    NOT appended after the latest future item. Future items keep their stable
     //    times and will interleave naturally — process-queue picks by scheduled_at ASC.
     //    This eliminates long gaps when future items happen to be far away.
+    //
+    // §4.4 ТЗ: the contact_registry gate lives HERE, not in the selection loops
+    // above. fn_capture_contact is not a query — on the same-brand path it
+    // extends owned_until by cooldown_days. Called during selection it fired for
+    // every candidate considered, including the many this loop then drops on
+    // `cursor >= workEndMs`, so the active brand kept re-extending its ownership
+    // every 15 minutes over leads it never mails — starving the exact rotation
+    // the gate exists to enforce. Capturing at the moment a lead actually gets a
+    // slot means ownership is only taken for mail that is really scheduled.
+    //
+    // A denied lead does NOT consume a slot: `cursor` only advances on success,
+    // so a blocked contact costs nothing and the next candidate takes its place.
+    let blockedByRotation = 0;
     for (const l of newLeads) {
       if (cursor >= workEndMs) break;
+      const cd = l.brand_id ? (cooldownMap.get(l.brand_id) ?? 3) : 3;
+      if (!(await captureAllowed(l.contact_email, l.url, l.brand_id, cd))) { blockedByRotation++; continue; }
       inserts.push({
         lead_id:       l.id,
         brand:         l.brand,
@@ -412,7 +430,8 @@ Deno.serve(async (req: Request) => {
     await supabase.from('error_log').insert([{
       level: 'info', service: 'generate-queue',
       message: `Queue updated — kept ${futurePending.length} future, rescheduled ${updates.length} overdue, `
-        + `added ${inserts.length} new (sent today ${sentToday ?? 0}/${dailyTarget})`,
+        + `added ${inserts.length} new (sent today ${sentToday ?? 0}/${dailyTarget})`
+        + (blockedByRotation ? `, ${blockedByRotation} blocked by rotation` : ''),
     }]);
 
     return new Response(JSON.stringify({
