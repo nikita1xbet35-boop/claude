@@ -1,4 +1,4 @@
--- 040 — Блок 2: keyword-пулы для brand_keywords (1xCasino, LuckyPari)
+-- 040 — Блок 2: keyword-пулы для multibrand_keywords (1xCasino, LuckyPari)
 --
 -- Данные от Ника (AffiliateOS_KeywordPools_1xCasino_LuckyPari.sql), с двумя
 -- правками при переносе:
@@ -21,19 +21,19 @@
 -- по этим языкам отдельно первую неделю, <3 результата на запрос стабильно
 -- значит переписать или выключить active=false.
 --
--- ВНИМАНИЕ: brand_keywords само по себе НЕ подключено как источник ключей
+-- ВНИМАНИЕ: multibrand_keywords само по себе НЕ подключено как источник ключей
 -- в find-and-queue.ts (см. комментарий в 038_multibrand_execution_layer.sql) —
 -- эти строки лежат в базе, но пайплайн их пока не читает. Подключение
 -- источника — отдельная работа, не эта миграция.
 
-CREATE UNIQUE INDEX IF NOT EXISTS brand_keywords_dedup
-  ON public.brand_keywords (brand_id, geo, language, keyword);
+CREATE UNIQUE INDEX IF NOT EXISTS multibrand_keywords_dedup
+  ON public.multibrand_keywords (brand_id, geo, language, keyword);
 
 -- ============================================
--- brand_keywords seed: 1xcasino
+-- multibrand_keywords seed: 1xcasino
 -- ============================================
 
-INSERT INTO public.brand_keywords (brand_id, geo, language, keyword, layer, active) VALUES
+INSERT INTO public.multibrand_keywords (brand_id, geo, language, keyword, layer, active) VALUES
 ((SELECT id FROM public.brands WHERE slug='1xcasino'), 'guinea', 'FR', 'meilleur casino en ligne Guinea', 'A', true),
 ((SELECT id FROM public.brands WHERE slug='1xcasino'), 'guinea', 'FR', 'code bonus casino Guinea', 'A', true),
 ((SELECT id FROM public.brands WHERE slug='1xcasino'), 'guinea', 'FR', 'programme d''affiliation casino', 'B', true),
@@ -197,10 +197,10 @@ INSERT INTO public.brand_keywords (brand_id, geo, language, keyword, layer, acti
 ON CONFLICT (brand_id, geo, language, keyword) DO NOTHING;
 
 -- ============================================
--- brand_keywords seed: luckypari
+-- multibrand_keywords seed: luckypari
 -- ============================================
 
-INSERT INTO public.brand_keywords (brand_id, geo, language, keyword, layer, active) VALUES
+INSERT INTO public.multibrand_keywords (brand_id, geo, language, keyword, layer, active) VALUES
 ((SELECT id FROM public.brands WHERE slug='luckypari'), 'uzbekistan', 'UZ', 'eng yaxshi bukmekerlik Uzbekistan', 'A', true),
 ((SELECT id FROM public.brands WHERE slug='luckypari'), 'uzbekistan', 'UZ', 'bukmeker bonus kodi Uzbekistan', 'A', true),
 ((SELECT id FROM public.brands WHERE slug='luckypari'), 'uzbekistan', 'RU', 'лучшие сайты для ставок Uzbekistan', 'A', true),

@@ -14,11 +14,11 @@
 -- НЕ заменяет существующую `keywords` (preset+layer, ~14 гео-пресетов 1xBet со
 -- своей ротацией городов — PRESET_CITIES в find-and-queue.ts). Тот пайплайн
 -- проверен на реальном трафике и переписывать его в один проход — лишний риск
--- на боевом источнике дохода. brand_keywords — путь для НОВЫХ брендов
+-- на боевом источнике дохода. multibrand_keywords — путь для НОВЫХ брендов
 -- (1xcasino, luckypari), у которых пока нет наработанной preset-инфраструктуры;
 -- 1xBet продолжает работать на `keywords`, пока для него не появится причина
 -- мигрировать (см. комментарий в find-and-queue.ts).
-CREATE TABLE IF NOT EXISTS public.brand_keywords (
+CREATE TABLE IF NOT EXISTS public.multibrand_keywords (
   id          BIGSERIAL PRIMARY KEY,
   brand_id    UUID NOT NULL REFERENCES public.brands(id),
   geo         TEXT NOT NULL,
@@ -29,11 +29,11 @@ CREATE TABLE IF NOT EXISTS public.brand_keywords (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_brand_keywords_brand ON public.brand_keywords(brand_id, active);
+CREATE INDEX IF NOT EXISTS idx_multibrand_keywords_brand ON public.multibrand_keywords(brand_id, active);
 
-ALTER TABLE public.brand_keywords DISABLE ROW LEVEL SECURITY;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.brand_keywords TO anon, authenticated, service_role;
-GRANT USAGE, SELECT ON SEQUENCE public.brand_keywords_id_seq TO anon, authenticated, service_role;
+ALTER TABLE public.multibrand_keywords DISABLE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.multibrand_keywords TO anon, authenticated, service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.multibrand_keywords_id_seq TO anon, authenticated, service_role;
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- 2. SMTP_ACCOUNTS — пул отправки на бренд
@@ -49,10 +49,23 @@ CREATE TABLE IF NOT EXISTS public.smtp_accounts (
   bounce_count_7d INTEGER NOT NULL DEFAULT 0,
   sent_count_7d   INTEGER NOT NULL DEFAULT 0,
   last_reset_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Отдельно от last_reset_at: дневной сброс трогает last_reset_at КАЖДЫЕ
+  -- сутки, поэтому условие ramp-up "last_reset_at < now() - 7 days" не
+  -- выполнялось бы никогда и стадия не росла бы вообще.
+  last_ramp_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Начало текущего 7-дневного окна для sent_count_7d/bounce_count_7d.
+  -- Без него счётчики никогда не обнулялись, и bounce-rate превращался в
+  -- пожизненный: аккаунт, один раз перешагнувший 3%, не мог вернуться.
+  window_start_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_smtp_accounts_brand_status ON public.smtp_accounts(brand_id, status);
+-- Нужен, чтобы ON CONFLICT DO NOTHING ниже реально что-то ловил: без
+-- уникального ключа (PK — gen_random_uuid()) повторный прогон миграции
+-- просто добавлял второй одинаковый аккаунт.
+CREATE UNIQUE INDEX IF NOT EXISTS smtp_accounts_brand_email
+  ON public.smtp_accounts(brand_id, email);
 
 ALTER TABLE public.smtp_accounts DISABLE ROW LEVEL SECURITY;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.smtp_accounts TO anon, authenticated, service_role;
@@ -66,7 +79,7 @@ INSERT INTO public.smtp_accounts (brand_id, email, status, ramp_stage, daily_lim
 SELECT id, 'nick.adflow@gmail.com', 'active', 5, 300 FROM public.brands WHERE slug = '1xbet'
 UNION ALL
 SELECT id, 'nick.adflow@gmail.com', 'active', 5, 300 FROM public.brands WHERE slug = '1xcasino'
-ON CONFLICT DO NOTHING;
+ON CONFLICT (brand_id, email) DO NOTHING;
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- 3. Функции
@@ -79,7 +92,8 @@ ON CONFLICT DO NOTHING;
 -- проставить cron_weight=0 черновику.
 CREATE OR REPLACE FUNCTION public.fn_pick_active_brand()
 RETURNS public.brands
-LANGUAGE plpgsql SECURITY DEFINER AS $$
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, extensions, pg_temp AS $$
 DECLARE
   v_total NUMERIC;
   v_roll  NUMERIC;
@@ -105,7 +119,8 @@ $$;
 -- нагрузку между несколькими аккаунтами одного бренда.
 CREATE OR REPLACE FUNCTION public.fn_next_smtp_account(p_brand_id UUID)
 RETURNS public.smtp_accounts
-LANGUAGE sql SECURITY DEFINER AS $$
+LANGUAGE sql SECURITY DEFINER
+SET search_path = public, extensions, pg_temp AS $$
   SELECT * FROM public.smtp_accounts
     WHERE brand_id = p_brand_id
       AND status IN ('active', 'ramping')
@@ -116,7 +131,8 @@ $$;
 
 -- Записать отправку (нужно вызывать сразу после реальной отправки письма).
 CREATE OR REPLACE FUNCTION public.fn_record_smtp_send(p_account_id UUID, p_bounced BOOLEAN DEFAULT FALSE)
-RETURNS VOID LANGUAGE sql SECURITY DEFINER AS $$
+RETURNS VOID LANGUAGE sql SECURITY DEFINER
+SET search_path = public, extensions, pg_temp AS $$
   UPDATE public.smtp_accounts SET
     daily_sent    = daily_sent + 1,
     sent_count_7d = sent_count_7d + 1,
@@ -125,17 +141,25 @@ RETURNS VOID LANGUAGE sql SECURITY DEFINER AS $$
 $$;
 
 -- Полночный сброс + автопауза по bounce-rate (п. 4.5, вторая и третья
--- строчки). daily_sent сбрасывается каждый вызов (крон должен звать это раз
--- в сутки); sent_count_7d/bounce_count_7d — скользящее окно, здесь упрощено
--- до "обнулить раз в 7 циклов вызова", а не честного 7-дневного окна per-day —
--- этого достаточно для правила ">3% → пауза", которое ТЗ описывает как
--- разовую проверку, не EMA.
+-- строчки). daily_sent сбрасывается каждый вызов (крон зовёт раз в сутки).
+--
+-- Окно 7 дней катится по window_start_at, а не «раз в 7 вызовов»: счётчики
+-- sent_count_7d/bounce_count_7d раньше не обнулялись НИГДЕ, из-за чего
+-- проверка ">3%" считалась по всей истории аккаунта и работала в одну
+-- сторону — один плохой день, и вернуться из paused было невозможно.
+-- Обнуление идёт ДО проверки, иначе пауза срабатывала бы по данным
+-- только что закрытого окна.
 CREATE OR REPLACE FUNCTION public.fn_reset_smtp_daily()
-RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, extensions, pg_temp AS $$
 DECLARE
   v_paused INTEGER;
 BEGIN
   UPDATE public.smtp_accounts SET daily_sent = 0, last_reset_at = now();
+
+  UPDATE public.smtp_accounts SET
+    sent_count_7d = 0, bounce_count_7d = 0, window_start_at = now()
+    WHERE window_start_at < now() - interval '7 days';
 
   UPDATE public.smtp_accounts SET status = 'paused'
     WHERE status IN ('active', 'ramping')
@@ -151,16 +175,21 @@ $$;
 -- fn_reset_smtp_daily — тот дневной, этот недельный, крон зовёт их на разных
 -- расписаниях.
 CREATE OR REPLACE FUNCTION public.fn_ramp_smtp_accounts()
-RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, extensions, pg_temp AS $$
 DECLARE
   v_count INTEGER;
 BEGIN
   UPDATE public.smtp_accounts SET
-    daily_limit = CEIL(daily_limit * 1.2),
-    ramp_stage  = ramp_stage + 1,
-    status      = CASE WHEN ramp_stage + 1 >= 5 THEN 'active' ELSE status END
+    daily_limit  = CEIL(daily_limit * 1.2),
+    ramp_stage   = ramp_stage + 1,
+    last_ramp_at = now(),
+    status       = CASE WHEN ramp_stage + 1 >= 5 THEN 'active' ELSE status END
   WHERE status = 'ramping'
-    AND last_reset_at < now() - interval '7 days';
+    -- last_ramp_at, НЕ last_reset_at: последний переписывается дневным
+    -- сбросом каждые сутки, поэтому условие "> 7 дней назад" не выполнялось
+    -- бы никогда и ни один аккаунт не прогревался бы вообще.
+    AND last_ramp_at < now() - interval '7 days';
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN v_count;
 END;
