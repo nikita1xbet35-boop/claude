@@ -268,7 +268,10 @@ jobs:
           echo "── Таблицы мультибренда ──"
           q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('brands','contact_registry','contact_touches','api_keys','system_config','multibrand_keywords','smtp_accounts','brand_keywords') ORDER BY table_name;"
           echo; echo "── brand_id: где ещё NOT NULL (должно быть пусто) ──"
-          NN=$(q "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='brand_id' AND is_nullable='NO';")
+          # Только семь таблиц, которые ломала 037. brand_id NOT NULL на
+          # contact_touches/multibrand_keywords/smtp_accounts — это ЗАМЫСЕЛ:
+          # они заведены уже мультибрендовыми, строка без бренда там бессмысленна.
+          NN=$(q "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='brand_id' AND is_nullable='NO' AND table_name IN ('leads','send_queue','email_log','api_usage','error_log','funnel_stats','dfs_domains');")
           echo "$NN"
           echo; echo "── Функции ──"
           q "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'fn_%' ORDER BY 1;"
