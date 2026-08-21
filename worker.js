@@ -249,13 +249,23 @@ async function hashPassword(password, salt) {
 // grant 'standard' — a deploy must not lock the dashboard out, and 'standard'
 // is the safe default (it is the role that sees LESS).
 async function verifyPassword(input, env) {
-  const matches = async (stored) => {
+  // Пробелы по краям срезаются и у введённого, и у хранимого. Причина не
+  // косметическая: секрет попадает в Cloudflare копипастой, и прилипший
+  // пробел или перевод строки делает safeEqual ложным — длина не совпадает.
+  // Снаружи это выглядит как «пароль не подходит», то есть неотличимо от
+  // опечатки, и искать причину можно долго. Проверено: "1111 " против
+  // введённого "1111" давало ровно тот же 401, что и вовсе не заданный
+  // секрет. Пароль, у которого пробел по краям значим, — цена, которую
+  // здесь не жалко заплатить.
+  const given = String(input == null ? '' : input).trim();
+  const matches = async (storedRaw) => {
+    const stored = String(storedRaw == null ? '' : storedRaw).trim();
     if (!stored) return false;
     if (stored.includes(':')) {
       const [salt, hash] = stored.split(':');
-      return safeEqual(await hashPassword(input, salt || ''), hash);
+      return safeEqual(await hashPassword(given, salt || ''), hash);
     }
-    return safeEqual(input, stored);
+    return safeEqual(given, stored);
   };
 
   if (await matches(env.AUTH_FULL_HASH)) return 'full';
@@ -634,7 +644,23 @@ async function handleRequest(request, env, ctx) {
       const gateOn = !!(env.DASHBOARD_PASSWORD || env.DASHBOARD_PASSWORD_HASH);
       const sess = gateOn ? await readSession(getCookie(request, COOKIE_NAME), env) : null;
       const role = gateOn ? (sess && sess.role === 'full' ? 'full' : 'standard') : 'full';
-      return new Response(JSON.stringify({ role }), {
+
+      // ── Диагностика конфигурации ──────────────────────────────────────────
+      // Только «задан / не задан», никогда сами значения и никогда длина.
+      // Появилось из вполне конкретного тупика: смена роли принимала лишь
+      // старый DASHBOARD_PASSWORD и всегда выдавала standard, и отличить
+      // «секрет не доехал до воркера» от «секрет есть, но введено другое»
+      // было нечем — снаружи оба выглядят как молчаливый отказ.
+      //
+      // Стоит за паролем, и три булева ничего не добавляют тому, кто уже
+      // вошёл: существование полного доступа видно по самой кнопке ⇄.
+      const configured = {
+        full:     !!env.AUTH_FULL_HASH,
+        standard: !!env.AUTH_STANDARD_HASH,
+        legacy:   !!(env.DASHBOARD_PASSWORD || env.DASHBOARD_PASSWORD_HASH),
+      };
+
+      return new Response(JSON.stringify({ role, configured }), {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           // Роль меняется вместе с сессией — закэшированный ответ пережил бы
