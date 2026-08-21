@@ -37,3 +37,4 @@ ALTER TABLE public.dfs_domains  ALTER COLUMN brand_id DROP NOT NULL;
 -- retry 1787242635
 -- retry 1787244085
 -- retry 1787244738
+-- retry 1787292409
