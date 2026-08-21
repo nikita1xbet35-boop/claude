@@ -3,9 +3,31 @@
 ## Current State
 
 - **JWT Infrastructure**: ✅ Complete (in `worker.js` at `mintSupabaseJwt()`)
-- **JWT Secret Setup**: ✅ Documented (in `DEPLOY.md`)
-- **Database RLS**: ❌ Not yet enabled (all tables have `DISABLE ROW LEVEL SECURITY`)
-- **JWT Claims**: ✅ Ready (`role: 'authenticated'`, `brand_role: 'full'|'standard'`)
+- **JWT Secret Setup**: ✅ Configured in Cloudflare + documented (in `DEPLOY.md`)
+- **Role delivered to the page**: ✅ `GET /__role` → `{"role":"full"|"standard"}`
+- **JWT Claims**: ✅ Live (`role: 'authenticated'`, `brand_role: 'full'|'standard'`)
+- **Database RLS**: 🟡 Enabled on **`brands` only** (migration 046). Every other
+  table is still `DISABLE ROW LEVEL SECURITY`.
+
+### What migration 046 actually enforces
+
+`brands` is the first and so far only table where `brand_role` is read by a policy:
+
+| Caller | Public brands | Hidden brands (Melbet, Coldbet) | Writes |
+|---|---|---|---|
+| `anon` (no session / `?direct=1`) | read | — | denied loudly (`permission denied`) |
+| `authenticated` + `brand_role=standard` | read/write | — | public only |
+| `authenticated` + `brand_role=full` | read/write | read/write | all |
+| `service_role` (edge functions) | full access — `BYPASSRLS` | | |
+
+Verified against a local PostgreSQL 16 instance before merge, including the
+`WITH CHECK` case (standard cannot flip a public brand to `hidden`) and a
+repeat run of the migration.
+
+`anon` keeps **SELECT** on public brands on purpose: if JWT minting ever breaks,
+the dashboard still renders instead of showing "брендов нет", which would look
+like an empty database rather than an access failure. Writes are revoked so that
+a broken session fails with a visible error instead of a silent no-op.
 
 ## What RLS Infrastructure Already Exists
 

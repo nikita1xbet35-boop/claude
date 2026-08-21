@@ -15102,6 +15102,38 @@ const MB = (() => {
     return brandsCache;
   }
 
+  // ── Роль сессии (Блок 4) ────────────────────────────────────────────────
+  // Два PIN-кода дают две роли: full видит скрытые бренды (Melbet/Coldbet) и
+  // экран настроек системы, standard — нет. Роль приходит с воркера
+  // (/__role), а не из localStorage и не из самой страницы: всё, что лежит в
+  // браузере, правится в браузере, и «повысить себя до full» было бы делом
+  // одной строки в консоли.
+  //
+  // Это разделение — ВТОРОЙ слой. Первый — политики brands_select/brands_modify
+  // (миграция 046): они режут скрытые бренды на стороне Postgres, по claim
+  // brand_role в подписанном JWT. Поэтому ошибка здесь портит интерфейс, но
+  // не открывает данные — запрос за скрытым брендом вернётся пустым и так.
+  //
+  // Недоступный /__role трактуется как standard: отказ должен закрывать, а не
+  // открывать. Цена ошибки в эту сторону — full временно не видит настройки,
+  // и это заметно сразу; ошибка в другую сторону тихо показала бы standard'у
+  // чужие бренды.
+  let roleCache = null;
+  async function loadRole(){
+    if(roleCache) return roleCache;
+    try {
+      const res = await withTimeout(
+        fetch('/__role', {credentials:'same-origin'}), 8000, 'роль сессии');
+      const j = res.ok ? await res.json() : null;
+      roleCache = (j && j.role === 'full') ? 'full' : 'standard';
+    } catch(e){
+      console.error('MB.loadRole', e);
+      roleCache = 'standard';
+    }
+    return roleCache;
+  }
+  function isFull(){ return roleCache === 'full'; }
+
   function colorFor(slug, idx){ return BRAND_COLORS[slug] || FALLBACK_COLORS[idx % FALLBACK_COLORS.length]; }
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -15119,12 +15151,19 @@ const MB = (() => {
         <span class="mb-dot" style="background:${clr};"></span>${esc(b.name||b.slug).toUpperCase()}
       </button>`;
     }).join('');
+    // Настройки системы — единственный экран, где вообще видны скрытые бренды
+    // (Melbet/Coldbet). Для standard кнопки просто нет; маршрут #/settings
+    // закрыт отдельно в applyHash, чтобы адрес, набранный руками, тоже не
+    // открывал экран.
+    const settingsBtn = isFull()
+      ? `<button class="mb-xbtn ${kind==='settings'?'active':''}" onclick="MB.gotoHash('#/settings')" title="Настройки системы">⚙</button>`
+      : '';
     return `<div class="mb-topbar-x">
         ${xBtn('x-overview','◈ Обзор','#/')}
         ${xBtn('x-rotation','⇄ Ротация','#/rotation')}
       </div>
       <div class="mb-topbar-brands">${brandBtns || '<span class="mb-empty" style="padding:0;">брендов нет</span>'}</div>
-      <button class="mb-xbtn ${kind==='settings'?'active':''}" onclick="MB.gotoHash('#/settings')" title="Настройки системы">⚙</button>`;
+      ${settingsBtn}`;
   }
 
   // Best-effort: a failed/timed-out brands fetch here must not stop whatever
@@ -15133,7 +15172,7 @@ const MB = (() => {
   // problem, a page frozen on "Загрузка…" forever is not.
   async function paintShell(pageSuffix, kind, activeSlug){
     try {
-      await loadBrands();
+      await Promise.all([loadBrands(), loadRole()]);
       const el = document.getElementById('mb-shell-' + pageSuffix);
       if(el) el.innerHTML = shellHtml(kind, activeSlug);
     } catch(e){ console.error('MB.paintShell', e); }
@@ -15157,7 +15196,7 @@ const MB = (() => {
   // было именно расхождением этой функции по разным путям для разных страниц.
   async function paintBrandContext(pageSuffix, modKey, slug){
     try {
-      await loadBrands();
+      await Promise.all([loadBrands(), loadRole()]);
       const shellEl = document.getElementById('mb-shell-' + pageSuffix);
       if(shellEl) shellEl.innerHTML = shellHtml('brand', slug);
       const btnsEl = document.getElementById('mb-modbtns-' + pageSuffix);
@@ -15250,6 +15289,19 @@ const MB = (() => {
 
   async function applyHash(){
     const r = parseHash();
+    // Роль нужна ДО развилки: ниже по ней решается, пускать ли на #/settings,
+    // а loadRole кэширует — на остальных маршрутах это бесплатно.
+    await loadRole();
+    // Адрес, набранный руками (или сохранённый в закладке с прошлой сессии под
+    // full), не должен открывать экран, которого у этой роли нет. Молча
+    // уводим на Обзор и чистим хэш, чтобы перезагрузка не вернула сюда же.
+    if(r.kind === 'settings' && !isFull()){
+      // Только меняем хэш и выходим. Смена хэша сама позовёт applyHash
+      // повторно — уже с маршрутом обзора, который и нарисует экран. Рисовать
+      // тут же означало бы отрисовать Обзор дважды и дважды сходить в базу.
+      location.replace(location.pathname + location.search + '#/');
+      return;
+    }
     if(r.kind === 'x-overview'){
       goTo('x-overview');
       await paintShell('x-overview', 'x-overview', null);
@@ -15702,12 +15754,17 @@ const MB = (() => {
     box.innerHTML = '<div class="mb-empty">Загрузка…</div>';
     try {
       // ВСЕ бренды, включая draft — этим экран и отличается от шапки, где
-      // draft скрыт (§4 ТЗ: Melbet/Coldbet видны только здесь).
+      // draft скрыт (§4 ТЗ: Melbet/Coldbet видны только здесь И только роли
+      // full). Сюда standard не доходит — маршрут закрыт в applyHash, — а
+      // если бы дошёл, политика brands_select (046) всё равно не отдала бы
+      // ему скрытые строки: запрос вернулся бы без них, а не с
+      // ошибкой. Фильтр ниже — третий слой, на случай прямого вызова
+      // MB.renderSystemSettings() из консоли.
       const [allRes, cfgRes] = await withTimeout(Promise.all([
         sb.from('brands').select('*').order('cron_weight', {ascending:false}),
         sb.from('system_config').select('*'),
       ]), 15000, 'настройки системы');
-      const all = allRes.data || [];
+      const all = (allRes.data || []).filter(b => isFull() || b.visibility !== 'hidden');
       const cfg = {}; for(const r of (cfgRes.data||[])) cfg[r.key] = r.value;
 
       const activeSum = all.filter(b => b.status==='active')

@@ -602,6 +602,32 @@ async function handleRequest(request, env, ctx) {
     const gated = await gate(request, env);
     if (gated) return gated;
 
+    // ── Роль текущей сессии для страницы (Блок 4) ────────────────────────────
+    // Единственный способ для дашборда узнать, что ему показывать. Стоит ПОСЛЕ
+    // gate(), поэтому неаутентифицированный запрос сюда не доходит — гейт
+    // вернёт форму входа раньше.
+    //
+    // Ответ намеренно бедный: только роль, без самого JWT. Отдай мы токен —
+    // страница смогла бы его сохранить и пойти с ним напрямую в supabase.co
+    // в обход /db, и граница доступа снова превратилась бы в формальность.
+    //
+    // Гейт выключен (пароль не настроен) — отдаём 'full': в этом состоянии
+    // дашборд и так открыт целиком, и урезать его до 'standard' значило бы
+    // спрятать экраны от установки, которая просто ещё не настраивала пароли.
+    if (url.pathname === '/__role') {
+      const gateOn = !!(env.DASHBOARD_PASSWORD || env.DASHBOARD_PASSWORD_HASH);
+      const sess = gateOn ? await readSession(getCookie(request, COOKIE_NAME), env) : null;
+      const role = gateOn ? (sess && sess.role === 'full' ? 'full' : 'standard') : 'full';
+      return new Response(JSON.stringify({ role }), {
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          // Роль меняется вместе с сессией — закэшированный ответ пережил бы
+          // перелогин под другим PIN и показал бы чужой интерфейс.
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
     // ── Same-origin proxies ──────────────────────────────────────────────────
     // The dashboard used to load its library from cdn.jsdelivr.net and talk to
     // *.supabase.co directly from the browser. Both are third-party hosts, and
