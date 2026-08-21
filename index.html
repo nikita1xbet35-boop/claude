@@ -1179,9 +1179,31 @@ const RoleSwitch = (() => {
       const missing = [];
       if(!c.full)     missing.push('AUTH_FULL_HASH');
       if(!c.standard) missing.push('AUTH_STANDARD_HASH');
-      hint.innerHTML = missing.length
-        ? `<span style="color:#f0a">не задан в Cloudflare: ${missing.join(', ')}</span>`
-        : `сейчас: ${j.role === 'full' ? 'полный' : 'обычный'}`;
+      // Собирается через textContent, а не innerHTML: esc() из MB живёт в
+      // чужом замыкании и здесь недоступен, а подставлять в разметку строку с
+      // сервера без экранирования — плохая привычка независимо от того, что
+      // сейчас там лежит наша же константа.
+      hint.textContent = '';
+      const line = document.createElement('div');
+      if(missing.length){
+        line.style.color = '#f0a';
+        line.textContent = 'не задан в Cloudflare: ' + missing.join(', ');
+      } else {
+        line.textContent = 'сейчас: ' + (j.role === 'full' ? 'полный' : 'обычный');
+      }
+      hint.appendChild(line);
+
+      // Версия воркера рядом с диагнозом — намеренно. «Секрет не задан» и
+      // «страница старая» выглядели одинаково, и различить их было нечем:
+      // окно могло жаловаться на секрет, с которым уже всё в порядке, просто
+      // потому что сама страница пришла из прошлой сборки.
+      if(j.build){
+        const b = document.createElement('div');
+        b.style.opacity = '.55';
+        b.style.marginTop = '3px';
+        b.textContent = 'сборка ' + j.build;
+        hint.appendChild(b);
+      }
     } catch(_){ /* подсказка необязательна — молчим */ }
   }
   function close(){ const m = $('role-switch-modal'); if(m) m.style.display = 'none'; }

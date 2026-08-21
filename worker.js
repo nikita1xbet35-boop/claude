@@ -21,6 +21,16 @@
 //   SESSION_SECRET     — optional HMAC key for signing session cookies; falls
 //     back to DASHBOARD_PASSWORD when absent.
 
+// Отметка сборки. Поднимается в каждом коммите, который надо уметь опознать на
+// живом сайте.
+//
+// Появилась после часа блужданий вокруг вопроса, на который нечем было
+// ответить: «то, что я вижу на экране, — это уже новый код или ещё старый?».
+// Отличить непришедшую сборку от ненастроенного секрета было нельзя, и обе
+// гипотезы выглядели одинаково правдоподобно. Отдаётся в /__role, а страница
+// печатает её в окне смены роли — если цифра не та, дальше можно не гадать.
+const BUILD = '2026-08-21.7';
+
 const DEFAULT_SUPABASE_URL = 'https://lxsyrserfuighwxuymgb.supabase.co';
 const DEFAULT_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM';
 
@@ -700,7 +710,7 @@ async function handleRequest(request, env, ctx) {
         legacy:   !!(env.DASHBOARD_PASSWORD || env.DASHBOARD_PASSWORD_HASH),
       };
 
-      return new Response(JSON.stringify({ role, configured }), {
+      return new Response(JSON.stringify({ role, configured, build: BUILD }), {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           // Роль меняется вместе с сессией — закэшированный ответ пережил бы
