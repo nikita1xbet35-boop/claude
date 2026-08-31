@@ -104,15 +104,80 @@ jobs:
           exit 0
 
       - name: Деплой
+        id: deploy
         working-directory: partner-bots
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: wrangler deploy
-
-      - name: Что дальше
         run: |
-          echo "Воркер задеплоен. Осталось зарегистрировать вебхуки — один раз:"
-          echo "  export WORKER_URL=https://partner-bots.<subdomain>.workers.dev"
-          echo "  export BOT_WEBHOOK_SECRET=... BOT_TOKEN_INDIA=... (и остальные)"
-          echo "  ./partner-bots/set-webhooks.sh"
+          # pipefail обязателен: без него падение wrangler заслонит успешный
+          # tee, и job поедет дальше как ни в чём не бывало.
+          set -o pipefail
+          wrangler deploy 2>&1 | tee deploy.log
+
+          # Адрес не собирается из имени воркера: поддомен свой у каждого
+          # аккаунта, и угаданный адрес выглядел бы правдоподобно, а вебхуки
+          # уехали бы в никуда. Берём тот, что назвал сам wrangler.
+          url=$(grep -oE 'https://[A-Za-z0-9._-]+\.workers\.dev' deploy.log | head -1)
+          if [ -z "$url" ]; then
+            echo "::error::не удалось вычитать адрес воркера из вывода wrangler"
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "воркер: $url"
+
+      # Регистрация вебхуков здесь, а не руками на машине Ника: только у
+      # раннера есть одновременно и токены (из секретов), и выход в
+      # api.telegram.org. Шаг идемпотентен — setWebhook просто перезаписывает
+      # адрес, поэтому повторные деплои безопасны.
+      - name: Зарегистрировать вебхуки
+        working-directory: partner-bots
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.url }}
+          BOT_WEBHOOK_SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
+          BOT_TOKEN_INDIA: ${{ secrets.BOT_TOKEN_INDIA }}
+          BOT_TOKEN_AFRICA: ${{ secrets.BOT_TOKEN_AFRICA }}
+          BOT_TOKEN_BANGLADESH: ${{ secrets.BOT_TOKEN_BANGLADESH }}
+          BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
+          BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
+          BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+        run: ./set-webhooks.sh
+
+      # Проверяем не свой же ответ, а состояние на стороне Telegram: адрес,
+      # который он реально запомнил, и есть ли ошибка доставки. Незарегистри-
+      # рованный вебхук выглядит как «бот молчит» и никак иначе себя не
+      # проявляет.
+      - name: Проверить, что Telegram принял вебхуки
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.url }}
+          BOT_TOKEN_INDIA: ${{ secrets.BOT_TOKEN_INDIA }}
+          BOT_TOKEN_AFRICA: ${{ secrets.BOT_TOKEN_AFRICA }}
+          BOT_TOKEN_BANGLADESH: ${{ secrets.BOT_TOKEN_BANGLADESH }}
+          BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
+          BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
+          BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+        run: |
+          set -u
+          bad=0
+          for slug in india africa bangladesh worldwide afrique uzbekistan; do
+            var="BOT_TOKEN_$(echo "$slug" | tr '[:lower:]' '[:upper:]')"
+            info=$(curl -sS --max-time 20 "https://api.telegram.org/bot${!var}/getWebhookInfo")
+            expected="${WORKER_URL%/}/bot/${slug}"
+            if echo "$info" | grep -qF "\"url\":\"${expected}\""; then
+              echo "  ok   ${slug} → ${expected}"
+            else
+              echo "  FAIL ${slug}: Telegram помнит не тот адрес"
+              bad=1
+            fi
+            # Пустая строка ошибки — норма; непустая означает, что доставка
+            # уже пробовалась и не вышла.
+            err=$(echo "$info" | grep -oE '"last_error_message":"[^"]*"' || true)
+            [ -n "$err" ] && echo "       ${err}"
+          done
+          exit $bad
+
+      - name: Итог
+        run: |
+          echo "Воркер: ${{ steps.deploy.outputs.url }}"
+          echo "Все шесть ботов принимают апдейты. Осталось только наполнить FAQ"
+          echo "(таблица bot_faq) — без него бот отдаёт контакт менеджера."
