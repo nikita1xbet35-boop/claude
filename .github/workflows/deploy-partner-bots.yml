@@ -50,16 +50,52 @@ jobs:
       - name: Тесты
         run: node partner-bots/test.mjs
 
-      - name: Проверить, что ключ Cloudflare заведён
+      # Печатает картину целиком, а не падает на первом отсутствующем.
+      #
+      # Причина конкретная: два прогона подряд сообщали, что CLOUDFLARE_* не
+      # заданы, при том что на странице настроек репозитория они видны. Из
+      # «упало на первом» нельзя понять, доезжает ли хоть что-нибудь — а это
+      # ровно та развилка, которая нужна: пусто ВСЁ (секреты не на вкладке
+      # Actions или не в этом репозитории) или пусто только старое.
+      #
+      # Значения не печатаются никогда, только факт наличия. GitHub маскирует
+      # заданные секреты как ***, но полагаться на маскировку там, где можно
+      # просто не печатать, незачем.
+      - name: Какие секреты дошли до Actions
         env:
-          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BOT_TOKEN_INDIA: ${{ secrets.BOT_TOKEN_INDIA }}
+          BOT_TOKEN_AFRICA: ${{ secrets.BOT_TOKEN_AFRICA }}
+          BOT_TOKEN_BANGLADESH: ${{ secrets.BOT_TOKEN_BANGLADESH }}
+          BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
+          BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
+          BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+          BOT_WEBHOOK_SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          missing=""
-          [ -n "$TOKEN" ]   || missing="$missing CLOUDFLARE_API_TOKEN"
-          [ -n "$ACCOUNT" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
-          if [ -n "$missing" ]; then
-            echo "::error::не заданы секреты GitHub:$missing — см. шапку этого файла"
+          set -u
+          have=0; miss=0
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID \
+                      BOT_TOKEN_INDIA BOT_TOKEN_AFRICA BOT_TOKEN_BANGLADESH \
+                      BOT_TOKEN_WORLDWIDE BOT_TOKEN_AFRIQUE BOT_TOKEN_UZBEKISTAN \
+                      BOT_WEBHOOK_SECRET SUPABASE_URL SUPABASE_SERVICE_KEY; do
+            if [ -n "${!name:-}" ]; then echo "  есть    $name"; have=$((have+1))
+            else                         echo "  НЕТ     $name"; miss=$((miss+1)); fi
+          done
+          echo "итого: дошло $have, отсутствует $miss"
+
+          if [ "$have" -eq 0 ]; then
+            echo "::error::до Actions не дошёл НИ ОДИН секрет. Значит они заведены не там:"
+            echo "::error::на странице Secrets and variables три вкладки — Actions, Dependabot, Codespaces."
+            echo "::error::Нужна вкладка Actions: /settings/secrets/actions"
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::часть секретов дошла, а CLOUDFLARE_* нет — значит эти два лежат"
+            echo "::error::на другой вкладке (или в другом репозитории). Заведи их заново"
+            echo "::error::на вкладке Actions: /settings/secrets/actions"
             exit 1
           fi
 
