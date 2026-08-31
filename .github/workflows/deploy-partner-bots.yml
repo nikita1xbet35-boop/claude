@@ -1,0 +1,118 @@
+name: Deploy partner-bots worker
+
+# Зачем этот воркфлоу существует
+#
+# Корневой воркер (дашборд) Cloudflare пересобирает сам при пуше в main — у
+# него настроена Git-интеграция. Для partner-bots такого пути нет: Workers
+# Builds собирает один воркер из корня репозитория, а не каждую подпапку.
+# Значит без этого файла деплой бота — только руками через wrangler, а именно
+# ручные операции в Cloudflare и оказались узким местом.
+#
+# Что нужно один раз завести в GitHub → Settings → Secrets and variables →
+# Actions → New repository secret:
+#
+#   CLOUDFLARE_API_TOKEN   обязателен. Cloudflare → My Profile → API Tokens →
+#                          Create Token → шаблон "Edit Cloudflare Workers".
+#   CLOUDFLARE_ACCOUNT_ID  обязателен. Виден в адресе панели:
+#                          dash.cloudflare.com/<ЭТО_ОН>/workers
+#
+# Дальше — по желанию. Если положить сюда токены ботов, воркфлоу сам зальёт их
+# в секреты Cloudflare, и в панель Cloudflare заходить не придётся вообще:
+#
+#   BOT_TOKEN_INDIA, BOT_TOKEN_AFRICA, BOT_TOKEN_BANGLADESH,
+#   BOT_TOKEN_WORLDWIDE, BOT_TOKEN_AFRIQUE, BOT_TOKEN_UZBEKISTAN,
+#   BOT_WEBHOOK_SECRET, SUPABASE_URL, SUPABASE_SERVICE_KEY
+#
+# Незаданные пропускаются с предупреждением, а не роняют деплой: воркер должен
+# выкатываться и тогда, когда часть ботов ещё не заведена.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'partner-bots/**'
+      - '.github/workflows/deploy-partner-bots.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Тесты до деплоя, а не после. Сеть в них подменена целиком, внешних
+      # зависимостей нет — то есть это дешёвая проверка, которая не пускает в
+      # прод воркер, ломающий выдачу ссылок или дублирующий лиды.
+      - name: Тесты
+        run: node partner-bots/test.mjs
+
+      - name: Проверить, что ключ Cloudflare заведён
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -n "$TOKEN" ]   || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$ACCOUNT" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::не заданы секреты GitHub:$missing — см. шапку этого файла"
+            exit 1
+          fi
+
+      - name: Установить wrangler
+        run: npm install -g wrangler@3
+
+      # Секреты заливаются ДО деплоя: воркер, поднявшийся без токена бота,
+      # отвечал бы 500 на каждый апдейт, и Telegram успел бы накопить очередь
+      # повторов за те секунды, пока секрет доезжает.
+      - name: Синхронизировать секреты Cloudflare
+        working-directory: partner-bots
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BOT_TOKEN_INDIA: ${{ secrets.BOT_TOKEN_INDIA }}
+          BOT_TOKEN_AFRICA: ${{ secrets.BOT_TOKEN_AFRICA }}
+          BOT_TOKEN_BANGLADESH: ${{ secrets.BOT_TOKEN_BANGLADESH }}
+          BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
+          BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
+          BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+          BOT_WEBHOOK_SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -u
+          skipped=""
+          for name in BOT_TOKEN_INDIA BOT_TOKEN_AFRICA BOT_TOKEN_BANGLADESH \
+                      BOT_TOKEN_WORLDWIDE BOT_TOKEN_AFRIQUE BOT_TOKEN_UZBEKISTAN \
+                      BOT_WEBHOOK_SECRET SUPABASE_URL SUPABASE_SERVICE_KEY; do
+            value="${!name:-}"
+            if [ -z "$value" ]; then
+              skipped="$skipped $name"
+              continue
+            fi
+            # printf, а не echo: echo в некоторых оболочках добавляет перевод
+            # строки в значение, и секрет перестаёт совпадать при сравнении —
+            # ровно та поломка, что уже была с AUTH_* на соседнем воркере.
+            printf '%s' "$value" | wrangler secret put "$name" >/dev/null
+            echo "  залит $name"
+          done
+          [ -n "$skipped" ] && echo "::warning::пропущены (не заданы в GitHub):$skipped"
+          exit 0
+
+      - name: Деплой
+        working-directory: partner-bots
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler deploy
+
+      - name: Что дальше
+        run: |
+          echo "Воркер задеплоен. Осталось зарегистрировать вебхуки — один раз:"
+          echo "  export WORKER_URL=https://partner-bots.<subdomain>.workers.dev"
+          echo "  export BOT_WEBHOOK_SECRET=... BOT_TOKEN_INDIA=... (и остальные)"
+          echo "  ./partner-bots/set-webhooks.sh"
