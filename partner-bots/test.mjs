@@ -218,6 +218,20 @@ test('ссылка настроена → выдаётся с ref_code и пиш
   assert.strictEqual(lead.status, 'link_issued');
 });
 
+test('шаблон без {ref} отдаётся как есть и лид всё равно пишется', async () => {
+  const h = await harness();
+  // Реальная конфигурация после 050: сокращённая реф-ссылка, к которой ничего
+  // дописывать не нужно.
+  h.db.bot_configs[0].signup_url_tpl = 'https://1xaffiliate.org/newreg';
+  await h.post('india', h.msg('🔗 Get Registration Link'));
+  assert.match(h.last().text, /https:\/\/1xaffiliate\.org\/newreg/);
+  assert.doesNotMatch(h.last().text, /\{ref\}|\?ref=/,
+    'ни плейсхолдер, ни самодельный параметр не должны попасть в ссылку');
+  // Привязка «кому выдали» живёт в bot_leads, а не в адресе.
+  assert.strictEqual(h.db.bot_leads.length, 1);
+  assert.strictEqual(h.db.bot_leads[0].ref_code, 'tg_india_42');
+});
+
 test('повторное нажатие не плодит вторую строку', async () => {
   const h = await harness();
   h.db.bot_configs[0].signup_url_tpl = 'https://p.example/signup?ref={ref}';
