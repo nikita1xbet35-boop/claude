@@ -122,8 +122,25 @@ ALTER TABLE public.bot_leads      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bot_user_prefs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bot_faq        ENABLE ROW LEVEL SECURITY;
 
--- anon не упомянут нигде намеренно — см. шапку. Воркер ходит под service_role
--- и политик не замечает (BYPASSRLS).
+-- ── Сначала отобрать, потом выдать ──────────────────────────────────────────
+-- Не перестраховка: в Supabase на схему public настроены ALTER DEFAULT
+-- PRIVILEGES, выдающие права anon, authenticated и service_role на КАЖДУЮ
+-- новую таблицу. То есть к этому месту anon уже получил полный доступ ко всем
+-- четырём таблицам — просто потому, что они созданы. «Не упоминать anon»
+-- ничего не даёт: молчание здесь означает согласие с умолчанием.
+--
+-- Именно на этом первая версия миграции и упала в проде: проверка внизу
+-- насчитала 28 прав у anon и остановила накат. Проверка сработала верно,
+-- ошибкой было предположение, что новая таблица начинает жизнь без грантов.
+--
+-- PUBLIC тоже: права, выданные ему, наследует любая роль, включая anon.
+-- authenticated отбирается по той же причине: умолчание выдало ему полный
+-- доступ, а по замыслу у дашборда только чтение — писать в эти таблицы должен
+-- воркер, и больше никто.
+REVOKE ALL ON public.bot_configs, public.bot_leads, public.bot_user_prefs, public.bot_faq
+  FROM anon, authenticated, PUBLIC;
+REVOKE ALL ON SEQUENCE public.bot_leads_id_seq FROM anon, authenticated, PUBLIC;
+
 GRANT SELECT ON public.bot_configs, public.bot_leads, public.bot_user_prefs, public.bot_faq
   TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE
@@ -156,6 +173,17 @@ BEGIN
      AND grantee = 'anon';
   IF n > 0 THEN
     RAISE EXCEPTION 'anon получил % прав на bot_*-таблицы — в них telegram id живых людей', n;
+  END IF;
+
+  -- Дашборд должен только читать. Право записи здесь означало бы, что лида
+  -- можно подделать или стереть из браузера, а таблица считает выдачи ссылок.
+  SELECT count(*) INTO n FROM information_schema.role_table_grants
+   WHERE table_schema = 'public'
+     AND table_name IN ('bot_configs','bot_leads','bot_user_prefs','bot_faq')
+     AND grantee = 'authenticated'
+     AND privilege_type <> 'SELECT';
+  IF n > 0 THEN
+    RAISE EXCEPTION 'у authenticated % прав кроме SELECT — дашборд должен только читать', n;
   END IF;
 
   SELECT count(*) INTO n FROM public.bot_configs;
