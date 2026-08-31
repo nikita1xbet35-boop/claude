@@ -25,7 +25,38 @@
 
 ---
 
-## 1. Секреты Cloudflare
+## 1. Секреты
+
+Есть два пути. **Первый предпочтительнее**: в панель Cloudflare заходить не
+нужно совсем.
+
+### Путь А — через GitHub (рекомендуется)
+
+GitHub → Settings → **Secrets and variables → Actions** → New repository secret.
+
+⚠️ На этой странице три вкладки: **Actions**, **Dependabot**, **Codespaces**.
+Выглядят они одинаково, и у каждой свой раздел «Repository secrets». Воркфлоу
+видит **только вкладку Actions** — секрет, заведённый на двух других, для него
+не существует, и он честно скажет «не заданы секреты GitHub».
+
+| Имя секрета | Что вставить |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → шаблон «Edit Cloudflare Workers» |
+| `CLOUDFLARE_ACCOUNT_ID` | из адреса панели: `dash.cloudflare.com/<ЭТО_ОН>/workers` |
+| `BOT_TOKEN_INDIA` | токен бота India из BotFather |
+| `BOT_TOKEN_AFRICA` | токен бота Africa |
+| `BOT_TOKEN_BANGLADESH` | токен бота Bangladesh |
+| `BOT_TOKEN_WORLDWIDE` | токен бота Worldwide |
+| `BOT_TOKEN_AFRIQUE` | токен бота Afrique |
+| `BOT_TOKEN_UZBEKISTAN` | токен бота Uzbekistan |
+| `BOT_WEBHOOK_SECRET` | любая длинная случайная строка, придумывается один раз |
+| `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
+| `SUPABASE_SERVICE_KEY` | Supabase → Settings → API → `service_role` |
+
+Дальше воркфлоу `deploy-partner-bots.yml` сам зальёт их в Cloudflare как
+Secret'ы и задеплоит воркер. Незаданные пропускаются с предупреждением.
+
+### Путь Б — руками через wrangler
 
 **Токены в репозиторий не кладутся** — он публичный.
 
