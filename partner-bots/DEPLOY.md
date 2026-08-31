@@ -55,8 +55,10 @@ GitHub → Settings → **Secrets and variables → Actions** → New repository
 | `BOT_TOKEN_AFRIQUE` | токен бота Afrique |
 | `BOT_TOKEN_UZBEKISTAN` | токен бота Uzbekistan |
 | `BOT_WEBHOOK_SECRET` | любая длинная случайная строка, придумывается один раз |
-| `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
 | `SUPABASE_SERVICE_KEY` | Supabase → Settings → API → `service_role` |
+
+`SUPABASE_URL` в списке нет: он не секрет (открыто лежит в `index.html`) и
+объявлен обычной переменной в `wrangler.jsonc`.
 
 Дальше воркфлоу `deploy-partner-bots.yml` сам зальёт их в Cloudflare как
 Secret'ы и задеплоит воркер. Незаданные пропускаются с предупреждением.

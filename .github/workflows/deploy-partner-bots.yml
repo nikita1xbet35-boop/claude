@@ -21,7 +21,10 @@ name: Deploy partner-bots worker
 #
 #   BOT_TOKEN_INDIA, BOT_TOKEN_AFRICA, BOT_TOKEN_BANGLADESH,
 #   BOT_TOKEN_WORLDWIDE, BOT_TOKEN_AFRIQUE, BOT_TOKEN_UZBEKISTAN,
-#   BOT_WEBHOOK_SECRET, SUPABASE_URL, SUPABASE_SERVICE_KEY
+#   BOT_WEBHOOK_SECRET, SUPABASE_SERVICE_KEY
+#
+# SUPABASE_URL в этом списке нет намеренно: он не секрет и объявлен в
+# wrangler.jsonc как обычная переменная.
 #
 # Незаданные пропускаются с предупреждением, а не роняют деплой: воркер должен
 # выкатываться и тогда, когда часть ботов ещё не заведена.
@@ -72,7 +75,6 @@ jobs:
           BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
           BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
           BOT_WEBHOOK_SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           set -u
@@ -80,7 +82,7 @@ jobs:
           for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID \
                       BOT_TOKEN_INDIA BOT_TOKEN_AFRICA BOT_TOKEN_BANGLADESH \
                       BOT_TOKEN_WORLDWIDE BOT_TOKEN_AFRIQUE BOT_TOKEN_UZBEKISTAN \
-                      BOT_WEBHOOK_SECRET SUPABASE_URL SUPABASE_SERVICE_KEY; do
+                      BOT_WEBHOOK_SECRET SUPABASE_SERVICE_KEY; do
             if [ -n "${!name:-}" ]; then echo "  есть    $name"; have=$((have+1))
             else                         echo "  НЕТ     $name"; miss=$((miss+1)); fi
           done
@@ -117,14 +119,13 @@ jobs:
           BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
           BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
           BOT_WEBHOOK_SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           set -u
           skipped=""
           for name in BOT_TOKEN_INDIA BOT_TOKEN_AFRICA BOT_TOKEN_BANGLADESH \
                       BOT_TOKEN_WORLDWIDE BOT_TOKEN_AFRIQUE BOT_TOKEN_UZBEKISTAN \
-                      BOT_WEBHOOK_SECRET SUPABASE_URL SUPABASE_SERVICE_KEY; do
+                      BOT_WEBHOOK_SECRET SUPABASE_SERVICE_KEY; do
             value="${!name:-}"
             if [ -z "$value" ]; then
               skipped="$skipped $name"
