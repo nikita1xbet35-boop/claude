@@ -21,6 +21,7 @@ name: Deploy partner-bots worker
 #
 #   BOT_TOKEN_INDIA, BOT_TOKEN_AFRICA, BOT_TOKEN_BANGLADESH,
 #   BOT_TOKEN_WORLDWIDE, BOT_TOKEN_AFRIQUE, BOT_TOKEN_UZBEKISTAN,
+#   BOT_TOKEN_RU, BOT_TOKEN_LATAM,
 #   BOT_WEBHOOK_SECRET, SUPABASE_SERVICE_KEY
 #
 # SUPABASE_URL в этом списке нет намеренно: он не секрет и объявлен в
@@ -87,6 +88,8 @@ jobs:
           BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
           BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
           BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+          BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
+          BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
           BOT_WEBHOOK_SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
@@ -95,6 +98,7 @@ jobs:
           for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID \
                       BOT_TOKEN_INDIA BOT_TOKEN_AFRICA BOT_TOKEN_BANGLADESH \
                       BOT_TOKEN_WORLDWIDE BOT_TOKEN_AFRIQUE BOT_TOKEN_UZBEKISTAN \
+                      BOT_TOKEN_RU BOT_TOKEN_LATAM \
                       BOT_WEBHOOK_SECRET SUPABASE_SERVICE_KEY; do
             if [ -n "${!name:-}" ]; then echo "  есть    $name"; have=$((have+1))
             else                         echo "  НЕТ     $name"; miss=$((miss+1)); fi
@@ -133,6 +137,45 @@ jobs:
             exit 1
           fi
 
+      # Что Telegram видел ДО этого деплоя.
+      #
+      # Шаг стоит В САМОМ НАЧАЛЕ и помечен if: always() — обе вещи нарочно.
+      #
+      # Печататься он обязан до setWebhook, потому что тот обнуляет счётчики:
+      # после него картина всегда чистая и ничего не говорит. Здесь же видна
+      # настоящая история — сколько апдейтов зависло в очереди и с какой
+      # ошибкой Telegram не смог их доставить. Это единственный взгляд с ТОЙ
+      # стороны: наш воркер на любой своей ошибке отвечает 200 и в статистике
+      # Telegram выглядит здоровым.
+      #
+      # Раньше шаг стоял после самотеста — и это ровно тот случай, когда
+      # диагностика пропадает тогда, когда она нужнее всего: любой упавший шаг
+      # выше отменял её, и самый ценный вывод терялся при первой же реальной
+      # поломке. Теперь он снимается всегда и до всего остального.
+      - name: Что Telegram видел до деплоя
+        if: always()
+        env:
+          BOT_TOKEN_INDIA: ${{ secrets.BOT_TOKEN_INDIA }}
+          BOT_TOKEN_AFRICA: ${{ secrets.BOT_TOKEN_AFRICA }}
+          BOT_TOKEN_BANGLADESH: ${{ secrets.BOT_TOKEN_BANGLADESH }}
+          BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
+          BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
+          BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+          BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
+          BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
+        run: |
+          set -u
+          for slug in india africa bangladesh worldwide afrique uzbekistan ru latam; do
+            var="BOT_TOKEN_$(echo "$slug" | tr '[:lower:]' '[:upper:]')"
+            if [ -z "${!var:-}" ]; then
+              printf '  %-11s токен не задан — бот ещё не заведён\n' "$slug"; continue
+            fi
+            info=$(curl -sS --max-time 20 "https://api.telegram.org/bot${!var}/getWebhookInfo" || true)
+            pend=$(echo "$info" | grep -oE '"pending_update_count":[0-9]+' | cut -d: -f2)
+            err=$(echo "$info"  | grep -oE '"last_error_message":"[^"]*"' || true)
+            printf '  %-11s в очереди: %-4s %s\n' "$slug" "${pend:-?}" "${err:-}"
+          done
+
       - name: Установить wrangler
         run: npm install -g wrangler@3
 
@@ -150,6 +193,8 @@ jobs:
           BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
           BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
           BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+          BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
+          BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
           BOT_WEBHOOK_SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
@@ -157,6 +202,7 @@ jobs:
           skipped=""
           for name in BOT_TOKEN_INDIA BOT_TOKEN_AFRICA BOT_TOKEN_BANGLADESH \
                       BOT_TOKEN_WORLDWIDE BOT_TOKEN_AFRIQUE BOT_TOKEN_UZBEKISTAN \
+                      BOT_TOKEN_RU BOT_TOKEN_LATAM \
                       BOT_WEBHOOK_SECRET SUPABASE_SERVICE_KEY; do
             value="${!name:-}"
             if [ -z "$value" ]; then
@@ -219,7 +265,7 @@ jobs:
             exit 1
           }
 
-      # Сквозной прогон каждой функции на ЖИВОМ воркере, все шесть ботов.
+      # Сквозной прогон каждой функции на ЖИВОМ воркере, все восемь ботов.
       #
       # Это то, чего не хватало всё время. Тесты гоняют код локально, /health
       # проверяет доступ к базе — и обе проверки были зелёными, пока /start в
@@ -234,6 +280,14 @@ jobs:
         env:
           WORKER_URL: ${{ steps.deploy.outputs.url }}
           SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
+          BOT_TOKEN_INDIA: ${{ secrets.BOT_TOKEN_INDIA }}
+          BOT_TOKEN_AFRICA: ${{ secrets.BOT_TOKEN_AFRICA }}
+          BOT_TOKEN_BANGLADESH: ${{ secrets.BOT_TOKEN_BANGLADESH }}
+          BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
+          BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
+          BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+          BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
+          BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
         run: |
           set -u
           bad=0
@@ -255,11 +309,35 @@ jobs:
             fi
           }
 
-          for slug in india africa bangladesh worldwide afrique uzbekistan; do
+          # Бот, у которого ещё нет токена, — не сломанный, а не заведённый.
+          # Разница существенная: без неё добавление бота делает прогон красным
+          # до тех пор, пока человек не заведёт секрет, и красный цвет перестаёт
+          # означать «что-то сломалось» — а именно ради этого значения весь шаг
+          # и написан.
+          checked=0
+          for slug in india africa bangladesh worldwide afrique uzbekistan ru latam; do
+            var="BOT_TOKEN_$(echo "$slug" | tr '[:lower:]' '[:upper:]')"
+            if [ -z "${!var:-}" ]; then
+              echo "  ── $slug ── пропущен: нет секрета $var"
+              continue
+            fi
+            checked=$((checked+1))
             echo "  ── $slug ──"
-            call "$slug" '{"text":"/start"}'
+
+            # Конфиг нового бота приезжает ДРУГИМ конвейером (миграция в
+            # deploy-supabase.yml), и оба стартуют от одного пуша. Кто успеет
+            # первым — не определено, а воркер без строки в bot_configs честно
+            # отвечает «нет строки» и уронил бы прогон по чисто временно́й
+            # причине. Ждём, вместо того чтобы падать: минута с запасом.
+            for attempt in 1 2 3 4 5 6; do
+              call "$slug" '{"text":"/start"}'
+              printf '%s' "$RESP" | grep -q 'нет строки в bot_configs' || break
+              echo "    ждём миграцию с конфигом бота (попытка $attempt)"
+              sleep 10
+            done
+
             expect "/start отвечает"        '"ok": true'
-            expect "меню из четырёх кнопок"  'Check GEO|Vérifier un GEO|GEO tekshirish'
+            expect "меню из четырёх кнопок"  'Check GEO|Vérifier un GEO|GEO tekshirish|Проверить ГЕО|Consultar GEO'
 
             call "$slug" '{"text":"/check_geo"}'
             expect "Check GEO открывается"   '"ok": true'
@@ -271,42 +349,16 @@ jobs:
             expect "Nigeria → статус"        'Nigeria'
 
             call "$slug" '{"callback_data":"faq:payouts"}'
-            expect "FAQ отвечает текстом"    'Tuesday|mardis|seshanba'
+            expect "FAQ отвечает текстом"    'Tuesday|mardis|seshanba|вторник|martes'
           done
 
-          # Выдачу ссылки проверяем на одном боте: она одна на все шесть, а
-          # каждый прогон пишет строку в bot_leads.
+          # Выдачу ссылки проверяем на одном боте: она одна на всех, а каждый
+          # прогон пишет строку в bot_leads.
           call india '{"text":"🔗 Get Registration Link"}'
           expect "ссылка регистрации выдаётся" '1xaffiliate\.org/newreg'
 
           [ "$bad" = 0 ] || { echo "::error::боты задеплоены, но не работают — см. FAIL выше"; exit 1; }
-          echo "  все функции отвечают на всех шести ботах"
-
-      # Что Telegram видел ДО этого деплоя.
-      #
-      # Печатается перед перерегистрацией, потому что setWebhook обнуляет
-      # счётчики: после него мы всегда увидим чистую картину и ничего не
-      # узнаем. Здесь же видно настоящую историю — сколько апдейтов зависло в
-      # очереди и с какой ошибкой Telegram не смог их доставить. Это
-      # единственный взгляд с ТОЙ стороны; наш воркер на любой своей ошибке
-      # отвечает 200 и в статистике Telegram выглядит здоровым.
-      - name: Что Telegram видел до деплоя
-        env:
-          BOT_TOKEN_INDIA: ${{ secrets.BOT_TOKEN_INDIA }}
-          BOT_TOKEN_AFRICA: ${{ secrets.BOT_TOKEN_AFRICA }}
-          BOT_TOKEN_BANGLADESH: ${{ secrets.BOT_TOKEN_BANGLADESH }}
-          BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
-          BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
-          BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
-        run: |
-          set -u
-          for slug in india africa bangladesh worldwide afrique uzbekistan; do
-            var="BOT_TOKEN_$(echo "$slug" | tr '[:lower:]' '[:upper:]')"
-            info=$(curl -sS --max-time 20 "https://api.telegram.org/bot${!var}/getWebhookInfo" || true)
-            pend=$(echo "$info" | grep -oE '"pending_update_count":[0-9]+' | cut -d: -f2)
-            err=$(echo "$info"  | grep -oE '"last_error_message":"[^"]*"' || true)
-            printf '  %-11s в очереди: %-4s %s\n' "$slug" "${pend:-?}" "${err:-}"
-          done
+          echo "  все функции отвечают, проверено ботов: $checked"
 
       # Проверяем, что статика воркера действительно отдаётся: PDF полного
       # списка ГЕО лежит в public/ и уходит человеку по кнопке. Файл, который
@@ -340,6 +392,8 @@ jobs:
           BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
           BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
           BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+          BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
+          BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
         run: ./set-webhooks.sh
 
       # Проверяем не свой же ответ, а состояние на стороне Telegram: адрес,
@@ -355,11 +409,20 @@ jobs:
           BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
           BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
           BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+          BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
+          BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
         run: |
           set -u
           bad=0
-          for slug in india africa bangladesh worldwide afrique uzbekistan; do
+          for slug in india africa bangladesh worldwide afrique uzbekistan ru latam; do
             var="BOT_TOKEN_$(echo "$slug" | tr '[:lower:]' '[:upper:]')"
+            # Тот же принцип, что в set-webhooks.sh: бот без токена не заведён,
+            # и спрашивать о нём Telegram нечем — запрос с пустым токеном вернул
+            # бы 404 и выглядел как поломка живого бота.
+            if [ -z "${!var:-}" ]; then
+              echo "  ─    ${slug}: пропущен, нет секрета $var"
+              continue
+            fi
             info=$(curl -sS --max-time 20 "https://api.telegram.org/bot${!var}/getWebhookInfo")
             expected="${WORKER_URL%/}/bot/${slug}"
             if echo "$info" | grep -qF "\"url\":\"${expected}\""; then
@@ -378,5 +441,5 @@ jobs:
       - name: Итог
         run: |
           echo "Воркер: ${{ steps.deploy.outputs.url }}"
-          echo "Все шесть ботов принимают апдейты. Осталось только наполнить FAQ"
+          echo "Все восемь ботов принимают апдейты. Осталось только наполнить FAQ"
           echo "(таблица bot_faq) — без него бот отдаёт контакт менеджера."

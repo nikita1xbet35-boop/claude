@@ -1,8 +1,8 @@
 // 1xBet Affiliate Program — Telegram-боты партнёрской программы
 //
-// Шесть ботов, один код. Различия между ними — строки в bot_configs, а не
+// Восемь ботов, один код. Различия между ними — строки в bot_configs, а не
 // ветки здесь: гео, язык по умолчанию, контакт менеджера, шаблон ссылки.
-// Добавить седьмой бот = строка в таблице + секрет с токеном + setWebhook.
+// Добавить девятый бот = строка в таблице + секрет с токеном + setWebhook.
 //
 // ── Почему отдельный воркер, а не роут в дашбордном ─────────────────────────
 // У дашбордного воркера "crons": [] выставлены СОЗНАТЕЛЬНО — этим стоит на
@@ -12,17 +12,19 @@
 // пришлось бы проводить шесть новых открытых роутов.
 //
 // ── Секреты (Cloudflare) ────────────────────────────────────────────────────
-//   BOT_TOKEN_INDIA / _AFRICA / _BANGLADESH / _WORLDWIDE / _AFRIQUE / _UZBEKISTAN
-//   BOT_WEBHOOK_SECRET   — общий для всех шести, см. verifyWebhookSecret
+//   BOT_TOKEN_INDIA / _AFRICA / _BANGLADESH / _WORLDWIDE / _AFRIQUE /
+//   _UZBEKISTAN / _RU / _LATAM
+//   BOT_WEBHOOK_SECRET   — общий для всех восьми, см. verifyWebhookSecret
 //   SUPABASE_URL, SUPABASE_SERVICE_KEY
 //
 // Токены в коде не лежат и лежать не могут: репозиторий публичный.
 
-const SLUGS = ['india', 'africa', 'bangladesh', 'worldwide', 'afrique', 'uzbekistan'];
+const SLUGS = ['india', 'africa', 'bangladesh', 'worldwide', 'afrique', 'uzbekistan',
+               'ru', 'latam'];
 
 // Отметка сборки: по ней видно, какой код реально отвечает. Поднимать при
 // каждом изменении, которое надо уметь опознать на живом воркере.
-const BUILD = '2026-09-01.1';
+const BUILD = '2026-09-01.2';
 
 // Токен бота по slug. Имя секрета выводится, а не перечисляется таблицей —
 // иначе добавление бота требует правки в двух местах, и второе забывается.
@@ -32,6 +34,15 @@ const tokenFor = (env, slug) => env['BOT_TOKEN_' + slug.toUpperCase()];
 // Здесь только то, что задано в ТЗ дословно, плюс служебные строки. Ответы FAQ
 // сюда НЕ попадают: они утверждают факты о лицензиях и условиях выплат, их
 // согласует Ник, и живут они в таблице bot_faq.
+
+// Заголовок выбора языка одинаков во всех языках и намеренно многоязычен:
+// человек открывает /lang именно тогда, когда текущий язык ему НЕ понятен, и
+// строка на непонятном языке здесь бесполезна. Вынесена в константу, потому
+// что раньше её приходилось дублировать в каждый блок, и при добавлении языка
+// список молча расходился между блоками.
+const LANG_TITLE =
+  'Choose language / Выберите язык / Elige idioma / Choisir la langue / Tilni tanlang:';
+
 const T = {
   en: {
     welcome: (mgr) =>
@@ -59,7 +70,7 @@ const T = {
     faqEmpty: (mgr) => `This answer isn't published yet. Ask your manager directly: ${mgr}`,
     linkMissing: (mgr) =>
       `The registration link isn't configured yet — your manager will send it to you directly:\n👉 ${mgr}`,
-    langTitle: "Choose language / Tilni tanlang / Choisir la langue:",
+    langTitle: LANG_TITLE,
     langSet: 'Language set to English.',
     back: '⬅️ Back',
   },
@@ -86,7 +97,7 @@ const T = {
     faqEmpty: (mgr) => `Cette réponse n'est pas encore publiée. Demandez directement à votre manager : ${mgr}`,
     linkMissing: (mgr) =>
       `Le lien d'inscription n'est pas encore configuré — votre manager vous l'enverra directement :\n👉 ${mgr}`,
-    langTitle: "Choose language / Tilni tanlang / Choisir la langue:",
+    langTitle: LANG_TITLE,
     langSet: 'Langue définie sur le français.',
     back: '⬅️ Retour',
   },
@@ -113,9 +124,63 @@ const T = {
     faqEmpty: (mgr) => `Bu javob hali chop etilmagan. Menejeringizdan so'rang: ${mgr}`,
     linkMissing: (mgr) =>
       `Ro'yxatdan o'tish havolasi hali sozlanmagan — menejeringiz uni sizga yuboradi:\n👉 ${mgr}`,
-    langTitle: "Choose language / Tilni tanlang / Choisir la langue:",
+    langTitle: LANG_TITLE,
     langSet: 'Til o\'zbekchaga o\'zgartirildi.',
     back: '⬅️ Orqaga',
+  },
+  ru: {
+    welcome: (mgr) =>
+      `👋 Добро пожаловать в партнёрскую программу 1xBet.\n` +
+      `Прямой контакт: ${mgr} — пишите в любое время, без тикетов.\n\n` +
+      `Выберите действие 👇`,
+    btnLink: '🔗 Получить ссылку для регистрации',
+    btnFaq: '❓ Вопросы и ответы',
+    btnManager: '👤 Связаться с менеджером',
+    link: (url) =>
+      `Ваша персональная ссылка для регистрации:\n👉 ${url}\n\n` +
+      `Перейдите по ней, чтобы создать партнёрский аккаунт. После регистрации\n` +
+      `вы получите доступ к личному кабинету с трекинговой ссылкой,\n` +
+      `статистикой и настройками выплат.\n\n` +
+      `Вопросы? В любой момент нажмите «Связаться с менеджером».`,
+    manager: (mgr) => `Напишите менеджеру напрямую:\n👉 ${mgr}`,
+    reminder: (url, mgr) =>
+      `👋 Напоминаем о себе — если вы зарегистрировались, менеджер готов\n` +
+      `помочь. Если нет, ваша ссылка всё ещё активна:\n👉 ${url}\n\n` +
+      `Контакт: ${mgr}`,
+    faqTitle: 'Частые вопросы:',
+    faqEmpty: (mgr) => `Этот ответ ещё не опубликован. Спросите менеджера напрямую: ${mgr}`,
+    linkMissing: (mgr) =>
+      `Ссылка для регистрации ещё не настроена — менеджер пришлёт её вам лично:\n👉 ${mgr}`,
+    langTitle: LANG_TITLE,
+    langSet: 'Язык переключён на русский.',
+    back: '⬅️ Назад',
+  },
+  es: {
+    welcome: (mgr) =>
+      `👋 Bienvenido al programa de afiliados de 1xBet.\n` +
+      `Contacto directo: ${mgr} — escríbenos cuando quieras, sin tickets.\n\n` +
+      `Elige una opción abajo 👇`,
+    btnLink: '🔗 Obtener enlace de registro',
+    btnFaq: '❓ Preguntas frecuentes',
+    btnManager: '👤 Hablar con el manager',
+    link: (url) =>
+      `Este es tu enlace personal de registro:\n👉 ${url}\n\n` +
+      `Púlsalo para crear tu cuenta de socio. Una vez registrado,\n` +
+      `tendrás acceso a tu panel con tu enlace de seguimiento,\n` +
+      `estadísticas y ajustes de pago.\n\n` +
+      `¿Dudas? Pulsa «Hablar con el manager» cuando quieras.`,
+    manager: (mgr) => `Escribe directamente a tu manager:\n👉 ${mgr}`,
+    reminder: (url, mgr) =>
+      `👋 Pasamos a saludar — si ya te has registrado, tu manager está\n` +
+      `listo para ayudarte. Si no, tu enlace sigue activo:\n👉 ${url}\n\n` +
+      `Contacto: ${mgr}`,
+    faqTitle: 'Preguntas frecuentes:',
+    faqEmpty: (mgr) => `Esta respuesta aún no está publicada. Pregunta directamente a tu manager: ${mgr}`,
+    linkMissing: (mgr) =>
+      `El enlace de registro aún no está configurado — tu manager te lo enviará directamente:\n👉 ${mgr}`,
+    langTitle: LANG_TITLE,
+    langSet: 'Idioma cambiado a español.',
+    back: '⬅️ Atrás',
   },
 };
 
@@ -124,8 +189,8 @@ const T = {
 // функции лежит рядом, и его видно целиком — включая то, что ни один ответ не
 // утверждает ничего сверх того, что пришло из справочника.
 //
-// Формулировки статусов взяты из ТЗ §2.3 дословно; fr/uz — перевод тех же
-// фраз. Названия стран и примечания подставляются из geo_availability как
+// Формулировки статусов взяты из ТЗ §2.3 дословно; fr/uz/ru/es — перевод тех
+// же фраз. Названия стран и примечания подставляются из geo_availability как
 // есть, ни на один язык не переводятся: это данные из PDF, а не наш текст.
 const GEO_T = {
   en: {
@@ -196,6 +261,54 @@ const GEO_T = {
     geoPdfMissing: (mgr) =>
       `To'liq ro'yxat hali chop etilmagan. Buning o'rniga davlat nomini yozing yoki menejeringizdan so'rang:\n👉 ${mgr}`,
     btnMenu: '⬅️ Menyu',
+  },
+  ru: {
+    btnGeo: '🌍 Проверить ГЕО',
+    geoIntro: 'Проверить конкретную страну или получить полный список?',
+    geoBtnCountry: '🔍 Проверить страну',
+    geoBtnPdf: '📄 Полный список ГЕО (PDF)',
+    // Русское название работает наравне с английским: в справочнике есть
+    // колонка geo_ru, и поиск сверяется с обеими.
+    geoAsk: 'Напишите название страны (например, Нигерия)',
+    geoAvailable: (n, note) => `✅ ${n} — доступно.` + (note ? `\n${note}` : ''),
+    geoNotAvailable: (n) => `❌ ${n} — недоступно.`,
+    geoLocalOnly: (n, note) =>
+      `⚠️ ${n} покрывается только локальной партнёрской программой, не этой.` +
+      (note ? `\n${note}` : ''),
+    geoConfirm: (n, mgr) =>
+      `❓ Доступность ${n} зависит от текущих условий — уточните напрямую:\n👉 ${mgr}`,
+    geoNotFound: (q) =>
+      `Не удалось найти «${q}» — проверьте написание или нажмите «Полный список ГЕО», чтобы посмотреть все страны.`,
+    geoDidYouMean: (q) => `Точного совпадения для «${q}» нет. Возможно, имелось в виду:`,
+    geoAgain: 'Напишите другую страну или вернитесь в меню.',
+    geoEmpty: (mgr) =>
+      `Справочник ГЕО ещё не загружен — менеджер может подтвердить любую страну напрямую:\n👉 ${mgr}`,
+    geoPdfMissing: (mgr) =>
+      `Полный список ещё не опубликован. Напишите название страны или спросите менеджера:\n👉 ${mgr}`,
+    btnMenu: '⬅️ Меню',
+  },
+  es: {
+    btnGeo: '🌍 Consultar GEO',
+    geoIntro: '¿Quieres consultar un país concreto u obtener la lista completa?',
+    geoBtnCountry: '🔍 Consultar un país',
+    geoBtnPdf: '📄 Lista GEO completa (PDF)',
+    geoAsk: 'Escribe el nombre del país (por ejemplo, México)',
+    geoAvailable: (n, note) => `✅ ${n} — disponible.` + (note ? `\n${note}` : ''),
+    geoNotAvailable: (n) => `❌ ${n} — no disponible.`,
+    geoLocalOnly: (n, note) =>
+      `⚠️ ${n} solo está cubierto por un programa de afiliados local, no por este.` +
+      (note ? `\n${note}` : ''),
+    geoConfirm: (n, mgr) =>
+      `❓ La disponibilidad de ${n} depende de las condiciones actuales — confírmalo directamente:\n👉 ${mgr}`,
+    geoNotFound: (q) =>
+      `No se ha encontrado «${q}» — revisa la ortografía o pulsa «Lista GEO completa» para ver todos los países.`,
+    geoDidYouMean: (q) => `No hay coincidencia exacta para «${q}». ¿Querías decir:`,
+    geoAgain: 'Escribe otro país o vuelve al menú.',
+    geoEmpty: (mgr) =>
+      `El directorio GEO aún no se ha cargado — tu manager puede confirmar cualquier país directamente:\n👉 ${mgr}`,
+    geoPdfMissing: (mgr) =>
+      `La lista completa aún no está publicada. Escribe el nombre de un país o pregunta a tu manager:\n👉 ${mgr}`,
+    btnMenu: '⬅️ Menú',
   },
 };
 for (const [lang, extra] of Object.entries(GEO_T)) Object.assign(T[lang], extra);
@@ -526,17 +639,29 @@ async function onManager(env, cfg, chatId, userId) {
   });
 }
 
+// Самоназвания языков: подпись кнопки читает тот, кто нужного языка сейчас не
+// видит, поэтому «Русский», а не «Russian».
+const LANG_NAMES = {
+  en: 'English', ru: 'Русский', es: 'Español', fr: 'Français', uz: "O'zbekcha",
+};
+
 async function onLang(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
-  await send(env, cfg, chatId, t(lang).langTitle, {
-    reply_markup: {
-      inline_keyboard: [[
-        { text: 'English', callback_data: 'lang:en' },
-        { text: "O'zbekcha", callback_data: 'lang:uz' },
-        { text: 'Français', callback_data: 'lang:fr' },
-      ]],
-    },
-  });
+
+  // Клавиатура собирается из списка языков, а не перечисляется руками: пока
+  // она была списком из трёх кнопок, добавление языка означало правку в двух
+  // местах, и второе (здесь) забывалось — язык существовал бы в коде, но
+  // выбрать его было бы нечем.
+  //
+  // По две кнопки в ряд: пять подписей в одну строку Telegram сожмёт до
+  // нечитаемого.
+  const langs = Object.keys(T).filter(l => LANG_NAMES[l]);
+  const rows = [];
+  for (let i = 0; i < langs.length; i += 2) {
+    rows.push(langs.slice(i, i + 2).map(l => ({ text: LANG_NAMES[l], callback_data: `lang:${l}` })));
+  }
+
+  await send(env, cfg, chatId, t(lang).langTitle, { reply_markup: { inline_keyboard: rows } });
 }
 
 // ── Роутинг апдейта ─────────────────────────────────────────────────────────

@@ -18,6 +18,8 @@ function makeDb() {
       { slug:'afrique', geo_label:'Francophone Africa', default_lang:'fr', manager_contact:'@aff_manager_xbet', signup_url_tpl:'', active:true },
       { slug:'uzbekistan', geo_label:'Uzbekistan', default_lang:'uz', manager_contact:'@aff_manager_xbet', signup_url_tpl:'', active:true },
       { slug:'worldwide', geo_label:'Worldwide', default_lang:'en', manager_contact:'@aff_manager_xbet', signup_url_tpl:'', active:false },
+      { slug:'ru', geo_label:'Russian-speaking', default_lang:'ru', manager_contact:'@aff_manager_xbet', signup_url_tpl:'', active:true },
+      { slug:'latam', geo_label:'Latin America', default_lang:'es', manager_contact:'@aff_manager_xbet', signup_url_tpl:'', active:true },
     ],
     bot_leads: [],
     bot_user_prefs: [],
@@ -41,6 +43,8 @@ function makeDb() {
       { lang:'en', key:'revshare', question:'📊 RevShare terms', answer:'', sort_order:2 },
       { lang:'fr', key:'payouts',  question:'💵 Paiements',      answer:'', sort_order:1 },
       { lang:'uz', key:'payouts',  question:"💵 To'lovlar",      answer:'', sort_order:1 },
+      { lang:'ru', key:'payouts',  question:'💵 Выплаты',        answer:'', sort_order:1 },
+      { lang:'es', key:'payouts',  question:'💵 Pagos',          answer:'', sort_order:1 },
     ],
     _seq: 1,
   };
@@ -207,6 +211,7 @@ async function harness() {
     BOT_WEBHOOK_SECRET: 'shh',
     BOT_TOKEN_INDIA: 'tok-in', BOT_TOKEN_AFRIQUE: 'tok-fr',
     BOT_TOKEN_UZBEKISTAN: 'tok-uz', BOT_TOKEN_WORLDWIDE: 'tok-ww',
+    BOT_TOKEN_RU: 'tok-ru', BOT_TOKEN_LATAM: 'tok-es',
   };
 
   const post = (slug, update, secret = 'shh') =>
@@ -290,7 +295,7 @@ test('GET на вебхук — 405', async () => {
   assert.strictEqual(res.status, 405);
 });
 
-test('/start отвечает на языке бота: en / fr / uz', async () => {
+test('/start отвечает на языке бота: en / fr / uz / ru / es', async () => {
   const h = await harness();
   await h.post('india', h.msg('/start'));
   assert.match(h.last().text, /Welcome to the 1xBet Affiliate Program/);
@@ -298,6 +303,10 @@ test('/start отвечает на языке бота: en / fr / uz', async () 
   assert.match(h.last().text, /Bienvenue dans le programme/);
   await h.post('uzbekistan', h.msg('/start'));
   assert.match(h.last().text, /xush kelibsiz/);
+  await h.post('ru', h.msg('/start'));
+  assert.match(h.last().text, /партнёрскую программу 1xBet/);
+  await h.post('latam', h.msg('/start'));
+  assert.match(h.last().text, /programa de afiliados de 1xBet/);
 });
 
 test('/start показывает контакт менеджера сразу, без кликов', async () => {
@@ -785,6 +794,101 @@ test('падение Supabase не роняет вебхук: Telegram полу�
   assert.strictEqual(res.status, 200,
     'не-200 заставил бы Telegram повторять апдейт бесконечно');
   globalThis.fetch = realFetch;
+});
+
+// ── Два новых бота: ru и latam ──────────────────────────────────────────────
+// Кода они не добавляют, поэтому проверяется не «работает ли обработчик», а
+// ровно то, что при добавлении языка ломается: неполный словарь и забытая
+// кнопка в /lang.
+
+test('русский бот: меню, ссылка и FAQ на русском', async () => {
+  const h = await harness();
+  h.db.bot_configs.find(c => c.slug==='ru').signup_url_tpl = 'https://p.example/newreg';
+  await h.post('ru', h.msg('/start'));
+  const kb = h.last().reply_markup.keyboard;
+  assert.deepStrictEqual(kb.map(r => r.length), [2,2], 'четыре кнопки в двух рядах');
+  assert.match(kb[0][1].text, /Проверить ГЕО/);
+  await h.post('ru', h.msg('🔗 Получить ссылку для регистрации'));
+  assert.match(h.last().text, /https:\/\/p\.example\/newreg/);
+  assert.strictEqual(h.db.bot_leads[0].bot_slug, 'ru');
+  assert.strictEqual(h.db.bot_leads[0].lang, 'ru');
+});
+
+test('LATAM-бот отвечает по-испански', async () => {
+  const h = await harness();
+  h.db.bot_configs.find(c => c.slug==='latam').signup_url_tpl = 'https://p.example/newreg';
+  await h.post('latam', h.msg('/start'));
+  assert.match(h.last().reply_markup.keyboard[0][1].text, /Consultar GEO/);
+  await h.post('latam', h.msg('🔗 Obtener enlace de registro'));
+  assert.match(h.last().text, /enlace personal de registro/);
+  assert.strictEqual(h.db.bot_leads[0].lang, 'es');
+});
+
+test('/lang предлагает все пять языков и каждый выбирается', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/lang'));
+  const rows = h.last().reply_markup.inline_keyboard;
+  const codes = rows.flat().map(b => b.callback_data.slice(5)).sort();
+  assert.deepStrictEqual(codes, ['en','es','fr','ru','uz']);
+  assert.ok(rows.every(r => r.length <= 2), 'не больше двух кнопок в ряд');
+
+  // Кнопка, которая не переключает язык, выглядит рабочей и ничего не делает —
+  // проверяем каждую, а не одну.
+  for (const code of codes) {
+    await h.post('india', h.cb(`lang:${code}`));
+    assert.strictEqual(h.db.bot_user_prefs[0].lang, code, `lang:${code} не сохранился`);
+  }
+});
+
+// Забытый ключ в языковом словаре виден снаружи как слово undefined в тексте
+// бота — и только на том языке, который никто из нас не читает. Прогоняем весь
+// сценарий на каждом языке и ищем именно это.
+test('ни один язык не даёт undefined в текстах и кнопках', async () => {
+  for (const lang of ['en','fr','uz','ru','es']) {
+    const h = await harness();
+    h.db.bot_configs[0].signup_url_tpl = 'https://p.example/newreg';
+    await h.post('india', h.cb(`lang:${lang}`));
+    h.sent.length = 0;
+
+    await h.post('india', h.msg('/start'));
+    const kb = h.last().reply_markup.keyboard;
+    await h.post('india', h.msg(kb[0][0].text));      // ссылка
+    await h.post('india', h.msg(kb[0][1].text));      // Check GEO
+    await h.post('india', h.cb('geo:country'));
+    await h.post('india', h.msg('Nigeria'));
+    await h.post('india', h.msg('Nigeira'));          // «вы имели в виду»
+    await h.post('india', h.msg('Atlantis'));         // ничего не найдено
+    await h.post('india', h.cb('geo:pdf'));
+    await h.post('india', h.msg(kb[1][0].text));      // FAQ
+    await h.post('india', h.cb('faq:payouts'));       // ответ не заполнен
+    await h.post('india', h.msg(kb[1][1].text));      // менеджер
+    await h.post('india', h.msg('/lang'));
+
+    // Проверять только подстроку 'undefined' в JSON НЕДОСТАТОЧНО, и это ровно
+    // тот случай, когда проверка выглядит рабочей и ничего не ловит:
+    // JSON.stringify выбрасывает поля со значением undefined целиком. Убранный
+    // ключ словаря даёт не текст «undefined», а сообщение БЕЗ поля text —
+    // Telegram ответит на такое ошибкой, а бот снаружи промолчит. Поэтому
+    // сначала смотрим, что текст вообще есть.
+    for (const m of h.sent) {
+      if (m.method === 'sendMessage') {
+        assert.ok(typeof m.text === 'string' && m.text.trim(),
+          `${lang}: sendMessage без текста — пропущен ключ в словаре языка`);
+      }
+      const btns = [
+        ...((m.reply_markup && m.reply_markup.keyboard) || []).flat(),
+        ...((m.reply_markup && m.reply_markup.inline_keyboard) || []).flat(),
+      ];
+      for (const b of btns) {
+        assert.ok(typeof b.text === 'string' && b.text.trim(),
+          `${lang}: кнопка без подписи`);
+      }
+    }
+
+    const dump = JSON.stringify(h.sent);
+    assert.ok(!dump.includes('undefined'), `${lang}: в ответах бота есть undefined`);
+    assert.ok(!dump.includes('[object Object]'), `${lang}: в ответах бота есть [object Object]`);
+  }
 });
 
 // ── Запуск ──────────────────────────────────────────────────────────────────
