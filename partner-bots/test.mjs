@@ -170,7 +170,11 @@ function fakeSupabase(db, url, init) {
       rows.push({ id: db._seq++, reminder_sent: false, status: 'link_issued',
                   link_issued_at: new Date().toISOString(), ...body });
     }
-    return new Response(null, { status: 204 });
+    // PostgREST на POST-upsert отвечает 201 и ПУСТЫМ телом, а не 204.
+    // Заглушка возвращала 204, и из-за этого тесты не ловили самую дорогую
+    // ошибку сессии: sb() звал res.json() на пустом теле, падал с
+    // «Unexpected end of JSON input», и /start молчал во всех шести ботах.
+    return new Response('', { status: 201 });
   }
 
   if (method === 'PATCH') {
@@ -467,6 +471,48 @@ test('произвольный текст возвращает меню, а не
   const h = await harness();
   await h.post('india', h.msg('привет, как дела'));
   assert.match(h.last().text, /Welcome to the 1xBet/);
+});
+
+// Регрессия на самую дорогую ошибку сессии: PostgREST отвечает на upsert
+// 201 с ПУСТЫМ телом, sb() звал res.json() и падал, ошибку глотал обработчик,
+// Telegram получал 200 — и все шесть ботов молчали, не оставив следа.
+test('пустое тело ответа Supabase не роняет обработчик', async () => {
+  const h = await harness();
+  const real = globalThis.fetch;
+  // Отвечаем пустым телом на ВСЕ коды, какие PostgREST реально использует.
+  for (const status of [200, 201, 204]) {
+    globalThis.fetch = async (input, init = {}) => {
+      const u = typeof input === 'string' ? input : input.url;
+      if (u.startsWith(SUPA) && (init.method || 'GET') !== 'GET') {
+        // 204 по спецификации не может нести тело — Response с телом и 204
+        // бросает TypeError ещё в самом тесте.
+        return new Response(status === 204 ? null : '', { status });
+      }
+      return real(input, init);
+    };
+    h.sent.length = 0;
+    await h.post('india', h.msg('/start'));
+    assert.strictEqual(h.sent.length, 1, `статус ${status}: бот обязан ответить`);
+    assert.match(h.last().text, /Welcome to the 1xBet/, `статус ${status}`);
+  }
+  globalThis.fetch = real;
+});
+
+test('нечитаемое тело даёт понятную ошибку, а не «Unexpected end of JSON»', async () => {
+  const h = await harness();
+  const real = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const u = typeof input === 'string' ? input : input.url;
+    if (u.includes('/rest/v1/bot_configs')) return new Response('<html>502</html>', { status: 200 });
+    return real(input, init);
+  };
+  const res = await h.worker.fetch(new Request('https://x.test/selftest/india', {
+    method: 'POST', headers: { 'X-Telegram-Bot-Api-Secret-Token': 'shh' },
+    body: JSON.stringify({ text: '/start' }),
+  }), h.env, { waitUntil: p => p });
+  globalThis.fetch = real;
+  const j = await res.json();
+  assert.match(j.error, /не разобралось как JSON/, j.error);
 });
 
 // ── Сквозной самотест ───────────────────────────────────────────────────────
