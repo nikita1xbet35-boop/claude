@@ -11,13 +11,16 @@
 |---|---|
 | Схема БД (`bot_configs`, `bot_leads`, `bot_user_prefs`, `bot_faq`) | ✅ миграция `048` |
 | Воркер: роутинг, `/start`, меню, ссылка, FAQ, менеджер, `/lang`, реминдер | ✅ `worker.js` |
-| Тесты (27 проверок) | ✅ `node partner-bots/test.mjs` |
+| Тесты (44 проверки) | ✅ `node partner-bots/test.mjs` |
 | Адрес регистрации `https://1xaffiliate.org/newreg` | ✅ миграции `049`+`050` |
 | Автодеплой воркера | ✅ `.github/workflows/deploy-partner-bots.yml` |
 | `setWebhook` на 6 ботов + проверка через `getWebhookInfo` | ✅ шаг того же воркфлоу |
 | Ключ Cloudflare в секретах **GitHub** | ⛔ **нужен ты** — см. §1 |
 | Токены ботов в секретах **GitHub** | ⛔ **нужен ты** — см. §1 |
-| Тексты FAQ на EN/FR/UZ | ⛔ **нужен ты** — см. §5 |
+| FAQ на EN/FR/UZ (3 пункта) | ✅ миграция `051` |
+| «🌍 Check GEO»: поиск, синонимы, уточнение | ✅ миграция `051` + `worker.js` |
+| Справочник ГЕО (190+ строк) | ⛔ **нужен PDF** — см. §5 |
+| Полный список PDF по кнопке | ⛔ **нужен PDF** — см. §5 |
 
 Важно: секреты нужны именно в **GitHub**, а не в панели Cloudflare. Воркфлоу
 сам зальёт их оттуда в нужный воркер. Токены, добавленные руками в Cloudflare
@@ -178,22 +181,62 @@ UPDATE public.bot_configs SET signup_url_tpl = 'https://ДОМЕН/ПУТЬ'
 
 ---
 
-## 5. Тексты FAQ
+## 5. Справочник ГЕО
 
-Кнопки уже засеяны на трёх языках, ответы пустые. Пока ответ пуст, бот говорит,
-что текст ещё не опубликован, и отдаёт контакт менеджера — вместо того чтобы
-выдумывать условия выплат и статус лицензий.
+`geo_availability` создана и **пуста**. ТЗ называет единственным источником
+правды приложенный PDF и запрещает транскрибировать его вручную — файл к
+заданию не пришёл, в загрузке был только текст ТЗ.
+
+Пока таблица пуста, «Check a country» честно говорит, что справочник не
+загружен, и отдаёт контакт менеджера. Кода это не касается: наполнение —
+операция с данными.
 
 ```sql
-UPDATE public.bot_faq SET answer = 'Weekly payouts, no admin fee...'
- WHERE lang = 'en' AND key = 'payouts';
+-- Перезалить целиком (ТЗ §1: без diff-логики)
+BEGIN;
+TRUNCATE public.geo_availability;
+\copy public.geo_availability (geo_en,geo_ru,iso_code,region,availability,note)
+  FROM 'geo.csv' CSV HEADER;
+COMMIT;
+
+-- Сверить с оригиналом
+SELECT count(*) FROM public.geo_availability;
+SELECT availability, count(*) FROM public.geo_availability GROUP BY 1;
 ```
 
-Ключи: `payouts`, `revshare`, `geo`, `license`. Языки: `en`, `fr`, `uz`.
-Посмотреть, что осталось незаполненным:
+Значения `availability` — ровно четыре: `available`, `not_available`,
+`local_program_only`, `confirm_with_manager`. Незнакомый статус бот не
+выдумывает: отправляет уточнить у менеджера.
+
+**Полный список PDF.** Кнопка отправляет файл по URL. Положи PDF куда угодно,
+откуда его отдадут по HTTP, и запиши адрес:
 
 ```sql
-SELECT lang, key FROM public.bot_faq WHERE answer = '' ORDER BY lang, sort_order;
+UPDATE public.system_config SET value = to_jsonb('https://…/geo.pdf'::text)
+ WHERE key = 'geo_pdf_url';
+```
+
+Пока адрес пуст, кнопка честно говорит, что список не опубликован, и
+предлагает ввести страну.
+
+**Синонимы названий** живут отдельно в `geo_aliases`, потому что справочник
+перезаливается целиком и стёр бы их вместе с собой. Уже заведены `uae`, `usa`,
+`uk`, `drc`, `ivory coast`, `оаэ`, `сша` и ещё несколько. Добавить:
+
+```sql
+INSERT INTO public.geo_aliases (alias, iso_code) VALUES ('lowercase alias','XX');
+```
+
+---
+
+## 5a. Тексты FAQ
+
+Заполнены на трёх языках миграцией `051`, три пункта: `payouts`, `revshare`,
+`license`. Правятся без передеплоя:
+
+```sql
+UPDATE public.bot_faq SET answer = '…' WHERE lang = 'en' AND key = 'payouts';
+SELECT lang, key FROM public.bot_faq WHERE answer = '';  -- что осталось пустым
 ```
 
 ---
