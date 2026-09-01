@@ -115,6 +115,87 @@ const T = {
   },
 };
 
+// ── Check GEO (дополнение к ТЗ) ─────────────────────────────────────────────
+// Отдельным блоком, а не врезкой в три языковых объекта выше: весь текст новой
+// функции лежит рядом, и его видно целиком — включая то, что ни один ответ не
+// утверждает ничего сверх того, что пришло из справочника.
+//
+// Формулировки статусов взяты из ТЗ §2.3 дословно; fr/uz — перевод тех же
+// фраз. Названия стран и примечания подставляются из geo_availability как
+// есть, ни на один язык не переводятся: это данные из PDF, а не наш текст.
+const GEO_T = {
+  en: {
+    btnGeo: '🌍 Check GEO',
+    geoIntro: 'Would you like to check a specific country, or get the full list?',
+    geoBtnCountry: '🔍 Check a country',
+    geoBtnPdf: '📄 Full GEO list (PDF)',
+    geoAsk: 'Type the country name (e.g. Nigeria)',
+    geoAvailable: (n, note) => `✅ ${n} — available.` + (note ? `\n${note}` : ''),
+    geoNotAvailable: (n) => `❌ ${n} — not available.`,
+    geoLocalOnly: (n, note) =>
+      `⚠️ ${n} is only covered through a local affiliate program, not this one.` +
+      (note ? `\n${note}` : ''),
+    geoConfirm: (n, mgr) =>
+      `❓ ${n} availability depends on current terms — please confirm directly:\n👉 ${mgr}`,
+    geoNotFound: (q) =>
+      `Couldn't find "${q}" — check the spelling, or tap "Full GEO list" to browse all countries.`,
+    geoDidYouMean: (q) => `No exact match for "${q}". Did you mean:`,
+    geoAgain: 'Type another country, or go back to the menu.',
+    geoEmpty: (mgr) =>
+      `The GEO directory hasn't been uploaded yet — your manager can confirm any country directly:\n👉 ${mgr}`,
+    geoPdfMissing: (mgr) =>
+      `The full list isn't published yet. Type a country name instead, or ask your manager:\n👉 ${mgr}`,
+    btnMenu: '⬅️ Menu',
+  },
+  fr: {
+    btnGeo: '🌍 Vérifier un GEO',
+    geoIntro: 'Souhaitez-vous vérifier un pays précis, ou obtenir la liste complète ?',
+    geoBtnCountry: '🔍 Vérifier un pays',
+    geoBtnPdf: '📄 Liste GEO complète (PDF)',
+    geoAsk: 'Saisissez le nom du pays (par ex. Nigeria)',
+    geoAvailable: (n, note) => `✅ ${n} — disponible.` + (note ? `\n${note}` : ''),
+    geoNotAvailable: (n) => `❌ ${n} — non disponible.`,
+    geoLocalOnly: (n, note) =>
+      `⚠️ ${n} est couvert uniquement par un programme d'affiliation local, pas celui-ci.` +
+      (note ? `\n${note}` : ''),
+    geoConfirm: (n, mgr) =>
+      `❓ La disponibilité de ${n} dépend des conditions actuelles — merci de confirmer directement :\n👉 ${mgr}`,
+    geoNotFound: (q) =>
+      `Impossible de trouver « ${q} » — vérifiez l'orthographe, ou appuyez sur « Liste GEO complète » pour parcourir tous les pays.`,
+    geoDidYouMean: (q) => `Aucune correspondance exacte pour « ${q} ». Vouliez-vous dire :`,
+    geoAgain: 'Saisissez un autre pays, ou revenez au menu.',
+    geoEmpty: (mgr) =>
+      `Le répertoire GEO n'a pas encore été chargé — votre manager peut confirmer n'importe quel pays directement :\n👉 ${mgr}`,
+    geoPdfMissing: (mgr) =>
+      `La liste complète n'est pas encore publiée. Saisissez plutôt un nom de pays, ou demandez à votre manager :\n👉 ${mgr}`,
+    btnMenu: '⬅️ Menu',
+  },
+  uz: {
+    btnGeo: '🌍 GEO tekshirish',
+    geoIntro: "Muayyan davlatni tekshirmoqchimisiz yoki to'liq ro'yxatni olasizmi?",
+    geoBtnCountry: '🔍 Davlatni tekshirish',
+    geoBtnPdf: "📄 To'liq GEO ro'yxati (PDF)",
+    geoAsk: 'Davlat nomini yozing (masalan, Nigeria)',
+    geoAvailable: (n, note) => `✅ ${n} — mavjud.` + (note ? `\n${note}` : ''),
+    geoNotAvailable: (n) => `❌ ${n} — mavjud emas.`,
+    geoLocalOnly: (n, note) =>
+      `⚠️ ${n} faqat mahalliy hamkorlik dasturi orqali qamrab olingan, bu dastur orqali emas.` +
+      (note ? `\n${note}` : ''),
+    geoConfirm: (n, mgr) =>
+      `❓ ${n} bo'yicha mavjudlik joriy shartlarga bog'liq — iltimos, to'g'ridan-to'g'ri aniqlang:\n👉 ${mgr}`,
+    geoNotFound: (q) =>
+      `"${q}" topilmadi — imloni tekshiring yoki barcha davlatlarni ko'rish uchun "To'liq GEO ro'yxati" tugmasini bosing.`,
+    geoDidYouMean: (q) => `"${q}" uchun aniq moslik yo'q. Balki shulardan biri:`,
+    geoAgain: "Boshqa davlat nomini yozing yoki menyuga qayting.",
+    geoEmpty: (mgr) =>
+      `GEO ma'lumotnomasi hali yuklanmagan — menejeringiz istalgan davlatni to'g'ridan-to'g'ri tasdiqlay oladi:\n👉 ${mgr}`,
+    geoPdfMissing: (mgr) =>
+      `To'liq ro'yxat hali chop etilmagan. Buning o'rniga davlat nomini yozing yoki menejeringizdan so'rang:\n👉 ${mgr}`,
+    btnMenu: '⬅️ Menyu',
+  },
+};
+for (const [lang, extra] of Object.entries(GEO_T)) Object.assign(T[lang], extra);
+
 const t = (lang) => T[lang] || T.en;
 
 // ── Supabase ────────────────────────────────────────────────────────────────
@@ -152,10 +233,11 @@ async function tg(env, slug, method, payload) {
   return res;
 }
 
+// Раскладка из ТЗ §0: ссылка и GEO в первом ряду, FAQ и менеджер во втором.
 const mainKeyboard = (lang) => ({
   keyboard: [
-    [{ text: t(lang).btnLink }, { text: t(lang).btnFaq }],
-    [{ text: t(lang).btnManager }],
+    [{ text: t(lang).btnLink }, { text: t(lang).btnGeo }],
+    [{ text: t(lang).btnFaq },  { text: t(lang).btnManager }],
   ],
   resize_keyboard: true,
 });
@@ -191,8 +273,12 @@ const signupUrl = (cfg, refCode) =>
   cfg.signup_url_tpl ? cfg.signup_url_tpl.replace('{ref}', encodeURIComponent(refCode)) : null;
 
 // ── Обработчики ─────────────────────────────────────────────────────────────
-async function onStart(env, cfg, chatId, userId) {
+// clearState=true при явном возврате в меню (/start или кнопка «Menu»):
+// иначе человек, вышедший из проверки ГЕО, остался бы в ней, и следующее его
+// сообщение снова искалось бы как страна.
+async function onStart(env, cfg, chatId, userId, clearState) {
   const lang = await resolveLang(env, cfg, userId);
+  if (clearState) await setAwaiting(env, cfg.slug, userId, null);
   await send(env, cfg.slug, chatId, t(lang).welcome(cfg.manager_contact),
     { reply_markup: mainKeyboard(lang) });
 }
@@ -260,6 +346,119 @@ async function onFaqAnswer(env, cfg, chatId, userId, key) {
   await send(env, cfg.slug, chatId, answer || t(lang).faqEmpty(cfg.manager_contact));
 }
 
+// ── Check GEO ───────────────────────────────────────────────────────────────
+
+// Состояние «ждём название страны». Нужно, чтобы следующее сообщение поняли
+// как страну, а не как «не понял, вот меню». Живёт в bot_user_prefs рядом с
+// языком: заводить ради одного флага отдельную таблицу незачем.
+async function setAwaiting(env, slug, userId, value) {
+  await sb(env, 'bot_user_prefs?on_conflict=bot_slug,tg_user_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ bot_slug: slug, tg_user_id: userId, awaiting: value,
+                           updated_at: new Date().toISOString() }),
+  });
+}
+
+async function onGeoMenu(env, cfg, chatId, userId) {
+  const lang = await resolveLang(env, cfg, userId);
+  await setAwaiting(env, cfg.slug, userId, null);
+  await send(env, cfg.slug, chatId, t(lang).geoIntro, {
+    reply_markup: { inline_keyboard: [[
+      { text: t(lang).geoBtnCountry, callback_data: 'geo:country' },
+      { text: t(lang).geoBtnPdf,     callback_data: 'geo:pdf' },
+    ]] },
+  });
+}
+
+async function onGeoAskCountry(env, cfg, chatId, userId) {
+  const lang = await resolveLang(env, cfg, userId);
+  await setAwaiting(env, cfg.slug, userId, 'geo');
+  await send(env, cfg.slug, chatId, t(lang).geoAsk);
+}
+
+async function onGeoPdf(env, cfg, chatId, userId) {
+  const lang = await resolveLang(env, cfg, userId);
+  const rows = await sb(env, "system_config?key=eq.geo_pdf_url&select=value");
+  const url = rows[0] && typeof rows[0].value === 'string' ? rows[0].value : '';
+  if (!url) {
+    // Файла нет — говорим прямо. Отправить «что-нибудь похожее» вместо
+    // официального списка ГЕО было бы хуже молчания.
+    await send(env, cfg.slug, chatId, t(lang).geoPdfMissing(cfg.manager_contact));
+    return;
+  }
+  await tg(env, cfg.slug, 'sendDocument', { chat_id: chatId, document: url });
+}
+
+// Один ответ по строке справочника. Текст выбирается по availability; note
+// подставляется как есть и только если он есть.
+function geoAnswer(lang, row, mgr) {
+  const T_ = t(lang);
+  const name = row.geo_en;
+  switch (row.availability) {
+    case 'available':          return T_.geoAvailable(name, row.note);
+    case 'not_available':      return T_.geoNotAvailable(name);
+    case 'local_program_only': return T_.geoLocalOnly(name, row.note);
+    case 'confirm_with_manager': return T_.geoConfirm(name, mgr);
+    // Незнакомый статус — не наш случай выдумывать. Отправляем к менеджеру
+    // вместо того, чтобы молча выбрать одну из четырёх готовых формулировок.
+    default:                   return T_.geoConfirm(name, mgr);
+  }
+}
+
+const geoAgainKeyboard = (lang) => ({
+  inline_keyboard: [[{ text: t(lang).btnMenu, callback_data: 'geo:exit' }]],
+});
+
+async function onGeoLookup(env, cfg, chatId, userId, query) {
+  const lang = await resolveLang(env, cfg, userId);
+
+  const hit = await sb(env, 'rpc/fn_find_geo', {
+    method: 'POST', body: JSON.stringify({ q: query }),
+  });
+  if (hit.length) {
+    await send(env, cfg.slug, chatId, geoAnswer(lang, hit[0], cfg.manager_contact),
+      { reply_markup: geoAgainKeyboard(lang) });
+    return;
+  }
+
+  // Неточное совпадение НЕ становится ответом — только вопросом.
+  //
+  // Проверено на данных: запрос «Nigeira» ближе к «Niger» (0.400), чем к
+  // «Nigeria» (0.333), потому что короткое слово выигрывает по триграммам. Бот
+  // сказал бы «Niger — not available» человеку, спросившему про Нигерию, где
+  // ответ обратный. Порог этого не чинит — у любого нечёткого поиска есть
+  // соседи, между которыми он выбирает наугад.
+  const suggestions = await sb(env, 'rpc/fn_suggest_geo', {
+    method: 'POST', body: JSON.stringify({ q: query, n: 3 }),
+  });
+  if (suggestions.length) {
+    await send(env, cfg.slug, chatId, t(lang).geoDidYouMean(query), {
+      reply_markup: {
+        inline_keyboard: suggestions.map(x => [
+          { text: x.geo_en, callback_data: `geo:id:${x.id}` },
+        ]).concat([[{ text: t(lang).btnMenu, callback_data: 'geo:exit' }]]),
+      },
+    });
+    return;
+  }
+
+  // Ни ответа, ни кандидатов. Пустой справочник и незнакомая страна снаружи
+  // выглядят одинаково, а чинятся по-разному, поэтому различаем.
+  const any = await sb(env, 'geo_availability?select=id&limit=1');
+  await send(env, cfg.slug, chatId,
+    any.length ? t(lang).geoNotFound(query) : t(lang).geoEmpty(cfg.manager_contact),
+    { reply_markup: geoAgainKeyboard(lang) });
+}
+
+async function onGeoById(env, cfg, chatId, userId, id) {
+  const lang = await resolveLang(env, cfg, userId);
+  const rows = await sb(env, `geo_availability?id=eq.${encodeURIComponent(id)}&select=*`);
+  if (!rows.length) { await onGeoMenu(env, cfg, chatId, userId); return; }
+  await send(env, cfg.slug, chatId, geoAnswer(lang, rows[0], cfg.manager_contact),
+    { reply_markup: geoAgainKeyboard(lang) });
+}
+
 async function onManager(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
   await send(env, cfg.slug, chatId, t(lang).manager(cfg.manager_contact));
@@ -307,6 +506,13 @@ async function handleUpdate(env, cfg, update) {
       await onFaqAnswer(env, cfg, chatId, userId, data.slice(4));
       return;
     }
+    if (data === 'geo:country') { await onGeoAskCountry(env, cfg, chatId, userId); return; }
+    if (data === 'geo:pdf')     { await onGeoPdf(env, cfg, chatId, userId); return; }
+    if (data === 'geo:exit')    { await onStart(env, cfg, chatId, userId, true); return; }
+    if (data.startsWith('geo:id:')) {
+      await onGeoById(env, cfg, chatId, userId, data.slice(7));
+      return;
+    }
     return;
   }
 
@@ -316,16 +522,29 @@ async function handleUpdate(env, cfg, update) {
   const user = msg.from;
   const text = msg.text.trim();
 
-  if (text === '/start' || text.startsWith('/start ')) return onStart(env, cfg, chatId, user.id);
-  if (text === '/lang')  return onLang(env, cfg, chatId, user.id);
+  if (text === '/start' || text.startsWith('/start ')) return onStart(env, cfg, chatId, user.id, true);
+  if (text === '/lang')       return onLang(env, cfg, chatId, user.id);
+  if (text === '/check_geo')  return onGeoMenu(env, cfg, chatId, user.id);
 
   // Кнопки reply-меню приходят обычным текстом, поэтому сверяемся со ВСЕМИ
   // языками, а не только с текущим: человек мог переключить язык, оставив на
   // экране клавиатуру на прежнем — Telegram её не перерисовывает сам.
   const isBtn = (field) => Object.values(T).some(x => x[field] === text);
   if (isBtn('btnLink'))    return onGetLink(env, cfg, chatId, user);
+  if (isBtn('btnGeo'))     return onGeoMenu(env, cfg, chatId, user.id);
   if (isBtn('btnFaq'))     return onFaq(env, cfg, chatId, user.id);
   if (isBtn('btnManager')) return onManager(env, cfg, chatId, user.id);
+
+  // Кнопки проверяются ДО состояния: находясь в режиме ввода страны, человек
+  // всё равно должен мочь нажать «FAQ» и попасть в FAQ, а не искать страну с
+  // названием «❓ FAQ».
+  const prefs = await sb(env,
+    `bot_user_prefs?bot_slug=eq.${cfg.slug}&tg_user_id=eq.${user.id}&select=awaiting`);
+  if (prefs[0] && prefs[0].awaiting === 'geo') {
+    // Режим не сбрасывается после ответа: ТЗ §2.3 просит не заставлять выходить
+    // из проверки после одной страны. Выход — кнопкой «Menu».
+    return onGeoLookup(env, cfg, chatId, user.id, text);
+  }
 
   // Всё остальное — снова меню. Свободный текст боту не адресован: живой
   // диалог ведёт менеджер, и его контакт в приветствии.

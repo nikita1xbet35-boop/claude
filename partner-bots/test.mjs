@@ -21,6 +21,21 @@ function makeDb() {
     ],
     bot_leads: [],
     bot_user_prefs: [],
+    system_config: [{ key: 'geo_pdf_url', value: '' }],
+    // Вымышленные строки: проверяем механику, а не содержимое справочника —
+    // настоящие данные приходят из PDF. Niger рядом с Nigeria здесь намеренно:
+    // именно эта пара ловит подмену при опечатке.
+    geo_availability: [
+      { id:1, geo_en:'Nigeria', geo_ru:'Нигерия', iso_code:'NG', region:'Africa',
+        availability:'available', note:'Special commission scale — confirm with manager' },
+      { id:2, geo_en:'Niger', geo_ru:'Нигер', iso_code:'NE', region:'Africa',
+        availability:'not_available', note:null },
+      { id:3, geo_en:'United Arab Emirates', geo_ru:'ОАЭ', iso_code:'AE', region:'MENA',
+        availability:'local_program_only', note:'Local licence' },
+      { id:4, geo_en:'Uzbekistan', geo_ru:'Узбекистан', iso_code:'UZ', region:'CIS',
+        availability:'confirm_with_manager', note:null },
+    ],
+    geo_aliases: [{ alias:'uae', iso_code:'AE' }],
     bot_faq: [
       { lang:'en', key:'payouts',  question:'💵 Payouts',        answer:'', sort_order:1 },
       { lang:'en', key:'revshare', question:'📊 RevShare terms', answer:'', sort_order:2 },
@@ -51,13 +66,66 @@ const PK = {
   bot_user_prefs: ['bot_slug','tg_user_id'],
   bot_faq: ['lang','key'],
   bot_configs: ['slug'],
+  system_config: ['key'],
+  geo_availability: ['id'],
+  geo_aliases: ['alias'],
 };
+
+// Триграммное сходство — грубая реализация ровно для тестов. Настоящий поиск
+// живёт в Postgres (fn_find_geo / fn_suggest_geo, миграция 051); здесь важно
+// воспроизвести ПОРЯДОК «точное → синоним → кандидаты», а не сами числа.
+function trigrams(x) {
+  const p = '  ' + x + ' ';
+  const out = new Set();
+  for (let i = 0; i < p.length - 2; i++) out.add(p.slice(i, i + 3));
+  return out;
+}
+function similarity(a, b) {
+  const A = trigrams(a), B = trigrams(b);
+  let inter = 0;
+  for (const g of A) if (B.has(g)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+
+function fakeRpc(db, fn, body) {
+  const q = String(body.q || '').trim().toLowerCase();
+  if (!q) return [];
+
+  if (fn === 'fn_find_geo') {
+    const exact = db.geo_availability.find(g =>
+      g.geo_en.toLowerCase() === q || g.geo_ru.toLowerCase() === q || g.iso_code.toLowerCase() === q);
+    if (exact) return [{ ...exact, match: 'exact' }];
+    const alias = db.geo_aliases.find(a => a.alias === q);
+    if (alias) {
+      const g = db.geo_availability.find(x => x.iso_code.toLowerCase() === alias.iso_code.toLowerCase());
+      if (g) return [{ ...g, match: 'alias' }];
+    }
+    return [];   // приблизительное совпадение ответом НЕ становится
+  }
+
+  if (fn === 'fn_suggest_geo') {
+    return db.geo_availability
+      .map(g => ({ id:g.id, geo_en:g.geo_en, iso_code:g.iso_code,
+                   score: Math.max(similarity(g.geo_en.toLowerCase(), q),
+                                   similarity(g.geo_ru.toLowerCase(), q)),
+                   pref: g.geo_en.toLowerCase().startsWith(q) || g.geo_ru.toLowerCase().startsWith(q) }))
+      .filter(x => x.score > 0.25 || x.pref)
+      .sort((a,b) => (b.pref - a.pref) || (b.score - a.score))
+      .slice(0, body.n || 3);
+  }
+  throw new Error(`тест: RPC ${fn} не реализован`);
+}
 
 function fakeSupabase(db, url, init) {
   const u = new URL(url);
   const table = u.pathname.replace('/rest/v1/', '');
   const params = [...u.searchParams.entries()];
   const method = init.method || 'GET';
+  if (table.startsWith('rpc/')) {
+    const out = fakeRpc(db, table.slice(4), JSON.parse(init.body || '{}'));
+    return new Response(JSON.stringify(out), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
   const rows = db[table];
   if (!rows) throw new Error(`тест: нет таблицы ${table}`);
 
@@ -354,6 +422,156 @@ test('произвольный текст возвращает меню, а не
   const h = await harness();
   await h.post('india', h.msg('привет, как дела'));
   assert.match(h.last().text, /Welcome to the 1xBet/);
+});
+
+// ── Check GEO ───────────────────────────────────────────────────────────────
+
+test('меню содержит все четыре кнопки в порядке из ТЗ', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/start'));
+  const kb = h.last().reply_markup.keyboard;
+  assert.deepStrictEqual(kb.map(r => r.map(b => b.text)), [
+    ['🔗 Get Registration Link', '🌍 Check GEO'],
+    ['❓ FAQ', '👤 Talk to Manager'],
+  ]);
+});
+
+test('Check GEO предлагает выбор: страна или полный список', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('🌍 Check GEO'));
+  const kb = h.last().reply_markup.inline_keyboard[0];
+  assert.deepStrictEqual(kb.map(b => b.callback_data), ['geo:country', 'geo:pdf']);
+});
+
+test('/check_geo работает как команда, не только кнопкой', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/check_geo'));
+  assert.match(h.last().text, /check a specific country/i);
+});
+
+test('точное совпадение: статус и примечание из справочника', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('Nigeria'));
+  assert.match(h.last().text, /✅ Nigeria — available\./);
+  assert.match(h.last().text, /Special commission scale/, 'note должен попасть в ответ');
+});
+
+test('три остальных статуса формулируются по-разному', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('Niger'));
+  assert.match(h.last().text, /❌ Niger — not available\./);
+  await h.post('india', h.msg('United Arab Emirates'));
+  assert.match(h.last().text, /⚠️.*local affiliate program/);
+  assert.match(h.last().text, /Local licence/);
+  await h.post('india', h.msg('Uzbekistan'));
+  assert.match(h.last().text, /❓ Uzbekistan availability depends on current terms/);
+  assert.match(h.last().text, /@aff_manager_xbet/);
+});
+
+test('поиск по ISO-коду и по русскому названию', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('NG'));
+  assert.match(h.last().text, /✅ Nigeria/);
+  await h.post('india', h.msg('Нигерия'));
+  assert.match(h.last().text, /✅ Nigeria/);
+});
+
+test('синоним UAE находит United Arab Emirates', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('UAE'));
+  assert.match(h.last().text, /United Arab Emirates/);
+});
+
+test('ОПЕЧАТКА НЕ ДАЁТ УВЕРЕННОГО ОТВЕТА — бот переспрашивает', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('Nigeira'));
+  // Главное: НЕ утверждение про Нигер, к которому опечатка ближе по триграммам.
+  assert.doesNotMatch(h.last().text, /not available|available\./,
+    'приблизительное совпадение не должно превращаться в ответ о доступности');
+  assert.match(h.last().text, /Did you mean/);
+  const opts = h.last().reply_markup.inline_keyboard.flat().map(b => b.text);
+  assert.ok(opts.includes('Nigeria') && opts.includes('Niger'),
+    'оба кандидата должны быть предложены: ' + opts.join(', '));
+});
+
+test('выбор кандидата даёт точный ответ', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('Nigeira'));
+  const btn = h.last().reply_markup.inline_keyboard.flat().find(b => b.text === 'Nigeria');
+  await h.post('india', h.cb(btn.callback_data));
+  assert.match(h.last().text, /✅ Nigeria — available/);
+});
+
+test('неизвестная страна: вежливый отказ, а не падение', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('qwerty123'));
+  assert.match(h.last().text, /Couldn't find "qwerty123"/);
+});
+
+test('пустой справочник отличается от ненайденной страны', async () => {
+  const h = await harness();
+  h.db.geo_availability.length = 0;
+  h.db.geo_aliases.length = 0;
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('Nigeria'));
+  assert.match(h.last().text, /directory hasn't been uploaded yet/);
+  assert.match(h.last().text, /@aff_manager_xbet/);
+});
+
+test('режим проверки не сбрасывается после одного ответа', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('Nigeria'));
+  await h.post('india', h.msg('Niger'));
+  assert.match(h.last().text, /❌ Niger/, 'вторая страна должна искаться без повторного входа в режим');
+});
+
+test('кнопка меню выводит из режима проверки', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.cb('geo:exit'));
+  assert.match(h.last().text, /Welcome to the 1xBet/);
+  await h.post('india', h.msg('Nigeria'));
+  assert.match(h.last().text, /Welcome to the 1xBet/,
+    'после выхода текст снова трактуется как «не понял», а не как страна');
+});
+
+test('кнопки меню работают, даже когда ждём название страны', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('👤 Talk to Manager'));
+  assert.match(h.last().text, /Message your manager directly/,
+    'нажатие кнопки не должно искаться как страна');
+});
+
+test('PDF не опубликован — честный ответ вместо отправки чего попало', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('geo:pdf'));
+  assert.strictEqual(h.last().method, 'sendMessage');
+  assert.match(h.last().text, /full list isn't published yet/);
+});
+
+test('PDF опубликован — уходит документом', async () => {
+  const h = await harness();
+  h.db.system_config[0].value = 'https://files.example/geo.pdf';
+  await h.post('india', h.cb('geo:pdf'));
+  assert.strictEqual(h.last().method, 'sendDocument');
+  assert.strictEqual(h.last().document, 'https://files.example/geo.pdf');
+});
+
+test('Check GEO говорит на языке бота', async () => {
+  const h = await harness();
+  await h.post('afrique', h.msg('/check_geo'));
+  assert.match(h.last().text, /Souhaitez-vous vérifier un pays/);
+  await h.post('uzbekistan', h.msg('/check_geo'));
+  assert.match(h.last().text, /davlatni tekshirmoqchimisiz/i);
 });
 
 test('реминдер уходит через 6 дней и ровно один раз', async () => {
