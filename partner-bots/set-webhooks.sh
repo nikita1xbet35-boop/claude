@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Регистрирует вебхуки всех шести ботов разом.
+# Регистрирует вебхуки всех восьми ботов разом.
 #
 # Токены берутся из окружения и никогда не пишутся в файл — репозиторий
 # публичный. Запуск:
@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-SLUGS=(india africa bangladesh worldwide afrique uzbekistan)
+SLUGS=(india africa bangladesh worldwide afrique uzbekistan ru latam)
 
 : "${WORKER_URL:?нужен WORKER_URL — адрес задеплоенного воркера}"
 : "${BOT_WEBHOOK_SECRET:?нужен BOT_WEBHOOK_SECRET — тот же, что в секретах воркера}"

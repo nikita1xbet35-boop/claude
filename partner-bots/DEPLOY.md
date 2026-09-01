@@ -1,6 +1,6 @@
 # Telegram-боты партнёрской программы — развёртывание
 
-Шесть ботов, один воркер, один код. Различия между ботами — строки в таблице
+Восемь ботов, один воркер, один код. Различия между ботами — строки в таблице
 `bot_configs`, а не в коде.
 
 ---
@@ -11,13 +11,15 @@
 |---|---|
 | Схема БД (`bot_configs`, `bot_leads`, `bot_user_prefs`, `bot_faq`) | ✅ миграция `048` |
 | Воркер: роутинг, `/start`, меню, ссылка, FAQ, менеджер, `/lang`, реминдер | ✅ `worker.js` |
-| Тесты (46 проверок) | ✅ `node partner-bots/test.mjs` |
+| Тесты (57 проверок) | ✅ `node partner-bots/test.mjs` |
 | Адрес регистрации `https://1xaffiliate.org/newreg` | ✅ миграции `049`+`050` |
 | Автодеплой воркера | ✅ `.github/workflows/deploy-partner-bots.yml` |
-| `setWebhook` на 6 ботов + проверка через `getWebhookInfo` | ✅ шаг того же воркфлоу |
+| `setWebhook` на 8 ботов + проверка через `getWebhookInfo` | ✅ шаг того же воркфлоу |
 | Ключ Cloudflare в секретах **GitHub** | ⛔ **нужен ты** — см. §1 |
 | Токены ботов в секретах **GitHub** | ⛔ **нужен ты** — см. §1 |
+| Токены `BOT_TOKEN_RU` и `BOT_TOKEN_LATAM` | ⛔ **нужен ты** — см. §1 |
 | FAQ на EN/FR/UZ (3 пункта) | ✅ миграция `051` |
+| Боты `ru` (русский) и `latam` (испанский) + FAQ на RU/ES | ✅ миграция `053` |
 | «🌍 Check GEO»: поиск, синонимы, уточнение | ✅ миграция `051` + `worker.js` |
 | Справочник ГЕО (194 строки из PDF) | ✅ миграция `052` |
 | Полный список PDF по кнопке | ✅ `public/geo.pdf` едет с воркером |
@@ -57,6 +59,8 @@ GitHub → Settings → **Secrets and variables → Actions** → New repository
 | `BOT_TOKEN_WORLDWIDE` | токен бота Worldwide |
 | `BOT_TOKEN_AFRIQUE` | токен бота Afrique |
 | `BOT_TOKEN_UZBEKISTAN` | токен бота Uzbekistan |
+| `BOT_TOKEN_RU` | токен русскоязычного бота |
+| `BOT_TOKEN_LATAM` | токен бота LATAM (испанский) |
 | `BOT_WEBHOOK_SECRET` | любая длинная случайная строка, придумывается один раз |
 | `SUPABASE_SERVICE_KEY` | Supabase → Settings → API → `service_role` |
 
@@ -78,6 +82,8 @@ wrangler secret put BOT_TOKEN_BANGLADESH
 wrangler secret put BOT_TOKEN_WORLDWIDE
 wrangler secret put BOT_TOKEN_AFRIQUE
 wrangler secret put BOT_TOKEN_UZBEKISTAN
+wrangler secret put BOT_TOKEN_RU
+wrangler secret put BOT_TOKEN_LATAM
 
 # Придумай любую длинную случайную строку. Ей Telegram подписывает каждый
 # вебхук, и она же проверяется воркером. Значение нужно будет ещё раз в §3.
@@ -120,7 +126,7 @@ wrangler deploy
 
 Адрес воркера при этом вычитывается из вывода `wrangler`, а не собирается из
 имени: поддомен `workers.dev` свой у каждого аккаунта, и угаданный адрес
-выглядел бы правдоподобно при том, что все шесть вебхуков указывали бы в
+выглядел бы правдоподобно при том, что все восемь вебхуков указывали бы в
 никуда.
 
 Ниже — ручной путь, на случай если понадобится сделать это вне CI.
@@ -128,7 +134,7 @@ wrangler deploy
 ```bash
 export WORKER_URL="https://partner-bots.<subdomain>.workers.dev"
 export BOT_WEBHOOK_SECRET="<та же строка, что в §1>"
-export BOT_TOKEN_INDIA="..."   # и остальные пять
+export BOT_TOKEN_INDIA="..."   # и остальные семь
 ./set-webhooks.sh
 ```
 
@@ -149,8 +155,8 @@ curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"
 
 ## 4. Ссылка на регистрацию
 
-Задана и работает: `https://1xaffiliate.org/newreg`, одна на все шесть ботов
-(миграции 049 + 050).
+Задана и работает: `https://1xaffiliate.org/newreg`, одна на все восемь ботов
+(миграции 049 + 050 + 053).
 
 Это **уже сокращённая реферальная ссылка**, поэтому никакого `?ref=` к ней не
 дописывается — сокращатель либо проигнорировал бы лишний хвост, либо сломался
