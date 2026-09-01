@@ -221,7 +221,29 @@ async function sb(env, path, init = {}) {
     // код и искать нечего.
     throw new Error(`supabase ${init.method || 'GET'} ${path} → ${res.status}: ${await res.text()}`);
   }
-  return res.status === 204 ? null : res.json();
+  // Разбираем тело только когда оно есть.
+  //
+  // Это стоило нам всего рабочего дня. PostgREST на upsert (POST с
+  // resolution=merge-duplicates) отвечает 201 и ПУСТЫМ телом — представление
+  // возвращается только по явному Prefer: return=representation. Проверки на
+  // 204 здесь не хватало: res.json() на пустом теле бросает «Unexpected end of
+  // JSON input».
+  //
+  // Дальше ошибка попадала в обработчик апдейта, тот честно отвечал Telegram
+  // 200 (иначе бесконечные повторы) — и /start, /check_geo и выдача ссылки
+  // молчали во всех шести ботах, не оставив ни одного следа снаружи.
+  //
+  // Проверять код ответа вместо тела ненадёжно: PostgREST возвращает то 200,
+  // то 201, то 204 в зависимости от запроса и заголовков. Наличие тела —
+  // единственный честный признак того, что его можно разбирать.
+  const body = await res.text();
+  if (!body) return null;
+  try {
+    return JSON.parse(body);
+  } catch (e) {
+    throw new Error(`supabase ${init.method || 'GET'} ${path} → ${res.status}: ` +
+                    `тело не разобралось как JSON: ${body.slice(0, 200)}`);
+  }
 }
 
 // ── Telegram ────────────────────────────────────────────────────────────────
