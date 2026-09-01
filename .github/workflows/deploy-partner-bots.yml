@@ -323,7 +323,19 @@ jobs:
             fi
             checked=$((checked+1))
             echo "  ── $slug ──"
-            call "$slug" '{"text":"/start"}'
+
+            # Конфиг нового бота приезжает ДРУГИМ конвейером (миграция в
+            # deploy-supabase.yml), и оба стартуют от одного пуша. Кто успеет
+            # первым — не определено, а воркер без строки в bot_configs честно
+            # отвечает «нет строки» и уронил бы прогон по чисто временно́й
+            # причине. Ждём, вместо того чтобы падать: минута с запасом.
+            for attempt in 1 2 3 4 5 6; do
+              call "$slug" '{"text":"/start"}'
+              printf '%s' "$RESP" | grep -q 'нет строки в bot_configs' || break
+              echo "    ждём миграцию с конфигом бота (попытка $attempt)"
+              sleep 10
+            done
+
             expect "/start отвечает"        '"ok": true'
             expect "меню из четырёх кнопок"  'Check GEO|Vérifier un GEO|GEO tekshirish|Проверить ГЕО|Consultar GEO'
 
