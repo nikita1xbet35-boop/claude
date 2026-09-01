@@ -225,7 +225,14 @@ async function sb(env, path, init = {}) {
 }
 
 // ── Telegram ────────────────────────────────────────────────────────────────
-async function tg(env, slug, method, payload) {
+// cfg, а не slug, потому что на нём может висеть __sink — приёмник для
+// сквозного самотеста (/selftest). Сделано параметром, а не модульной
+// переменной, СОЗНАТЕЛЬНО: модульная переменная в воркере общая для всех
+// запросов изолята, и самотест мог бы проглотить сообщение живого человека,
+// пришедшее в ту же секунду.
+async function tg(env, cfg, method, payload) {
+  const slug = typeof cfg === 'string' ? cfg : cfg.slug;
+  if (cfg && cfg.__sink) { cfg.__sink.push({ method, ...payload }); return null; }
   const token = tokenFor(env, slug);
   if (!token) throw new Error(`нет секрета BOT_TOKEN_${slug.toUpperCase()}`);
   const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
@@ -246,8 +253,8 @@ const mainKeyboard = (lang) => ({
   resize_keyboard: true,
 });
 
-const send = (env, slug, chatId, text, extra = {}) =>
-  tg(env, slug, 'sendMessage', { chat_id: chatId, text, disable_web_page_preview: false, ...extra });
+const send = (env, cfg, chatId, text, extra = {}) =>
+  tg(env, cfg, 'sendMessage', { chat_id: chatId, text, disable_web_page_preview: false, ...extra });
 
 // ── Состояние пользователя ──────────────────────────────────────────────────
 // Язык берётся по цепочке: явный выбор пользователя → умолчание бота. Язык
@@ -283,7 +290,7 @@ const signupUrl = (cfg, refCode) =>
 async function onStart(env, cfg, chatId, userId, clearState) {
   const lang = await resolveLang(env, cfg, userId);
   if (clearState) await setAwaiting(env, cfg.slug, userId, lang, null);
-  await send(env, cfg.slug, chatId, t(lang).welcome(cfg.manager_contact),
+  await send(env, cfg, chatId, t(lang).welcome(cfg.manager_contact),
     { reply_markup: mainKeyboard(lang) });
 }
 
@@ -295,7 +302,7 @@ async function onGetLink(env, cfg, chatId, user) {
   if (!url) {
     // Запись всё равно не делаем: bot_leads означает «ссылка выдана», а она не
     // выдана. Иначе счётчик выдач начал бы врать в большую сторону.
-    await send(env, cfg.slug, chatId, t(lang).linkMissing(cfg.manager_contact));
+    await send(env, cfg, chatId, t(lang).linkMissing(cfg.manager_contact));
     return;
   }
 
@@ -329,13 +336,13 @@ async function onGetLink(env, cfg, chatId, user) {
     }),
   });
 
-  await send(env, cfg.slug, chatId, t(lang).link(url), { reply_markup: mainKeyboard(lang) });
+  await send(env, cfg, chatId, t(lang).link(url), { reply_markup: mainKeyboard(lang) });
 }
 
 async function onFaq(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
   const rows = await sb(env, `bot_faq?lang=eq.${lang}&select=key,question,sort_order&order=sort_order`);
-  await send(env, cfg.slug, chatId, t(lang).faqTitle, {
+  await send(env, cfg, chatId, t(lang).faqTitle, {
     reply_markup: {
       inline_keyboard: rows.map(r => [{ text: r.question, callback_data: `faq:${r.key}` }]),
     },
@@ -347,7 +354,7 @@ async function onFaqAnswer(env, cfg, chatId, userId, key) {
   const rows = await sb(env,
     `bot_faq?lang=eq.${lang}&key=eq.${encodeURIComponent(key)}&select=answer`);
   const answer = rows[0] && rows[0].answer;
-  await send(env, cfg.slug, chatId, answer || t(lang).faqEmpty(cfg.manager_contact));
+  await send(env, cfg, chatId, answer || t(lang).faqEmpty(cfg.manager_contact));
 }
 
 // ── Check GEO ───────────────────────────────────────────────────────────────
@@ -379,7 +386,7 @@ async function setAwaiting(env, slug, userId, lang, value) {
 async function onGeoMenu(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
   await setAwaiting(env, cfg.slug, userId, lang, null);
-  await send(env, cfg.slug, chatId, t(lang).geoIntro, {
+  await send(env, cfg, chatId, t(lang).geoIntro, {
     reply_markup: { inline_keyboard: [[
       { text: t(lang).geoBtnCountry, callback_data: 'geo:country' },
       { text: t(lang).geoBtnPdf,     callback_data: 'geo:pdf' },
@@ -390,7 +397,7 @@ async function onGeoMenu(env, cfg, chatId, userId) {
 async function onGeoAskCountry(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
   await setAwaiting(env, cfg.slug, userId, lang, 'geo');
-  await send(env, cfg.slug, chatId, t(lang).geoAsk);
+  await send(env, cfg, chatId, t(lang).geoAsk);
 }
 
 // origin приходит из самого запроса, а не из настройки: воркер отдаёт PDF как
@@ -409,10 +416,10 @@ async function onGeoPdf(env, cfg, chatId, userId, origin) {
   if (!url) {
     // Отправить «что-нибудь похожее» вместо официального списка ГЕО было бы
     // хуже молчания.
-    await send(env, cfg.slug, chatId, t(lang).geoPdfMissing(cfg.manager_contact));
+    await send(env, cfg, chatId, t(lang).geoPdfMissing(cfg.manager_contact));
     return;
   }
-  await tg(env, cfg.slug, 'sendDocument', { chat_id: chatId, document: url });
+  await tg(env, cfg, 'sendDocument', { chat_id: chatId, document: url });
 }
 
 // Один ответ по строке справочника. Текст выбирается по availability; note
@@ -442,7 +449,7 @@ async function onGeoLookup(env, cfg, chatId, userId, query) {
     method: 'POST', body: JSON.stringify({ q: query }),
   });
   if (hit.length) {
-    await send(env, cfg.slug, chatId, geoAnswer(lang, hit[0], cfg.manager_contact),
+    await send(env, cfg, chatId, geoAnswer(lang, hit[0], cfg.manager_contact),
       { reply_markup: geoAgainKeyboard(lang) });
     return;
   }
@@ -458,7 +465,7 @@ async function onGeoLookup(env, cfg, chatId, userId, query) {
     method: 'POST', body: JSON.stringify({ q: query, n: 3 }),
   });
   if (suggestions.length) {
-    await send(env, cfg.slug, chatId, t(lang).geoDidYouMean(query), {
+    await send(env, cfg, chatId, t(lang).geoDidYouMean(query), {
       reply_markup: {
         inline_keyboard: suggestions.map(x => [
           { text: x.geo_en, callback_data: `geo:id:${x.id}` },
@@ -471,7 +478,7 @@ async function onGeoLookup(env, cfg, chatId, userId, query) {
   // Ни ответа, ни кандидатов. Пустой справочник и незнакомая страна снаружи
   // выглядят одинаково, а чинятся по-разному, поэтому различаем.
   const any = await sb(env, 'geo_availability?select=id&limit=1');
-  await send(env, cfg.slug, chatId,
+  await send(env, cfg, chatId,
     any.length ? t(lang).geoNotFound(query) : t(lang).geoEmpty(cfg.manager_contact),
     { reply_markup: geoAgainKeyboard(lang) });
 }
@@ -480,13 +487,13 @@ async function onGeoById(env, cfg, chatId, userId, id) {
   const lang = await resolveLang(env, cfg, userId);
   const rows = await sb(env, `geo_availability?id=eq.${encodeURIComponent(id)}&select=*`);
   if (!rows.length) { await onGeoMenu(env, cfg, chatId, userId); return; }
-  await send(env, cfg.slug, chatId, geoAnswer(lang, rows[0], cfg.manager_contact),
+  await send(env, cfg, chatId, geoAnswer(lang, rows[0], cfg.manager_contact),
     { reply_markup: geoAgainKeyboard(lang) });
 }
 
 async function onManager(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
-  await send(env, cfg.slug, chatId, t(lang).manager(cfg.manager_contact));
+  await send(env, cfg, chatId, t(lang).manager(cfg.manager_contact));
 
   // Только UPDATE. ТЗ §3.4: записи нет — не создавать, нажатие на «связаться»
   // не означает, что человек вообще собирался регистрироваться.
@@ -499,7 +506,7 @@ async function onManager(env, cfg, chatId, userId) {
 
 async function onLang(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
-  await send(env, cfg.slug, chatId, t(lang).langTitle, {
+  await send(env, cfg, chatId, t(lang).langTitle, {
     reply_markup: {
       inline_keyboard: [[
         { text: 'English', callback_data: 'lang:en' },
@@ -518,13 +525,13 @@ async function handleUpdate(env, cfg, update, origin) {
     const userId = cq.from.id;
     const data = cq.data || '';
     // Отвечаем всегда — иначе кнопка в клиенте крутит часики до таймаута.
-    await tg(env, cfg.slug, 'answerCallbackQuery', { callback_query_id: cq.id });
+    await tg(env, cfg, 'answerCallbackQuery', { callback_query_id: cq.id });
 
     if (data.startsWith('lang:')) {
       const lang = data.slice(5);
       if (!T[lang]) return;
       await setLang(env, cfg.slug, userId, lang);
-      await send(env, cfg.slug, chatId, t(lang).langSet, { reply_markup: mainKeyboard(lang) });
+      await send(env, cfg, chatId, t(lang).langSet, { reply_markup: mainKeyboard(lang) });
       return;
     }
     if (data.startsWith('faq:')) {
@@ -622,7 +629,7 @@ async function sendReminders(env) {
     if (!url) { failed++; continue; }
     try {
       const lang = T[lead.lang] ? lead.lang : cfg.default_lang;
-      await send(env, cfg.slug, lead.tg_user_id, t(lang).reminder(url, cfg.manager_contact));
+      await send(env, cfg, lead.tg_user_id, t(lang).reminder(url, cfg.manager_contact));
       await sb(env, `bot_leads?id=eq.${lead.id}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
@@ -686,6 +693,54 @@ export default {
       });
       const failed = Object.values(out.db).filter(v => String(v).startsWith('ОШИБКА')).length;
       out.ok = failed === 0;
+      return new Response(JSON.stringify(out, null, 2), {
+        status: out.ok ? 200 : 500,
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
+
+    // ── Сквозной самотест ───────────────────────────────────────────────────
+    // POST /selftest/{slug} с тем же секретом, что у вебхука.
+    //
+    // Проверки БД (/health) говорят, что воркер видит базу, но НИЧЕГО не
+    // говорят о пути «пришёл апдейт → бот ответил» — а ломался именно он, и
+    // ровно этот путь я до сих пор ни разу не проверял на живом воркере.
+    // Здесь прогоняется настоящий handleUpdate, только вместо обращения к
+    // Telegram ответы складываются в приёмник и возвращаются вызывающему.
+    //
+    // Закрыт тем же секретом, что и вебхук: иначе любой желающий гонял бы
+    // обработчики чужого бота.
+    const st = url.pathname.match(/^\/selftest\/([a-z]+)\/?$/);
+    if (st) {
+      const slug = st[1];
+      if (!SLUGS.includes(slug)) return new Response('unknown bot', { status: 404 });
+      if (!verifyWebhookSecret(request, env, slug)) return new Response('unauthorized', { status: 401 });
+      let body = {};
+      try { body = await request.json(); } catch (_) {}
+      const text = typeof body.text === 'string' ? body.text : '/start';
+      const data = typeof body.callback_data === 'string' ? body.callback_data : null;
+      // Отрицательный id: настоящих пользователей с таким не бывает, поэтому
+      // самотест не может задеть чью-то запись в bot_user_prefs или bot_leads.
+      const uid = -1;
+
+      const out = { build: BUILD, slug, input: data ? `callback:${data}` : text, sent: [] };
+      try {
+        const cfg = await loadConfig(env, slug);
+        if (!cfg) { out.error = 'нет строки в bot_configs'; }
+        else if (!cfg.active) { out.error = 'бот выключен (active=false)'; }
+        else {
+          cfg.__sink = out.sent;
+          const update = data
+            ? { callback_query: { id: 'selftest', from: { id: uid }, data, message: { chat: { id: uid } } } }
+            : { message: { chat: { id: uid }, from: { id: uid, username: 'selftest' }, text } };
+          await handleUpdate(env, cfg, update, url.origin);
+        }
+      } catch (e) {
+        // Здесь ошибка НЕ проглатывается, в отличие от боевого пути: там 200
+        // обязателен, иначе Telegram уходит в бесконечные повторы.
+        out.error = (e && e.stack || String(e)).split('\n').slice(0, 4).join(' | ');
+      }
+      out.ok = !out.error && out.sent.length > 0;
       return new Response(JSON.stringify(out, null, 2), {
         status: out.ok ? 200 : 500,
         headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },

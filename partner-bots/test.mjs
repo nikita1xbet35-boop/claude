@@ -469,6 +469,71 @@ test('произвольный текст возвращает меню, а не
   assert.match(h.last().text, /Welcome to the 1xBet/);
 });
 
+// ── Сквозной самотест ───────────────────────────────────────────────────────
+// Проверяем сам инструмент проверки: если /selftest врёт, он хуже, чем ничего.
+
+test('/selftest прогоняет настоящий /start и возвращает отправленное', async () => {
+  const h = await harness();
+  const res = await h.worker.fetch(new Request('https://x.test/selftest/india', {
+    method: 'POST',
+    headers: { 'X-Telegram-Bot-Api-Secret-Token': 'shh' },
+    body: JSON.stringify({ text: '/start' }),
+  }), h.env, { waitUntil: p => p });
+  assert.strictEqual(res.status, 200);
+  const j = await res.json();
+  assert.strictEqual(j.ok, true, JSON.stringify(j));
+  assert.strictEqual(j.sent[0].method, 'sendMessage');
+  assert.match(j.sent[0].text, /Welcome to the 1xBet/);
+  assert.strictEqual(j.sent[0].reply_markup.keyboard.flat().length, 4, 'четыре кнопки');
+});
+
+test('/selftest НЕ отправляет ничего в Telegram по-настоящему', async () => {
+  const h = await harness();
+  await h.worker.fetch(new Request('https://x.test/selftest/india', {
+    method: 'POST', headers: { 'X-Telegram-Bot-Api-Secret-Token': 'shh' },
+    body: JSON.stringify({ text: '/start' }),
+  }), h.env, { waitUntil: p => p });
+  assert.strictEqual(h.sent.length, 0, 'приёмник должен перехватывать, а не слать');
+});
+
+test('/selftest закрыт секретом', async () => {
+  const h = await harness();
+  const res = await h.worker.fetch(new Request('https://x.test/selftest/india', {
+    method: 'POST', body: JSON.stringify({ text: '/start' }),
+  }), h.env, { waitUntil: p => p });
+  assert.strictEqual(res.status, 401);
+});
+
+test('/selftest сообщает об ошибке, а не глотает её', async () => {
+  const h = await harness();
+  const real = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const u = typeof input === 'string' ? input : input.url;
+    if (u.includes('/rest/v1/bot_user_prefs')) return new Response('boom', { status: 500 });
+    return real(input, init);
+  };
+  const res = await h.worker.fetch(new Request('https://x.test/selftest/india', {
+    method: 'POST', headers: { 'X-Telegram-Bot-Api-Secret-Token': 'shh' },
+    body: JSON.stringify({ text: '/start' }),
+  }), h.env, { waitUntil: p => p });
+  globalThis.fetch = real;
+  assert.strictEqual(res.status, 500);
+  const j = await res.json();
+  assert.strictEqual(j.ok, false);
+  assert.match(j.error, /bot_user_prefs/, 'в ответе должна быть причина: ' + j.error);
+});
+
+test('/selftest умеет прогонять и кнопки', async () => {
+  const h = await harness();
+  const res = await h.worker.fetch(new Request('https://x.test/selftest/india', {
+    method: 'POST', headers: { 'X-Telegram-Bot-Api-Secret-Token': 'shh' },
+    body: JSON.stringify({ callback_data: 'geo:country' }),
+  }), h.env, { waitUntil: p => p });
+  const j = await res.json();
+  assert.strictEqual(j.ok, true, JSON.stringify(j));
+  assert.ok(j.sent.some(m => /Type the country name/.test(m.text || '')), JSON.stringify(j.sent));
+});
+
 // ── Check GEO ───────────────────────────────────────────────────────────────
 
 test('меню содержит все четыре кнопки в порядке из ТЗ', async () => {
