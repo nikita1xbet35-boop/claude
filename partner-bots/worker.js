@@ -20,6 +20,10 @@
 
 const SLUGS = ['india', 'africa', 'bangladesh', 'worldwide', 'afrique', 'uzbekistan'];
 
+// Отметка сборки: по ней видно, какой код реально отвечает. Поднимать при
+// каждом изменении, которое надо уметь опознать на живом воркере.
+const BUILD = '2026-09-01.1';
+
 // Токен бота по slug. Имя секрета выводится, а не перечисляется таблицей —
 // иначе добавление бота требует правки в двух местах, и второе забывается.
 const tokenFor = (env, slug) => env['BOT_TOKEN_' + slug.toUpperCase()];
@@ -639,6 +643,54 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const m = url.pathname.match(/^\/bot\/([a-z]+)\/?$/);
+
+    // ── Самопроверка ────────────────────────────────────────────────────────
+    // Появилась после того, как боты замолчали при зелёных деплоях обоих
+    // конвейеров. Обработчик апдейта намеренно возвращает Telegram 200 на любой
+    // своей ошибке — иначе Telegram завалит повторами, — поэтому снаружи любая
+    // поломка выглядит одинаково: бот молчит. Здесь те же вызовы делаются
+    // открыто, и текст ошибки виден.
+    //
+    // Секретов не отдаёт: только «задан/не задан» и сообщения об ошибках БД.
+    if (url.pathname === '/health') {
+      const out = { build: BUILD, env: {}, db: {} };
+      out.env = {
+        SUPABASE_URL: env.SUPABASE_URL || '(не задан)',
+        SUPABASE_SERVICE_KEY: !!env.SUPABASE_SERVICE_KEY,
+        BOT_WEBHOOK_SECRET: !!env.BOT_WEBHOOK_SECRET,
+        tokens: SLUGS.filter(s => !!tokenFor(env, s)),
+      };
+      const probe = async (name, fn) => {
+        try { out.db[name] = await fn(); }
+        catch (e) { out.db[name] = 'ОШИБКА: ' + (e && e.message || String(e)); }
+      };
+      await probe('bot_configs', async () => {
+        const c = await loadConfig(env, 'india');
+        return c ? `ok (india, active=${c.active}, ссылка=${c.signup_url_tpl ? 'есть' : 'пусто'})` : 'строки india нет';
+      });
+      await probe('bot_user_prefs', async () => {
+        await sb(env, 'bot_user_prefs?select=bot_slug,awaiting&limit=1');
+        return 'ok (колонка awaiting на месте)';
+      });
+      await probe('bot_faq', async () => {
+        const r = await sb(env, 'bot_faq?select=lang,key');
+        return `ok (${r.length} записей)`;
+      });
+      await probe('geo_availability', async () => {
+        const r = await sb(env, 'geo_availability?select=id&limit=1');
+        return r.length ? 'ok (справочник не пуст)' : 'пусто';
+      });
+      await probe('fn_find_geo', async () => {
+        const r = await sb(env, 'rpc/fn_find_geo', { method: 'POST', body: JSON.stringify({ q: 'Nigeria' }) });
+        return r.length ? `ok (Nigeria → ${r[0].availability})` : 'ничего не нашлось';
+      });
+      const failed = Object.values(out.db).filter(v => String(v).startsWith('ОШИБКА')).length;
+      out.ok = failed === 0;
+      return new Response(JSON.stringify(out, null, 2), {
+        status: out.ok ? 200 : 500,
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
 
     if (!m) return new Response('not found', { status: 404 });
     const slug = m[1];
