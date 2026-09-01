@@ -219,6 +219,69 @@ jobs:
             exit 1
           }
 
+      # Сквозной прогон каждой функции на ЖИВОМ воркере, все шесть ботов.
+      #
+      # Это то, чего не хватало всё время. Тесты гоняют код локально, /health
+      # проверяет доступ к базе — и обе проверки были зелёными, пока /start в
+      # проде не отвечал вообще. Ни одна из них не трогала путь «пришёл апдейт
+      # → бот ответил», а ломался именно он.
+      #
+      # Здесь дёргается настоящий обработчик задеплоенного воркера, и ответ
+      # сверяется по содержанию: приветствие, четыре кнопки, ссылка регистрации,
+      # статус страны из справочника. Красный шаг = бот не работает, и это
+      # видно ДО того, как об этом скажет человек.
+      - name: Прогнать все функции на живом воркере
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.url }}
+          SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
+        run: |
+          set -u
+          bad=0
+          # call <slug> <json-тело> → тело ответа в $RESP
+          call() {
+            RESP=$(curl -sS --max-time 25 -X POST \
+              -H "X-Telegram-Bot-Api-Secret-Token: $SECRET" \
+              -H 'Content-Type: application/json' \
+              -d "$2" "${WORKER_URL%/}/selftest/$1")
+          }
+          # expect <ярлык> <регулярка>
+          expect() {
+            if printf '%s' "$RESP" | grep -qE "$2"; then
+              echo "    ok   $1"
+            else
+              echo "    FAIL $1"
+              printf '%s\n' "$RESP" | head -30 | sed 's/^/         /'
+              bad=1
+            fi
+          }
+
+          for slug in india africa bangladesh worldwide afrique uzbekistan; do
+            echo "  ── $slug ──"
+            call "$slug" '{"text":"/start"}'
+            expect "/start отвечает"        '"ok": true'
+            expect "меню из четырёх кнопок"  'Check GEO|Vérifier un GEO|GEO tekshirish'
+
+            call "$slug" '{"text":"/check_geo"}'
+            expect "Check GEO открывается"   '"ok": true'
+
+            call "$slug" '{"callback_data":"geo:country"}'
+            expect "просит название страны"  '"ok": true'
+
+            call "$slug" '{"text":"Nigeria"}'
+            expect "Nigeria → статус"        'Nigeria'
+
+            call "$slug" '{"callback_data":"faq:payouts"}'
+            expect "FAQ отвечает текстом"    'Tuesday|mardis|seshanba'
+          done
+
+          # Выдачу ссылки проверяем на одном боте: она одна на все шесть, а
+          # каждый прогон пишет строку в bot_leads.
+          call india '{"text":"🔗 Get Registration Link"}'
+          expect "ссылка регистрации выдаётся" '1xaffiliate\.org/newreg'
+
+          [ "$bad" = 0 ] || { echo "::error::боты задеплоены, но не работают — см. FAIL выше"; exit 1; }
+          echo "  все функции отвечают на всех шести ботах"
+
       # Что Telegram видел ДО этого деплоя.
       #
       # Печатается перед перерегистрацией, потому что setWebhook обнуляет
