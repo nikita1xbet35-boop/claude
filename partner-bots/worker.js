@@ -278,7 +278,7 @@ const signupUrl = (cfg, refCode) =>
 // сообщение снова искалось бы как страна.
 async function onStart(env, cfg, chatId, userId, clearState) {
   const lang = await resolveLang(env, cfg, userId);
-  if (clearState) await setAwaiting(env, cfg.slug, userId, null);
+  if (clearState) await setAwaiting(env, cfg.slug, userId, lang, null);
   await send(env, cfg.slug, chatId, t(lang).welcome(cfg.manager_contact),
     { reply_markup: mainKeyboard(lang) });
 }
@@ -351,18 +351,30 @@ async function onFaqAnswer(env, cfg, chatId, userId, key) {
 // Состояние «ждём название страны». Нужно, чтобы следующее сообщение поняли
 // как страну, а не как «не понял, вот меню». Живёт в bot_user_prefs рядом с
 // языком: заводить ради одного флага отдельную таблицу незачем.
-async function setAwaiting(env, slug, userId, value) {
+// lang передаётся ОБЯЗАТЕЛЬНО, хотя менять его здесь не требуется.
+//
+// bot_user_prefs.lang объявлен NOT NULL без умолчания, а у большинства людей
+// строки в этой таблице нет вовсе — она заводится только при смене языка.
+// Первая версия слала upsert без lang, и для такого человека вставка нарушала
+// ограничение: sb() бросал, обработчик ловил, Telegram получал 200, а
+// приветствие на следующей строке уже не отправлялось. Снаружи — «/start
+// молчит», и ни одной ошибки нигде.
+//
+// Умолчания в колонке хватило бы не всегда: правильный язык зависит от бота
+// (uz для Узбекистана, fr для франкофонной Африки), а колонка про бота не
+// знает. Поэтому значение приходит от вызывающего, который его уже вычислил.
+async function setAwaiting(env, slug, userId, lang, value) {
   await sb(env, 'bot_user_prefs?on_conflict=bot_slug,tg_user_id', {
     method: 'POST',
     headers: { Prefer: 'resolution=merge-duplicates' },
-    body: JSON.stringify({ bot_slug: slug, tg_user_id: userId, awaiting: value,
+    body: JSON.stringify({ bot_slug: slug, tg_user_id: userId, lang, awaiting: value,
                            updated_at: new Date().toISOString() }),
   });
 }
 
 async function onGeoMenu(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
-  await setAwaiting(env, cfg.slug, userId, null);
+  await setAwaiting(env, cfg.slug, userId, lang, null);
   await send(env, cfg.slug, chatId, t(lang).geoIntro, {
     reply_markup: { inline_keyboard: [[
       { text: t(lang).geoBtnCountry, callback_data: 'geo:country' },
@@ -373,17 +385,26 @@ async function onGeoMenu(env, cfg, chatId, userId) {
 
 async function onGeoAskCountry(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
-  await setAwaiting(env, cfg.slug, userId, 'geo');
+  await setAwaiting(env, cfg.slug, userId, lang, 'geo');
   await send(env, cfg.slug, chatId, t(lang).geoAsk);
 }
 
-async function onGeoPdf(env, cfg, chatId, userId) {
+// origin приходит из самого запроса, а не из настройки: воркер отдаёт PDF как
+// свою статику (public/geo.pdf), и адрес у каждого аккаунта свой. Собирать его
+// из имени воркера — это гадание, которое выглядит правдоподобно и уводит
+// вебхуки в никуда; тот же адрес, по которому Telegram сейчас достучался,
+// заведомо верен.
+//
+// system_config.geo_pdf_url остаётся и имеет приоритет — на случай, если файл
+// решат раздавать откуда-то ещё.
+async function onGeoPdf(env, cfg, chatId, userId, origin) {
   const lang = await resolveLang(env, cfg, userId);
   const rows = await sb(env, "system_config?key=eq.geo_pdf_url&select=value");
-  const url = rows[0] && typeof rows[0].value === 'string' ? rows[0].value : '';
+  const configured = rows[0] && typeof rows[0].value === 'string' ? rows[0].value : '';
+  const url = configured || (origin ? `${origin}/geo.pdf` : '');
   if (!url) {
-    // Файла нет — говорим прямо. Отправить «что-нибудь похожее» вместо
-    // официального списка ГЕО было бы хуже молчания.
+    // Отправить «что-нибудь похожее» вместо официального списка ГЕО было бы
+    // хуже молчания.
     await send(env, cfg.slug, chatId, t(lang).geoPdfMissing(cfg.manager_contact));
     return;
   }
@@ -486,7 +507,7 @@ async function onLang(env, cfg, chatId, userId) {
 }
 
 // ── Роутинг апдейта ─────────────────────────────────────────────────────────
-async function handleUpdate(env, cfg, update) {
+async function handleUpdate(env, cfg, update, origin) {
   if (update.callback_query) {
     const cq = update.callback_query;
     const chatId = cq.message && cq.message.chat.id;
@@ -507,7 +528,7 @@ async function handleUpdate(env, cfg, update) {
       return;
     }
     if (data === 'geo:country') { await onGeoAskCountry(env, cfg, chatId, userId); return; }
-    if (data === 'geo:pdf')     { await onGeoPdf(env, cfg, chatId, userId); return; }
+    if (data === 'geo:pdf')     { await onGeoPdf(env, cfg, chatId, userId, origin); return; }
     if (data === 'geo:exit')    { await onStart(env, cfg, chatId, userId, true); return; }
     if (data.startsWith('geo:id:')) {
       await onGeoById(env, cfg, chatId, userId, data.slice(7));
@@ -634,7 +655,7 @@ export default {
         console.error(`bot/${slug}: конфига нет или бот выключен`);
         return new Response('OK');
       }
-      await handleUpdate(env, cfg, await request.json());
+      await handleUpdate(env, cfg, await request.json(), url.origin);
     } catch (e) {
       console.error(`bot/${slug} update failed:`, e && e.stack || e);
     }

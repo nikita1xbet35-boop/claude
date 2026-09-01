@@ -60,6 +60,15 @@ function applyFilters(rows, params) {
   return out;
 }
 
+// NOT NULL из схемы 048/051. Заглушка обязана это проверять: без проверки
+// пропущена настоящая авария — setAwaiting вставлял строку bot_user_prefs без
+// lang, и /start молча падал у каждого, кто ещё не менял язык.
+const NOT_NULL = {
+  bot_user_prefs: ['bot_slug','tg_user_id','lang'],
+  bot_leads: ['bot_slug','tg_user_id','lang','ref_code'],
+  geo_availability: ['geo_en','geo_ru','iso_code','region','availability'],
+};
+
 // Ключи, по которым строка считается той же самой (аналог UNIQUE в 048).
 const PK = {
   bot_leads: ['bot_slug','tg_user_id'],
@@ -143,6 +152,17 @@ function fakeSupabase(db, url, init) {
     const merge = (init.headers?.Prefer || '').includes('merge-duplicates');
     const keys = PK[table];
     const existing = rows.find(r => keys.every(k => String(r[k]) === String(body[k])));
+    // NOT NULL проверяется только на ВСТАВКЕ: upsert существующей строки
+    // обновляет лишь переданные колонки, остальные сохраняются.
+    if (!existing) {
+      for (const col of (NOT_NULL[table] || [])) {
+        if (body[col] === undefined || body[col] === null) {
+          return new Response(
+            JSON.stringify({ code:'23502', message:`null value in column "${col}" violates not-null constraint` }),
+            { status: 400 });
+        }
+      }
+    }
     if (existing) {
       if (!merge) return new Response('duplicate key', { status: 409 });
       Object.assign(existing, body);          // как ON CONFLICT DO UPDATE
@@ -214,6 +234,31 @@ async function harness() {
 let failed = 0;
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
+
+// Регрессия. /start молча переставал отвечать всем, у кого не было строки в
+// bot_user_prefs — то есть всем, кто не менял язык. setAwaiting вставлял строку
+// без lang (NOT NULL), запрос падал, ошибку глотал обработчик, Telegram получал
+// 200, приветствие не уходило. Заглушка тогда NOT NULL не проверяла и всё
+// пропустила; теперь проверяет, а эти два теста стоят на страже.
+test('/start отвечает человеку, которого ещё нет в bot_user_prefs', async () => {
+  const h = await harness();
+  assert.strictEqual(h.db.bot_user_prefs.length, 0, 'предпосылка: строки нет');
+  await h.post('india', h.msg('/start'));
+  assert.strictEqual(h.sent.length, 1, '/start обязан ответить, а не молчать');
+  assert.match(h.last().text, /Welcome to the 1xBet/);
+});
+
+test('повторный /start работает и после диалога', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/start'));
+  await h.post('india', h.msg('🌍 Check GEO'));
+  await h.post('india', h.cb('geo:country'));
+  await h.post('india', h.msg('Nigeria'));
+  h.sent.length = 0;
+  await h.post('india', h.msg('/start'));
+  assert.strictEqual(h.sent.length, 1);
+  assert.match(h.last().text, /Welcome to the 1xBet/);
+});
 
 test('вебхук без секрета отклоняется 401', async () => {
   const h = await harness();
@@ -551,14 +596,15 @@ test('кнопки меню работают, даже когда ждём на�
     'нажатие кнопки не должно искаться как страна');
 });
 
-test('PDF не опубликован — честный ответ вместо отправки чего попало', async () => {
+test('PDF по умолчанию берётся со своего же адреса', async () => {
   const h = await harness();
   await h.post('india', h.cb('geo:pdf'));
-  assert.strictEqual(h.last().method, 'sendMessage');
-  assert.match(h.last().text, /full list isn't published yet/);
+  assert.strictEqual(h.last().method, 'sendDocument');
+  assert.strictEqual(h.last().document, 'https://x.test/geo.pdf',
+    'адрес должен строиться из origin запроса, а не угадываться по имени воркера');
 });
 
-test('PDF опубликован — уходит документом', async () => {
+test('настроенный URL важнее адреса по умолчанию', async () => {
   const h = await harness();
   h.db.system_config[0].value = 'https://files.example/geo.pdf';
   await h.post('india', h.cb('geo:pdf'));
