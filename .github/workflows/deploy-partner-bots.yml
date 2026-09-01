@@ -219,6 +219,49 @@ jobs:
             exit 1
           }
 
+      # Что Telegram видел ДО этого деплоя.
+      #
+      # Печатается перед перерегистрацией, потому что setWebhook обнуляет
+      # счётчики: после него мы всегда увидим чистую картину и ничего не
+      # узнаем. Здесь же видно настоящую историю — сколько апдейтов зависло в
+      # очереди и с какой ошибкой Telegram не смог их доставить. Это
+      # единственный взгляд с ТОЙ стороны; наш воркер на любой своей ошибке
+      # отвечает 200 и в статистике Telegram выглядит здоровым.
+      - name: Что Telegram видел до деплоя
+        env:
+          BOT_TOKEN_INDIA: ${{ secrets.BOT_TOKEN_INDIA }}
+          BOT_TOKEN_AFRICA: ${{ secrets.BOT_TOKEN_AFRICA }}
+          BOT_TOKEN_BANGLADESH: ${{ secrets.BOT_TOKEN_BANGLADESH }}
+          BOT_TOKEN_WORLDWIDE: ${{ secrets.BOT_TOKEN_WORLDWIDE }}
+          BOT_TOKEN_AFRIQUE: ${{ secrets.BOT_TOKEN_AFRIQUE }}
+          BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
+        run: |
+          set -u
+          for slug in india africa bangladesh worldwide afrique uzbekistan; do
+            var="BOT_TOKEN_$(echo "$slug" | tr '[:lower:]' '[:upper:]')"
+            info=$(curl -sS --max-time 20 "https://api.telegram.org/bot${!var}/getWebhookInfo" || true)
+            pend=$(echo "$info" | grep -oE '"pending_update_count":[0-9]+' | cut -d: -f2)
+            err=$(echo "$info"  | grep -oE '"last_error_message":"[^"]*"' || true)
+            printf '  %-11s в очереди: %-4s %s\n' "$slug" "${pend:-?}" "${err:-}"
+          done
+
+      # Проверяем, что статика воркера действительно отдаётся: PDF полного
+      # списка ГЕО лежит в public/ и уходит человеку по кнопке. Файл, который
+      # не отдаётся, снаружи выглядит как «кнопка не работает».
+      - name: Проверить, что PDF отдаётся
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -u
+          code=$(curl -sS -o /tmp/geo.pdf -w '%{http_code}' --max-time 25 "${WORKER_URL%/}/geo.pdf")
+          size=$(stat -c%s /tmp/geo.pdf 2>/dev/null || echo 0)
+          head -c 4 /tmp/geo.pdf | grep -q '%PDF' && magic=ok || magic=НЕТ
+          echo "  /geo.pdf → HTTP $code, ${size} байт, сигнатура PDF: $magic"
+          [ "$code" = "200" ] && [ "$magic" = "ok" ] || {
+            echo "::error::PDF не отдаётся — кнопка «Full GEO list» пришлёт битый файл"
+            exit 1
+          }
+
       # Регистрация вебхуков здесь, а не руками на машине Ника: только у
       # раннера есть одновременно и токены (из секретов), и выход в
       # api.telegram.org. Шаг идемпотентен — setWebhook просто перезаписывает

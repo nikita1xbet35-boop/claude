@@ -38,14 +38,20 @@ for slug in "${SLUGS[@]}"; do
   token="${!var}"
   url="${WORKER_URL%/}/bot/${slug}"
 
-  # drop_pending_updates: при перерегистрации в очереди могут висеть апдейты,
-  # накопившиеся пока вебхук был сломан. Отвечать на позавчерашнее «/start»
-  # никому не нужно.
+  # drop_pending_updates НЕ ставим.
+  #
+  # Он выбрасывает всё, что Telegram успел накопить, а этот скрипт запускается
+  # на КАЖДОМ деплое. За сегодня их было больше десятка подряд — и любое
+  # сообщение, пришедшее в те секунды, пока шла перерегистрация, молча
+  # исчезало. Снаружи это выглядит ровно как «нажал /start, ничего не
+  # произошло», причём воспроизводится через раз.
+  #
+  # Ответить на пару минут позже — не проблема. Потерять обращение человека,
+  # который пришёл в бота, — проблема.
   response=$(curl -sS --max-time 20 \
     "https://api.telegram.org/bot${token}/setWebhook" \
     -d "url=${url}" \
     -d "secret_token=${BOT_WEBHOOK_SECRET}" \
-    -d "drop_pending_updates=true" \
     -d 'allowed_updates=["message","callback_query"]')
 
   if echo "$response" | grep -q '"ok":true'; then
