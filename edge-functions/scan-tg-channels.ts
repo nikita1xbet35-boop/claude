@@ -286,6 +286,10 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
           signal: AbortSignal.timeout(25_000),
         });
         if (res.status === 429 || res.status >= 500) { res.body?.cancel().catch(() => {}); continue; }
+        // 401/403 — отвергнут КЛЮЧ, а не запрос: соседний ключ помогает.
+        // См. find-and-queue.ts, там это найдено на живых данных 02.09 —
+        // один протухший ключ из четырёх ронял весь пакет.
+        if (res.status === 401 || res.status === 403) { res.body?.cancel().catch(() => {}); continue; }
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
           // Model retired under us — every key answers the same, so advance the

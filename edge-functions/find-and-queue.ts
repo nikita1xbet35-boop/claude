@@ -63,17 +63,25 @@ function groqModelGone(status: number, text: string): boolean {
     && /does not exist|decommissioned|model[_ ]not[_ ]found|has been deprecated/i.test(text);
 }
 
-const GROQ_KEYS = [
-  Deno.env.get('GROQ_API_KEY') || '',
-  // GROQ_KEY_1 — четвёртый слот, добавлен когда Ник завёл три новых аккаунта.
-  // Слотов было три (GROQ_API_KEY + _2 + _3), и секрет с именем GROQ_KEY_1 не
-  // читал НИКТО: ни воркфлоу его не передавал, ни одна функция не забирала.
-  // Ключ лежал бы в настройках и молча не работал — ровно тот случай, когда
-  // всё выглядит настроенным и ничего не происходит.
-  Deno.env.get('GROQ_KEY_1')   || '',
-  Deno.env.get('GROQ_KEY_2') || '',
-  Deno.env.get('GROQ_KEY_3') || '',
-].filter(Boolean);
+// Ключи хранятся вместе с ИМЕНАМИ переменных. Раньше в логе стоял номер
+// («key 2»), а номер зависит от того, сколько слотов заполнено, — по нему
+// нельзя понять, какой секрет менять. Имя можно.
+//
+// GROQ_KEY_1 — четвёртый слот, добавлен когда Ник завёл три новых аккаунта.
+// Слотов было три (GROQ_API_KEY + _2 + _3), и секрет с именем GROQ_KEY_1 не
+// читал НИКТО: ни воркфлоу его не передавал, ни одна функция не забирала.
+const GROQ_KEY_SLOTS: Array<[string, string]> = [
+  ['GROQ_API_KEY', Deno.env.get('GROQ_API_KEY') || ''],
+  ['GROQ_KEY_1',   Deno.env.get('GROQ_KEY_1')   || ''],
+  ['GROQ_KEY_2',   Deno.env.get('GROQ_KEY_2')   || ''],
+  ['GROQ_KEY_3',   Deno.env.get('GROQ_KEY_3')   || ''],
+].filter(([, v]) => !!v) as Array<[string, string]>;
+const GROQ_KEYS      = GROQ_KEY_SLOTS.map(([, v]) => v);
+const GROQ_KEY_NAMES = GROQ_KEY_SLOTS.map(([n]) => n);
+
+// Ключи, которые Groq отверг в этом прогоне (401/403). Мёртвый ключ мёртв до
+// конца прогона — повторные попытки на нём только жгут бюджет времени.
+const groqDeadKeys = new Set<number>();
 
 const TIME_BUDGET_MS   = 110_000;
 const FETCH_TIMEOUT_MS = 7_000;
@@ -961,6 +969,7 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
     if (round) await new Promise(r => setTimeout(r, BACKOFF_MS[round]));
     for (let i = 0; i < n; i++) {
       const idx = (groqKeyIdx + i) % n;
+      if (groqDeadKeys.has(idx)) continue;
       try {
         groqCount++;
         // The model list can advance mid-run (see GROQ_MODELS), so stamp the
@@ -975,7 +984,22 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
         if (res.status === 429 || res.status >= 500) {
           // Rate-limited or transient on this key — immediately try the next one.
           if (res.status === 429) groq429Count++; else groqOtherErrCount++;
-          groqLastError = `HTTP ${res.status} (key ${idx + 1}, round ${round + 1})`;
+          groqLastError = `HTTP ${res.status} (${GROQ_KEY_NAMES[idx]}, round ${round + 1})`;
+          res.body?.cancel().catch(() => {});
+          continue;
+        }
+        // 401/403 — отвергнут КЛЮЧ, а не запрос. Соседний ключ здесь помогает,
+        // и это ровно то, чего код не делал.
+        //
+        // Найдено на живых данных 02.09: groqErr="HTTP 401", analyzed=0,
+        // saved=0 при том, что поиск честно приносил 10-17 URL за прогон. Один
+        // протухший ключ из четырёх ронял ВЕСЬ пакет — ветка ниже возвращала
+        // null с комментарием «next key won't help», верным для битого запроса
+        // и неверным для битого ключа.
+        if (res.status === 401 || res.status === 403) {
+          groqOtherErrCount++;
+          groqDeadKeys.add(idx);
+          groqLastError = `${GROQ_KEY_NAMES[idx]} отвергнут (HTTP ${res.status})`;
           res.body?.cancel().catch(() => {});
           continue;
         }
