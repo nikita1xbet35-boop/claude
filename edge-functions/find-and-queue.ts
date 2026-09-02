@@ -1932,7 +1932,11 @@ Deno.serve(async (req: Request) => {
 
     const session = makeSession();
     const serpBatches: Array<{ kw: string; results: Array<{ link: string; title: string; snippet: string }> }> = [];
-    const DDG_CONCURRENCY = 2;
+    // 1, а не 2. Два одновременных запроса — это всплеск, а всплеск с одного
+    // адреса дата-центра выглядит как бот; DuckDuckGo на это и реагировал.
+    // При пяти прогонах в час (крон */12) торопиться внутри прогона незачем:
+    // пять ключей подряд с паузами укладываются в бюджет с большим запасом.
+    const DDG_CONCURRENCY = 1;
 
     // Layer B/C keywords marked source_pref='dataforseo' go to Google instead —
     // but only when explicitly armed and only a couple per run, since each one
