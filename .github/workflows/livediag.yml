@@ -38,12 +38,31 @@ jobs:
         run: |
           set +e
           ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM"
+          # ── Почему здесь -s, а не -sf, и разбор ответа ─────────────────────
+          # Было -sf: при любой неудаче curl глотал тело и печатал ПУСТО. А
+          # пустой вывод неотличим от «данных нет» — то есть от нормального
+          # результата. На этом сгорел целый круг диагностики: добавленный сюда
+          # запрос был многострочным, ломал JSON (переводы строк внутри строки
+          # JSON недопустимы), API отвечал ошибкой, а в логе была пустота, и
+          # выглядело это как «ошибок за 6 часов нет».
+          #
+          # Успешный ответ этого API — всегда JSON-массив. Всё, что начинается
+          # не с '[', разбором не является и печатается как ошибка.
+          #
+          # ВАЖНО: запрос обязан быть ОДНОСТРОЧНЫМ. Многострочный молча
+          # ломается ровно так, как описано выше.
           q() {
-            curl -sf -X POST \
+            local out
+            out=$(curl -s -X POST \
               "https://api.supabase.com/v1/projects/lxsyrserfuighwxuymgb/database/query" \
               -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
-              -d "{\"query\":\"$1\"}"
+              -d "{\"query\":\"$1\"}")
+            case "$out" in
+              '['*) printf '%s' "$out" ;;
+              '')   echo "   ⚠ пустой ответ от Supabase API" ;;
+              *)    echo "   ⚠ запрос не выполнился: $(printf '%s' "$out" | head -c 250)" ;;
+            esac
           }
 
           echo "=== SEND_QUEUE BY STATUS ==="
@@ -280,24 +299,13 @@ jobs:
           # сводке нельзя было отличить «DuckDuckGo не отдаёт результатов» от
           # «всё отсеял дедуп». Тексты — единственное, что различает эти случаи.
           echo "=== ПОСЛЕДНИЕ ОШИБКИ поискового пути (текст, 6ч) ==="
-          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, service, level, left(message, 220) AS message
-               FROM error_log
-              WHERE level <> 'info'
-                AND created_at > now() - interval '6 hours'
-                AND service IN ('find-and-queue','DuckDuckGo','funnel','scan-tg-channels','serpapi')
-              ORDER BY created_at DESC LIMIT 12;"; echo ""
+          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, service, level, left(message, 200) AS message FROM error_log WHERE level <> 'info' AND created_at > now() - interval '6 hours' AND service IN ('find-and-queue','DuckDuckGo','funnel','scan-tg-channels','serpapi') ORDER BY created_at DESC LIMIT 12;"; echo ""
 
           # Последние прогоны поиска целиком: сколько ключей отработало, сколько
           # URL пришло, сколько отсеял дедуп. Именно эта строка отвечает на
           # вопрос «искали и не нашли» против «нашли, но всё уже в базе».
           echo "=== ПОСЛЕДНИЕ ПРОГОНЫ find-and-queue (сводка) ==="
-          q "SELECT to_char(started_at,'MM-DD HH24:MI') AS t, keywords_used AS kw,
-                    urls_returned AS raw, urls_after_noise AS after_noise,
-                    urls_after_dedup AS new_urls, sent_to_llm, llm_ok, llm_429,
-                    leads_created, search_errors, left(notes, 120) AS notes
-               FROM funnel_stats
-              WHERE pipeline = 'search'
-              ORDER BY started_at DESC LIMIT 8;"; echo ""
+          q "SELECT to_char(started_at,'MM-DD HH24:MI') AS t, keywords_used AS kw, urls_returned AS raw, urls_after_noise AS after_noise, urls_after_dedup AS new_urls, sent_to_llm, llm_ok, llm_429, leads_created, search_errors, left(coalesce(notes,''), 110) AS notes FROM funnel_stats WHERE pipeline = 'search' ORDER BY started_at DESC LIMIT 8;"; echo ""
 
           echo ""
           echo "████████ PARTNER BASES + YOUTUBE ████████"
@@ -371,3 +379,5 @@ jobs:
 # ping 1788343118
 
 # ping 1788343531
+
+# ping 1788343971
