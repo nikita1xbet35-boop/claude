@@ -265,6 +265,18 @@ Deno.serve(async (req: Request) => {
     const newQuota = Math.max(0, capacity - futurePending.length - overduePending.length);
     let newLeads: Array<{ id: string; brand: string; brand_id: string | null; source: string; contact_email: string; url: string }> = [];
 
+    // Кулдауны загружаются ЗДЕСЬ, а не внутри if (newQuota > 0) ниже.
+    //
+    // Объявление стояло внутри того блока, а используется оно после него —
+    // в цикле раздачи слотов. Снаружи это выглядело так: generate-queue падал
+    // с «cooldownMap is not defined» на КАЖДОМ запуске, очередь не наполнялась
+    // ни разу, и в send_queue не было ни одной строки со статусом pending.
+    // Отправлять было нечего — при 252 готовых лидах с адресами.
+    //
+    // Ошибка тихая вдвойне: пока расписание */2 стояло выключенным (с 20
+    // августа), функция вообще не запускалась, и падать было некому.
+    const cooldownMap = await loadCooldownMap();
+
     if (newQuota > 0) {
       // Hard dedup: ALL-TIME — never re-contact anyone we've ever emailed
       const { data: allSent } = await supabase
@@ -286,8 +298,6 @@ Deno.serve(async (req: Request) => {
       // never queue a lead the scorer excluded (occupied / competitor / partner).
       const { data: suppressed } = await supabase.from('suppression_list').select('email');
       const suppressedSet = new Set((suppressed || []).map(s => String(s.email).toLowerCase()));
-
-      const cooldownMap = await loadCooldownMap();
 
       const { data: candidates, error: leadsErr } = await supabase
         .from('leads')
