@@ -304,6 +304,15 @@ jobs:
           # Последние прогоны поиска целиком: сколько ключей отработало, сколько
           # URL пришло, сколько отсеял дедуп. Именно эта строка отвечает на
           # вопрос «искали и не нашли» против «нашли, но всё уже в базе».
+          # Сводка прогона режет notes до 110 символов, а groqErr стоит в самом
+          # конце строки — от него виден огрызок «HTTP 400: {"error":{"messag».
+          # Сама строка лежит в error_log целиком, но с level='info', поэтому в
+          # выборку ошибок выше не попадает. Забираем её отдельно и целиком:
+          # различить «модель снята», «слишком длинный запрос» и «неверный
+          # формат» можно только по тексту.
+          echo "=== ТЕКСТ ОШИБОК GROQ (последние 6, любой level) ==="
+          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, substring(message from 'groqErr=\"(.*)') AS groq_error FROM error_log WHERE service='find-and-queue' AND message LIKE '%groqErr%' ORDER BY created_at DESC LIMIT 6;"; echo ""
+
           echo "=== ПОСЛЕДНИЕ ПРОГОНЫ find-and-queue (сводка) ==="
           q "SELECT to_char(started_at,'MM-DD HH24:MI') AS t, keywords_used AS kw, urls_returned AS raw, urls_after_noise AS after_noise, urls_after_dedup AS new_urls, sent_to_llm, llm_ok, llm_429, leads_created, search_errors, left(coalesce(notes,''), 110) AS notes FROM funnel_stats WHERE pipeline = 'search' ORDER BY started_at DESC LIMIT 8;"; echo ""
 
@@ -383,3 +392,5 @@ jobs:
 # ping 1788343971
 
 # ping 1788347271
+
+# ping 1788347686
