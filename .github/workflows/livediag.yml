@@ -1,8 +1,18 @@
 name: Pipeline Health
 
-# Watchdog for the AffiliateOS pipeline. Runs every 30 min, prints a health
-# snapshot, and FAILS (red X + GitHub notification) when the system needs
-# attention — reserve of contactable leads too low, or the pipeline stalled.
+# Watchdog for the AffiliateOS pipeline. Prints a health snapshot and sends a
+# Telegram alert when the system needs attention — reserve of contactable leads
+# too low, or the pipeline stalled.
+#
+# ВАЖНО: этот воркфлоу НЕ краснеет. Раньше здесь было написано «FAILS (red X +
+# GitHub notification)», и это неправда: шаг начинается с `set +e`, а после
+# ветки с алертом ничего не выходит с ненулевым кодом. Проверено фактами —
+# конвейер стоял с 20 августа, а все прогоны за эти тринадцать дней зелёные.
+#
+# Сигнал есть, но приходит он ТОЛЬКО в Telegram. Зелёная галка здесь ничего не
+# доказывает, и полагаться на неё как на признак живого конвейера нельзя.
+# Если понадобится красный крест — добавить `exit 1` в ветку с PROBLEMS; пока
+# не добавлен сознательно, чтобы не сыпать красным на каждую паузу.
 # (probe bump 2026-07-03 #16: DEEP SWEEP — freshness, Groq rotation health, save trend, form codes)
 on:
   workflow_dispatch:
@@ -331,3 +341,5 @@ jobs:
 # ping 1781600035
 
 # ping 1781606165
+
+# ping 1788340105
