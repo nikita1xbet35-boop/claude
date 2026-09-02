@@ -830,6 +830,35 @@ async function pickSerpAccount(): Promise<{ service: string; key: string } | nul
   return null;
 }
 
+// ── Дневной бюджет SerpApi ──────────────────────────────────────────────────
+// Один счётчик на ВСЕ пути, которые тратят SerpApi (их теперь три: плановые
+// слоты, тонкий прогон и полный откат DuckDuckGo). Раньше счётчик вёл только
+// один из них, и остальные тратили квоту мимо учёта.
+//
+// Умолчание 25/день выведено из бюджета, а не взято с потолка:
+//   3 аккаунта × 250 запросов/мес = 750/мес
+//   750 / 30 дней = 25/день — ровно на месяц.
+// Прежние 60/день сжигали месячную квоту за 12 дней. Если план платный —
+// поднять секретом SERP_DAILY_CAP = месячная_квота / 30, без деплоя.
+const SERP_DAILY_CAP = parseInt(Deno.env.get('SERP_DAILY_CAP') || '25', 10) || 25;
+
+async function serpDailyUsed(): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await supabase.from('app_state').select('value').eq('key', 'serp_daily').maybeSingle();
+  const [day, cnt] = String(data?.value || '').split(':');
+  return day === today ? (parseInt(cnt, 10) || 0) : 0;
+}
+
+async function serpDailySpend(n: number) {
+  if (n <= 0) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const used = await serpDailyUsed();
+  await supabase.from('app_state').upsert(
+    { key: 'serp_daily', value: `${today}:${used + n}`, updated_at: new Date().toISOString() },
+    { onConflict: 'key' },
+  );
+}
+
 async function bumpSerpAccount(service: string, delta: number) {
   if (delta <= 0) return;
   const { data } = await supabase.from('api_usage').select('used').eq('service', service).single();
@@ -1855,13 +1884,18 @@ Deno.serve(async (req: Request) => {
     // rate sustainable, not to search less.
     // Honour an active cool-off. Hammering a source that has already started
     // refusing us is exactly how a partial throttle becomes a full ban.
+    // ── Откат DuckDuckGo больше НЕ означает пропуск прогона ─────────────────
+    // Раньше здесь стоял безусловный return, и это оказалось дорого: 02.09 DDG
+    // ушёл в 45-минутный откат, а прогоны каждые 3 минуты выходили сразу —
+    // пятнадцать пустых тиков подряд с kw=0 и raw=0. При том что три ключа
+    // SerpApi лежали заряженные ровно на этот случай.
+    //
+    // Теперь DDG просто выключается на этот прогон, а поиск идёт через Google.
+    // Расход держат три ограничителя: слотовый шаг (раз в час), общий дневной
+    // счётчик и месячный потолок на аккаунт.
     const throttledUntil = await isThrottled(supabase, 'ddg');
-    if (throttledUntil) {
-      return new Response(JSON.stringify({
-        ...stats, skipped: true,
-        reason: `DuckDuckGo backing off until ${throttledUntil.toISOString()}`,
-      }), { headers: { ...cors, 'Content-Type': 'application/json' } });
-    }
+    const ddgOff = !!throttledUntil;
+    if (ddgOff) (stats as any).ddg_backoff_until = throttledUntil!.toISOString();
 
     const session = makeSession();
     const serpBatches: Array<{ kw: string; results: Array<{ link: string; title: string; snippet: string }> }> = [];
@@ -1912,12 +1946,49 @@ Deno.serve(async (req: Request) => {
         }
       }
     };
-    await Promise.all(Array.from({ length: DDG_CONCURRENCY }, runWorker));
+    if (!ddgOff) await Promise.all(Array.from({ length: DDG_CONCURRENCY }, runWorker));
 
     const ddgDegraded = await recordHealth(supabase, 'ddg', session, layer);
     (stats as any).ddg_avg = session.requests
       ? Number((session.resultsTotal / session.requests).toFixed(2)) : null;
     (stats as any).ddg_degraded = ddgDegraded;
+
+    // ── 4a-bis. Google вместо DuckDuckGo, пока тот в бане ──────────────────
+    // Шаг раз в час (slotIndex % 20 при кроне */3), один ключ за раз. Это не
+    // замена DDG, а спасательный источник: при 480 прогонах в сутки и бюджете
+    // 750 запросов в МЕСЯЦ заменить его нечем в принципе. Один запрос в час
+    // даёт ~24 в сутки — столько же, сколько разрешает дневной счётчик, то есть
+    // расход равномерный, а не сожжённый за первый час.
+    if (ddgOff && SERPAPI_ACCOUNTS.length > 0 && slotIndex % 20 === 0) {
+      const usedToday = await serpDailyUsed();
+      if (usedToday < SERP_DAILY_CAP) {
+        const acct = await pickSerpAccount();
+        if (acct) {
+          let calls = 0;
+          for (const kw of keywords.slice(0, SERP_KW_PER_RUN)) {
+            const results = await searchSerpApi(`${kw}${cityPart}`, RESULTS_PER_KW, acct.key);
+            serpBatches.push({ kw, results });
+            stats.keywords_run++;
+            calls++;
+          }
+          await bumpSerpAccount(acct.service, calls);
+          await serpDailySpend(calls);
+          (stats as any).serp_primary = calls;
+          (stats as any).serp_acct   = acct.service;
+        }
+      }
+    }
+
+    // Ни одного источника — выходим честно, с указанием причины. Без этого
+    // прогон дошёл бы до конца с пустыми руками и записал в воронку нули,
+    // неотличимые от «искали и не нашли».
+    if (ddgOff && serpBatches.length === 0) {
+      return new Response(JSON.stringify({
+        ...stats, skipped: true,
+        reason: `DuckDuckGo в откате до ${throttledUntil!.toISOString()}, `
+              + `бюджет SerpApi на сегодня исчерпан или не тот слот`,
+      }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
 
     // 4b. SerpApi (second source) — same keys via Google surface different sites
     //     than DDG. Paced so 3×250/month isn't burned in a day; rotates accounts
@@ -1943,7 +2014,7 @@ Deno.serve(async (req: Request) => {
     const serpSlot = slotIndex % 40;
     const serpFire = serpSlot === 9   /* D (brand pool) / C (legacy) */
                   || serpSlot === 28  /* C (brand pool) / B (legacy) */;
-    if (SERPAPI_ACCOUNTS.length > 0 && serpFire) {
+    if (SERPAPI_ACCOUNTS.length > 0 && serpFire && (await serpDailyUsed()) < SERP_DAILY_CAP) {
       const acct = await pickSerpAccount();
       if (acct) {
         const serpKws = keywords.slice(0, SERP_KW_PER_RUN);
@@ -1954,6 +2025,7 @@ Deno.serve(async (req: Request) => {
           serpBatches.push({ kw, results });
         }
         await bumpSerpAccount(acct.service, serpCalls);
+        await serpDailySpend(serpCalls);
         (stats as any).serp = serpCalls;
         (stats as any).serp_acct = acct.service;
       } else {
@@ -1978,25 +2050,16 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 4c. SerpApi as a working co-source while DuckDuckGo is rate-limited. DDG
-    // keeps returning near-empty pages for our datacenter IP, so when a run comes
-    // back thin (< 5 results) we pull the run's primary keyword through SerpApi
-    // (reliable Google) regardless of layer. Bounded by a daily cap kept in
-    // app_state so the monthly SerpApi budget isn't drained all at once, and by
-    // pickSerpAccount's per-account monthly hard cap. The daily cap is
-    // env-tunable (SERP_DAILY_CAP) so it can be raised without a deploy once the
-    // real quota is known. Default 60/day:
-    //   • free 3×250 = 750/month  -> ~12 days of coverage (front-loaded, fine
-    //     while DDG recovers), and pickSerpAccount stops at the monthly cap anyway.
-    //   • paid plan -> set SERP_DAILY_CAP to plan_monthly / days_in_month.
+    // 4c. SerpApi добирает прогон, который вернулся тонким (< 5 результатов).
+    // Это третий и последний путь расхода квоты; все три ведут один дневной
+    // счётчик (см. serpDailyUsed) и упираются в месячный потолок аккаунта.
+    //
+    // Отличие от 4a-bis: там DDG выключен целиком, здесь он ответил, но почти
+    // ничем — типичная картина мягкого бана нашего IP.
     const ddgTotal = serpBatches.reduce((s, b) => s + b.results.length, 0);
     if (ddgTotal < 5 && SERPAPI_ACCOUNTS.length > 0 && !(stats as any).serp) {
-      const DAILY_SERP_CAP = parseInt(Deno.env.get('SERP_DAILY_CAP') || '60', 10) || 60;
-      const today = new Date().toISOString().slice(0, 10);
-      const { data: sd } = await supabase.from('app_state').select('value').eq('key', 'serp_daily').maybeSingle();
-      const [sdDay, sdCntRaw] = String(sd?.value || '').split(':');
-      const usedToday = sdDay === today ? (parseInt(sdCntRaw, 10) || 0) : 0;
-      if (usedToday < DAILY_SERP_CAP) {
+      const usedToday = await serpDailyUsed();
+      if (usedToday < SERP_DAILY_CAP) {
         const acct = await pickSerpAccount();
         if (acct) {
           let serpCalls = 0;
@@ -2006,10 +2069,7 @@ Deno.serve(async (req: Request) => {
             serpCalls++;
           }
           await bumpSerpAccount(acct.service, serpCalls);
-          await supabase.from('app_state').upsert(
-            { key: 'serp_daily', value: `${today}:${usedToday + serpCalls}`, updated_at: new Date().toISOString() },
-            { onConflict: 'key' },
-          );
+          await serpDailySpend(serpCalls);
           (stats as any).serp_fallback = serpCalls;
           (stats as any).serp_acct = acct.service;
         }
