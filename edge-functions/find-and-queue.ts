@@ -969,6 +969,12 @@ let groqLastError = '';
 let groq429Count = 0;
 let groqOtherErrCount = 0;
 
+// Groq отверг ответ модели как невалидный JSON (response_format: json_object).
+// Это НЕ ошибка ключа и НЕ лимит: модель не уложилась в max_tokens и оборвала
+// структуру на середине. Соседний ключ здесь бесполезен, а вот партия поменьше
+// помогает — флаг несёт этот факт до вызывающего.
+let groqJsonInvalid = false;
+
 // Round-robin cursor across GROQ_KEYS — spreads load so no single key hits its
 // per-minute cap. Advances every call and every 429.
 let groqKeyIdx = 0;
@@ -1041,8 +1047,16 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
             groqLastError = `model retired, switched to ${groqModel()}`;
             continue;
           }
+          // Groq не принял ответ модели как JSON. Ключи тут ни при чём —
+          // сообщаем вызывающему, чтобы тот уменьшил партию.
+          if (res.status === 400 && /failed to validate json|json_validate_failed/i.test(errText)) {
+            groqJsonInvalid = true;
+            groqOtherErrCount++;
+            groqLastError = `ответ модели не уложился в JSON (партия велика)`;
+            return null;
+          }
           groqLastError = `HTTP ${res.status}: ${errText.slice(0, 120)}`;
-          return null; // a real error (bad request/auth) — next key won't help
+          return null; // a real error (bad request) — next key won't help
         }
         const d = await res.json();
         groqKeyIdx = (idx + 1) % n; // next call starts on the following key
@@ -1230,14 +1244,33 @@ RULES for "priority":
   ).join('\n\n');
 
   try {
+    groqJsonInvalid = false;
     const raw = await groqChat({
       model: groqModel(),
       messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
       temperature: 0.1,
-      max_tokens: 130 * cands.length + 100,
+      // 220, а не 130, на сайт. У ответа семь полей, включая summary до 400
+      // символов и monetization_evidence до 200 — на 130 токенов это не влезает,
+      // модель обрывает JSON на середине, и Groq возвращает 400
+      // «Failed to validate JSON», теряя ВСЮ партию из восьми сайтов.
+      // Найдено на живых данных 02.09: 66 новых URL за сутки, сохранено ноль.
+      max_tokens: 220 * cands.length + 200,
       response_format: { type: 'json_object' },
     });
-    if (!raw) return out;
+    if (!raw) {
+      // Модель не уложилась в JSON — половина партии уложится. Рекурсия идёт
+      // до одного сайта: терять восемь кандидатов из-за одного разросшегося
+      // ответа дороже, чем сделать два запроса.
+      if (groqJsonInvalid && cands.length > 1) {
+        groqJsonInvalid = false;
+        const mid = Math.ceil(cands.length / 2);
+        const left  = await analyzeBatchWithGroq(cands.slice(0, mid), brandCfg);
+        const right = await analyzeBatchWithGroq(cands.slice(mid), brandCfg);
+        for (const [i, v] of left)  out.set(i, v);
+        for (const [i, v] of right) out.set(i + mid, v);
+      }
+      return out;
+    }
     const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
     const results: any[] = Array.isArray(parsed?.results) ? parsed.results
                          : Array.isArray(parsed) ? parsed : [];
