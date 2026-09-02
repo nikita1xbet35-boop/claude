@@ -182,7 +182,18 @@ jobs:
       - name: Arm form sending (FORM_SENDING_ENABLED)
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase secrets set FORM_SENDING_ENABLED=true --project-ref lxsyrserfuighwxuymgb
+        # false, а не true, и это осознанная смена умолчания.
+        #
+        # process-form-queue РЕАЛЬНО отправляет заявки через контактные формы
+        # живых сайтов — это исходящее действие, а не поиск. Оно не смотрит на
+        # pipeline_limits.paused (проверено: флага в функции нет), поэтому
+        # возврат крона */3 сам по себе возобновил бы рассылку форм, хотя
+        # просили возобновить поиск.
+        #
+        # Взвести обратно, когда это решение принято осознанно:
+        #   supabase secrets set FORM_SENDING_ENABLED=true --project-ref lxsyrserfuighwxuymgb
+        # Детект форм (find-contact-form) при этом работает — он только читает.
+        run: supabase secrets set FORM_SENDING_ENABLED=false --project-ref lxsyrserfuighwxuymgb
 
       # Arm the App Store source (Africa-focus week). find-appstore stays inert until
       # this secret is 'true'. To disable again, set it to 'false' here and redeploy.
