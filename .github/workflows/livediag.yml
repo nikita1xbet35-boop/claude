@@ -275,6 +275,30 @@ jobs:
           echo "=== ERROR VOLUME by service (non-info, 24h) ==="
           q "SELECT service, level, count(*) FROM error_log WHERE level <> 'info' AND created_at > now() - interval '24 hours' GROUP BY 1,2 ORDER BY 3 DESC LIMIT 15;"; echo ""
 
+          # Счётчик ошибок говорит, что что-то не так, и молчит о том, ЧТО именно.
+          # Сегодня это стоило отдельного круга: поиск шёл, лидов было ноль, а по
+          # сводке нельзя было отличить «DuckDuckGo не отдаёт результатов» от
+          # «всё отсеял дедуп». Тексты — единственное, что различает эти случаи.
+          echo "=== ПОСЛЕДНИЕ ОШИБКИ поискового пути (текст, 6ч) ==="
+          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, service, level, left(message, 220) AS message
+               FROM error_log
+              WHERE level <> 'info'
+                AND created_at > now() - interval '6 hours'
+                AND service IN ('find-and-queue','DuckDuckGo','funnel','scan-tg-channels','serpapi')
+              ORDER BY created_at DESC LIMIT 12;"; echo ""
+
+          # Последние прогоны поиска целиком: сколько ключей отработало, сколько
+          # URL пришло, сколько отсеял дедуп. Именно эта строка отвечает на
+          # вопрос «искали и не нашли» против «нашли, но всё уже в базе».
+          echo "=== ПОСЛЕДНИЕ ПРОГОНЫ find-and-queue (сводка) ==="
+          q "SELECT to_char(started_at,'MM-DD HH24:MI') AS t, keywords_used AS kw,
+                    urls_returned AS raw, urls_after_noise AS after_noise,
+                    urls_after_dedup AS new_urls, sent_to_llm, llm_ok, llm_429,
+                    leads_created, search_errors, left(notes, 120) AS notes
+               FROM funnel_stats
+              WHERE pipeline = 'search'
+              ORDER BY started_at DESC LIMIT 8;"; echo ""
+
           echo ""
           echo "████████ PARTNER BASES + YOUTUBE ████████"
           echo ""
@@ -345,3 +369,5 @@ jobs:
 # ping 1788340105
 
 # ping 1788343118
+
+# ping 1788343531
