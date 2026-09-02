@@ -95,6 +95,11 @@ const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixture
   + ' -"terms and conditions" -"privacy policy"'
   + ' -lyrics -movie -song';
 // Layer B hunts for ad inventory, so agencies SELLING marketing services are noise.
+//
+// Applies to the LEGACY pool only. In the brand pool (multibrand_keywords) the
+// letters mean something else entirely — there B is player intent without a
+// GEO ('free bet no deposit offers'), and excluding marketing agencies from it
+// filters nothing useful. See the layer table in the run body.
 const LAYER_B_MINUS = ' -"marketing agency" -"seo services" -"web design"';
 
 // Pre-filter: drop results whose title/snippet/URL contain these strings (catches what DDG misses).
@@ -191,6 +196,30 @@ const PRESET_CITIES: Record<string, string[]> = {
   '1xb-mz': ['maputo', 'beira', 'nampula'],
   '1xb-ml': ['bamako', 'sikasso'],
   '1xb-agency': [], // global — no city variants
+};
+
+// ── GEO slugs of the brand pool → what we already know about that country ───
+// multibrand_keywords stores a geo slug ('nigeria', 'cote_divoire', 'global').
+// Two things downstream are keyed by country: the city list above and the
+// DataForSEO location code. Both exist for exactly the fourteen African GEOs
+// this project has been running — so the slug maps onto the legacy preset id
+// and reuses them as they are.
+//
+// For the other 80+ GEOs in the new pool there is deliberately NO entry.
+// DFS_LOCATION values are identifiers inside someone else's API: a guessed one
+// does not fail, it searches the wrong country, and nothing in the output says
+// so. An unmapped GEO simply runs without city padding and without Google —
+// degraded, not broken, and visibly so in stats.
+const GEO_LEGACY_PRESET: Record<string, string> = {
+  nigeria: '1xb-ng', kenya: '1xb-ke', ghana: '1xb-gh', tanzania: '1xb-tz',
+  uganda: '1xb-ug', cameroon: '1xb-cm', cote_divoire: '1xb-ci', senegal: '1xb-sn',
+  burkina_faso: '1xb-bf', zambia: '1xb-zm', dr_congo: '1xb-cd', ethiopia: '1xb-et',
+  mozambique: '1xb-mz', mali: '1xb-ml',
+};
+const GEO_ISO2: Record<string, string> = {
+  nigeria: 'NG', kenya: 'KE', ghana: 'GH', tanzania: 'TZ', uganda: 'UG',
+  cameroon: 'CM', cote_divoire: 'CI', senegal: 'SN', burkina_faso: 'BF',
+  zambia: 'ZM', dr_congo: 'CD', ethiopia: 'ET', mozambique: 'MZ', mali: 'ML',
 };
 
 // Domains that are clearly not affiliate targets
@@ -1507,7 +1536,40 @@ Deno.serve(async (req: Request) => {
     // Presets for whichever brand came out of the weighted pick.
     const { data: customRaw } = await supabase
       .from('search_presets').select('*').eq('is_default', false).order('created_at');
-    const presetsFor = (b: string): Preset[] => [
+    // ── Keyword pool: the brand pool first, the legacy path as a fallback ──
+    // Until now find-and-queue took its GEO groups from DEFAULT_PRESETS in this
+    // file and its keywords from the `keywords` table keyed by preset id. The
+    // brand pools Nick supplies live in multibrand_keywords (brand_id, geo,
+    // language, keyword, layer) and NOTHING read them — migration 040 said so
+    // in as many words, and 1464 new keywords would have landed in the same
+    // silence. This is the wire-up.
+    //
+    // GEO groups are derived from the pool itself, so adding a country is a row
+    // in the table, not an edit here.
+    let poolSource: 'multibrand' | 'legacy' = 'legacy';
+    const geoPresetsFor = async (brandId: string): Promise<Preset[]> => {
+      try {
+        const { data } = await supabase.from('multibrand_keywords')
+          .select('geo').eq('brand_id', brandId).eq('active', true);
+        // 'global' is NOT a GEO group. Layers B and D live there and are reached
+        // regardless of which GEO the tick picked (see the pool query below);
+        // leaving it in the rotation only produces ticks that ask for
+        // layer-A-in-global, which no brand has a single row for. Measured on
+        // the real pool: 1-2% of all ticks spent returning "no keywords".
+        const geos = [...new Set((data || []).map((r: any) => r.geo))]
+          .filter((g: string) => g !== 'global').sort();
+        return geos.map((g: string) => ({
+          // Reusing the legacy id where one exists is what keeps PRESET_CITIES
+          // working for the fourteen GEOs that have city lists.
+          id:   GEO_LEGACY_PRESET[g] || `mb-${g}`,
+          name: g,
+          geo:  GEO_ISO2[g] || '',
+          keywords: [],
+        }));
+      } catch (_) { return []; }
+    };
+
+    const legacyPresetsFor = (b: string): Preset[] => [
       ...(DEFAULT_PRESETS[b] || []),
       ...(customRaw || [])
         // A preset with no brand set belongs to nobody in particular, so it
@@ -1528,23 +1590,54 @@ Deno.serve(async (req: Request) => {
     // "no presets" return. That is not a paused brand costing nothing; it is
     // 1xBet's own search volume being halved by brands that cannot yet run.
     // Fall back to the brand that does have a pool instead of wasting the tick.
-    let allPresets = presetsFor(brand);
+    // brandCfg is resolved BEFORE the presets now: the brand pool is keyed by
+    // brand_id, so there is nothing to look up without it.
+    const presetsFor = async (b: string, brandId: string): Promise<Preset[]> => {
+      const geo = await geoPresetsFor(brandId);
+      if (geo.length) { poolSource = 'multibrand'; return geo; }
+      poolSource = 'legacy';
+      return legacyPresetsFor(b);
+    };
+
+    let brandCfg   = await loadBrandConfig(brand);
+    let allPresets = await presetsFor(brand, brandCfg.id);
     if (allPresets.length === 0 && brand !== FALLBACK_BRAND) {
       stats.errors.push(`no keyword pool for ${brand} — fell back to ${FALLBACK_BRAND}`);
-      brand = FALLBACK_BRAND;
-      allPresets = presetsFor(brand);
+      brand      = FALLBACK_BRAND;
+      brandCfg   = await loadBrandConfig(brand);
+      allPresets = await presetsFor(brand, brandCfg.id);
     }
 
     stats.brand = brand;
-    const brandCfg = await loadBrandConfig(brand);
     stats.brand_id = brandCfg.id;
+    (stats as any).pool = poolSource;
 
     if (allPresets.length === 0) {
       return new Response(JSON.stringify({ ...stats, skipped: true, reason: 'no presets' }),
         { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    const presetIndex = Math.floor(slotIndex / BRAND_DIVISOR) % allPresets.length;
+    // ── Why the brand pool advances the GEO every TEN slots, not every slot ──
+    // The layer is slotIndex % 10 and the GEO was slotIndex % <count>. When
+    // those two moduli share a divisor, a GEO can only ever meet the layers in
+    // one residue class — and 95 GEOs against 10 layers share 5. Concretely, on
+    // the real 1xBet pool a GEO with index i only ever saw layerSlot i%5 and
+    // i%5+5, so ONLY the GEOs with i%5==3 ever reached layer C. 199 of 929
+    // keywords were unreachable — not rarely picked, never picked at all.
+    //
+    // Dividing by 10 first gives each GEO a full block of ten consecutive
+    // slots, i.e. the whole A/B/C/D cycle, before moving on. A sweep of 95 GEOs
+    // then takes ~2 days at the 3-minute cron, which is the intended cadence
+    // for a pool this size.
+    //
+    // The legacy branch keeps its own arithmetic untouched. It has the same
+    // flaw (15 presets against 10 layers also share 5), but it is a dormant
+    // path once a brand pool exists, and changing tuned behaviour on the way
+    // past is how regressions get smuggled in. Written down, not silently
+    // inherited.
+    const presetIndex = poolSource === 'multibrand'
+      ? Math.floor(slotIndex / 10) % allPresets.length
+      : Math.floor(slotIndex / BRAND_DIVISOR) % allPresets.length;
     const preset      = allPresets[presetIndex];
     stats.preset      = preset.name;
 
@@ -1555,21 +1648,62 @@ Deno.serve(async (req: Request) => {
     //   0-6 → A (70%) player intent — the core of the base
     //   7-8 → B (20%) publisher / monetisation intent
     //   9   → C (10%) competitor footprints — the warmest, they already get it
+    // The brand pool uses the SAME letters for DIFFERENT things, so the split
+    // depends on which pool is in play. Mixing the two meanings would be
+    // invisible: every query still runs, just aimed at the wrong audience.
+    //
+    //   legacy pool          brand pool (multibrand_keywords)
+    //   A player intent      A player intent + GEO      60%   608/148/156 keys
+    //   B publisher intent   B player intent, no GEO    20%    62/23/62
+    //   C competitor prints  C brand queries            10%   251/84/46
+    //   —                    D structural footprints    10%     8/8/8
     const layerSlot = slotIndex % 10;
-    const layer: 'A' | 'B' | 'C' = layerSlot <= 6 ? 'A' : layerSlot <= 8 ? 'B' : 'C';
+    const layer: 'A' | 'B' | 'C' | 'D' = poolSource === 'multibrand'
+      ? (layerSlot <= 5 ? 'A' : layerSlot <= 7 ? 'B' : layerSlot === 8 ? 'C' : 'D')
+      : (layerSlot <= 6 ? 'A' : layerSlot <= 8 ? 'B' : 'C');
     stats.layer = layer;
 
     // Keywords now live in the DB so their yield can be measured and burnt-out
     // ones retired automatically. The hardcoded preset list stays as a fallback
     // for the window before migration 016 lands.
     let poolRows: Array<{ id: number; keyword: string; source_pref?: string; lang?: string }> = [];
-    try {
-      const { data } = await supabase.from('keywords')
-        .select('id, keyword, source_pref, lang')
-        .eq('preset', preset.id).eq('layer', layer).eq('active', true)
-        .order('id');
-      poolRows = data || [];
-    } catch (_) { poolRows = []; }
+    // Which table the yield write-back at the end of the run must update.
+    let poolTable: 'keywords' | 'multibrand_keywords' = 'keywords';
+
+    if (poolSource === 'multibrand') {
+      poolTable = 'multibrand_keywords';
+      // Layers A and C are per-GEO; B and D are global — that is a property of
+      // the pool, not an assumption: every B and D row in all three brands
+      // carries geo='global', every A and C row carries a real country.
+      // Filtering B/D by the picked GEO would therefore return nothing and
+      // silently burn 30% of all ticks on "no keywords".
+      const perGeo = layer === 'A' || layer === 'C';
+      try {
+        let q = supabase.from('multibrand_keywords')
+          .select('id, keyword, language')
+          .eq('brand_id', brandCfg.id).eq('layer', layer).eq('active', true);
+        q = perGeo ? q.eq('geo', preset.name) : q.eq('geo', 'global');
+        // Least-recently-used first: with 1464 keywords a slot-arithmetic
+        // window would take days to come back round to any given key, and a key
+        // that never runs cannot be judged by yield (ТЗ §5). The partial index
+        // multibrand_kw_rotation serves exactly this order.
+        const { data } = await q
+          .order('last_run_at', { ascending: true, nullsFirst: true })
+          .order('id', { ascending: true })
+          .limit(KW_PER_RUN);
+        poolRows = (data || []).map((r: any) => ({
+          id: r.id, keyword: r.keyword, lang: (r.language || '').toLowerCase(),
+        }));
+      } catch (_) { poolRows = []; }
+    } else {
+      try {
+        const { data } = await supabase.from('keywords')
+          .select('id, keyword, source_pref, lang')
+          .eq('preset', preset.id).eq('layer', layer).eq('active', true)
+          .order('id');
+        poolRows = data || [];
+      } catch (_) { poolRows = []; }
+    }
 
     // Layer A can fall back to the in-code pool; B and C exist only in the DB, so
     // an empty pool there means "nothing to do this tick", not "use layer A keys".
@@ -1670,10 +1804,20 @@ Deno.serve(async (req: Request) => {
     const cityIdx    = Math.floor(visitNum / 3) % (cityList.length + 1); // +1 for base (no city)
     const cityAppend = cityIdx < cityList.length ? ' ' + cityList[cityIdx] : '';
 
-    // City padding only makes sense for player intent. Layer B/C keywords are
-    // corporate pages and exact-phrase footprints — a city token just breaks them.
+    // City padding only makes sense for player intent tied to a place, which is
+    // layer A in both pools. Everything else is either global or an exact
+    // phrase, and a city token just breaks it.
     const cityPart = layer === 'A' ? cityAppend : '';
-    const minusWords = DDG_MINUS + (layer === 'B' ? LAYER_B_MINUS : '');
+
+    // Minus-words: fifteen exclusions are a blunt instrument, and on layer D
+    // they are actively harmful — those keywords ARE search operators
+    // (`inurl:casino-review "bonus"`, `site:blogspot.com "betting tips"`), and
+    // bolting a wall of -terms onto one leaves almost nothing to match.
+    // LAYER_B_MINUS stays on the legacy pool only, where B still means
+    // publisher intent; see the constant's comment.
+    const minusWords = layer === 'D'
+      ? ''
+      : DDG_MINUS + (poolSource === 'legacy' && layer === 'B' ? LAYER_B_MINUS : '');
 
     // Five simultaneous requests is a burst, and a burst is what a bot looks
     // like. Concurrency 2 with 2-6s of jitter between launches spreads the same
@@ -1759,8 +1903,16 @@ Deno.serve(async (req: Request) => {
     // a layer-C slot (slot%10===9) and one on a layer-B slot (slot%10===8) — which
     // is ~24 calls/day, matching the 3×250/month budget (pickSerpAccount still
     // hard-caps per account, so this only controls spread, not the ceiling).
+    //
+    // Both constants keep working under the brand pool's layer split, and land
+    // on the two layers that need Google most there: slot%10 of 9 is D
+    // (footprint operators, which DuckDuckGo handles poorly) and 28%10 = 8 is C
+    // (brand queries). Under the legacy split the same two slots are C and B,
+    // as before. No change was needed — but it is luck, not design, so it is
+    // written down here rather than left to be rediscovered.
     const serpSlot = slotIndex % 40;
-    const serpFire = serpSlot === 9   /* layer C */ || serpSlot === 28 /* layer B */;
+    const serpFire = serpSlot === 9   /* D (brand pool) / C (legacy) */
+                  || serpSlot === 28  /* C (brand pool) / B (legacy) */;
     if (SERPAPI_ACCOUNTS.length > 0 && serpFire) {
       const acct = await pickSerpAccount();
       if (acct) {
@@ -2010,6 +2162,23 @@ Deno.serve(async (req: Request) => {
     for (const [kw, s] of kwStats) {
       const id = keywordIds.get(kw);
       if (!id) continue;
+      if (poolTable === 'multibrand_keywords') {
+        // Same purpose, different columns: multibrand_keywords has no
+        // hot_leads, and its results counter is results_found. Without this
+        // write-back ТЗ §5 is unenforceable — "результатов на запрос в разрезе
+        // языка" has nothing to divide by, and a keyword generated from a
+        // template for a language nobody checked keeps burning a tick forever.
+        const { data: cur } = await supabase.from('multibrand_keywords')
+          .select('runs, results_found, leads_created').eq('id', id).maybeSingle();
+        if (!cur) continue;
+        await supabase.from('multibrand_keywords').update({
+          runs:          (cur.runs ?? 0) + 1,
+          results_found: (cur.results_found ?? 0) + s.urls,
+          leads_created: (cur.leads_created ?? 0) + s.leads,
+          last_run_at:   new Date().toISOString(),
+        }).eq('id', id);
+        continue;
+      }
       const { data: cur } = await supabase.from('keywords')
         .select('runs, urls_found, leads_created, hot_leads').eq('id', id).maybeSingle();
       if (!cur) continue;

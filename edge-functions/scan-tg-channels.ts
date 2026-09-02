@@ -97,9 +97,16 @@ const RESERVED = new Set([
   'addlist', 'telegram', 'joinchat', 'confirmphone', 'privacy', 'faq', 'apps',
 ]);
 
-/** Canonical https://t.me/<username>, or null when the URL is not a public
- *  channel we may look at. Private invites (t.me/+…, /joinchat/…) are dropped
- *  here and never fetched anywhere downstream. */
+/** Canonical https://t.me/<username> in LOWER CASE, or null when the URL is
+ *  not a public channel we may look at. Private invites (t.me/+…, /joinchat/…)
+ *  are dropped here and never fetched anywhere downstream.
+ *
+ *  The lower-casing is the dedup key, not cosmetics. Telegram usernames are
+ *  case-insensitive — t.me/BettingTips and t.me/bettingtips are one channel —
+ *  but this function used to preserve whatever case the search engine happened
+ *  to return. UNIQUE(channel_url) then saw two different strings and let both
+ *  in, and the operator got the same card twice. Migration 054 collapsed the
+ *  rows already in the base; this stops new ones appearing. */
 function normalizeTgUrl(raw: string): string | null {
   let u: URL;
   try { u = new URL(raw); } catch { return null; }
@@ -115,7 +122,7 @@ function normalizeTgUrl(raw: string): string | null {
   if (!/^[A-Za-z0-9_]{4,32}$/.test(name)) return null;
   if (RESERVED.has(name.toLowerCase())) return null;
   if (/bot$/i.test(name)) return null;                      // a bot, not a channel
-  return 'https://t.me/' + name;
+  return 'https://t.me/' + name.toLowerCase();
 }
 
 // ── Search: DuckDuckGo HTML ─────────────────────────────────────────────────
