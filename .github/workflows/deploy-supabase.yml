@@ -211,6 +211,7 @@ jobs:
           SERPAPI_KEY_1: ${{ secrets.SERPAPI_KEY_1 }}
           SERPAPI_KEY_2: ${{ secrets.SERPAPI_KEY_2 }}
           SERPAPI_KEY_3: ${{ secrets.SERPAPI_KEY_3 }}
+          GROQ_KEY_1: ${{ secrets.GROQ_KEY_1 }}
           GROQ_KEY_2: ${{ secrets.GROQ_KEY_2 }}
           GROQ_KEY_3: ${{ secrets.GROQ_KEY_3 }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -222,6 +223,7 @@ jobs:
           [ -n "$SERPAPI_KEY_1" ] && ARGS="$ARGS SERPAPI_KEY_1=$SERPAPI_KEY_1"
           [ -n "$SERPAPI_KEY_2" ] && ARGS="$ARGS SERPAPI_KEY_2=$SERPAPI_KEY_2"
           [ -n "$SERPAPI_KEY_3" ] && ARGS="$ARGS SERPAPI_KEY_3=$SERPAPI_KEY_3"
+          [ -n "$GROQ_KEY_1" ]    && ARGS="$ARGS GROQ_KEY_1=$GROQ_KEY_1"
           [ -n "$GROQ_KEY_2" ]    && ARGS="$ARGS GROQ_KEY_2=$GROQ_KEY_2"
           [ -n "$GROQ_KEY_3" ]    && ARGS="$ARGS GROQ_KEY_3=$GROQ_KEY_3"
           [ -n "$YOUTUBE_API_KEY" ] && ARGS="$ARGS YOUTUBE_API_KEY=$YOUTUBE_API_KEY"
@@ -234,6 +236,24 @@ jobs:
           # SERP_DAILY_CAP GitHub secret to (paid monthly quota / days in month) to
           # raise it without a code change.
           [ -n "$SERP_DAILY_CAP" ] && ARGS="$ARGS SERP_DAILY_CAP=$SERP_DAILY_CAP"
+          # Печатаем ИМЕНА долетевших ключей, никогда значения.
+          #
+          # Без этого «ключ добавлен, но не работает» и «ключ не добавлен»
+          # выглядят одинаково: шаг зелёный в обоих случаях. На ботах это уже
+          # стоило дня — там секреты лежали не на той вкладке, и узнать это
+          # было неоткуда.
+          echo "── долетело до Actions ──"
+          for n in SERPAPI_KEY_1 SERPAPI_KEY_2 SERPAPI_KEY_3 \
+                   GROQ_KEY_1 GROQ_KEY_2 GROQ_KEY_3 \
+                   YOUTUBE_API_KEY MILLIONVERIFIER_KEY ANTHROPIC_API_KEY SERP_DAILY_CAP; do
+            if [ -n "${!n:-}" ]; then echo "   есть  $n"; else echo "   нет   $n"; fi
+          done
+
+          # GROQ_API_KEY здесь не фигурирует намеренно: это первый ключ ротации,
+          # он живёт прямо в секретах Supabase и через GitHub не проходит.
+          # Ротация в коде: GROQ_API_KEY → GROQ_KEY_1 → _2 → _3, пустые слоты
+          # отбрасываются.
+
           if [ -n "$ARGS" ]; then
             supabase secrets set $ARGS --project-ref lxsyrserfuighwxuymgb && echo "Optional API keys set"
           else

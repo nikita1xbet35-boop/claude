@@ -11,7 +11,7 @@
 // Deploy: supabase functions deploy find-and-queue --no-verify-jwt
 // (deploy trigger: activate SerpApi + Groq rotation keys)
 // Env:    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SERPAPI_KEY_1/2/3,
-//         GROQ_API_KEY + GROQ_KEY_2/GROQ_KEY_3 (rotated),
+//         GROQ_API_KEY + GROQ_KEY_1/2/3 (rotated),
 //         JINA_API_KEY (optional)
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -36,7 +36,7 @@ const SERPAPI_MONTHLY_LIMIT = 250;
 const SERP_KW_PER_RUN = 1;
 // Groq keys — rotated per call to multiply the free-tier TPM budget. Key #1 is
 // the env var (with the legacy hardcoded fallback); keys #2/#3 come from secrets
-// GROQ_KEY_2 / GROQ_KEY_3. On a 429 the call retries on the next key rather than
+// GROQ_KEY_1 / _2 / _3. On a 429 the call retries on the next key rather than
 // skipping analysis, which is what capped how many found sites got saved.
 // ── Model selection ─────────────────────────────────────────────────────────
 // Groq decommissioned llama-3.1-8b-instant without warning and every call
@@ -65,6 +65,12 @@ function groqModelGone(status: number, text: string): boolean {
 
 const GROQ_KEYS = [
   Deno.env.get('GROQ_API_KEY') || '',
+  // GROQ_KEY_1 — четвёртый слот, добавлен когда Ник завёл три новых аккаунта.
+  // Слотов было три (GROQ_API_KEY + _2 + _3), и секрет с именем GROQ_KEY_1 не
+  // читал НИКТО: ни воркфлоу его не передавал, ни одна функция не забирала.
+  // Ключ лежал бы в настройках и молча не работал — ровно тот случай, когда
+  // всё выглядит настроенным и ничего не происходит.
+  Deno.env.get('GROQ_KEY_1')   || '',
   Deno.env.get('GROQ_KEY_2') || '',
   Deno.env.get('GROQ_KEY_3') || '',
 ].filter(Boolean);

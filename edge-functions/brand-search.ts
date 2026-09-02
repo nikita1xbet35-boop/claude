@@ -38,7 +38,7 @@
 // function's own quota.
 //
 // Deploy: supabase functions deploy brand-search --no-verify-jwt
-// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY (+GROQ_KEY_2/3),
+// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY (+GROQ_KEY_1/2/3),
 //      BRAND_KW_PER_RUN (optional), BRAND_PAGES (optional)
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -72,6 +72,12 @@ function groqModelGone(status: number, text: string): boolean {
 
 const GROQ_KEYS = [
   Deno.env.get('GROQ_API_KEY') || '',
+  // GROQ_KEY_1 — четвёртый слот, добавлен когда Ник завёл три новых аккаунта.
+  // Слотов было три (GROQ_API_KEY + _2 + _3), и секрет с именем GROQ_KEY_1 не
+  // читал НИКТО: ни воркфлоу его не передавал, ни одна функция не забирала.
+  // Ключ лежал бы в настройках и молча не работал — ровно тот случай, когда
+  // всё выглядит настроенным и ничего не происходит.
+  Deno.env.get('GROQ_KEY_1')   || '',
   Deno.env.get('GROQ_KEY_2')   || '',
   Deno.env.get('GROQ_KEY_3')   || '',
 ].filter(Boolean);
