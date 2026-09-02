@@ -405,6 +405,13 @@ async function groqChat(user: string, itemCount: number): Promise<string | null>
           res.body?.cancel().catch(() => {});
           continue;
         }
+        if (res.status === 401 || res.status === 403) {
+          // Отвергнут КЛЮЧ, а не запрос — пробуем следующий (см. find-and-queue).
+          groqOtherErrCount++;
+          groqLastError = `HTTP ${res.status} (key ${idx + 1}) — ключ отвергнут`;
+          res.body?.cancel().catch(() => {});
+          continue;
+        }
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
           // The model was retired under us. Every key will say the same thing,

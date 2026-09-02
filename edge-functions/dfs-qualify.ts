@@ -248,6 +248,12 @@ async function groqChat(user: string, itemCount: number): Promise<string | null>
           res.body?.cancel().catch(() => {});
           continue;
         }
+        if (res.status === 401 || res.status === 403) {
+          // Отвергнут КЛЮЧ, а не запрос — пробуем следующий (см. find-and-queue).
+          lastLlmError = `groq key#${idx} HTTP ${res.status} — ключ отвергнут`;
+          res.body?.cancel().catch(() => {});
+          continue;
+        }
         if (!res.ok) {
           const text = await res.text().catch(() => '');
           // The model was retired under us. Every key will say the same thing,
