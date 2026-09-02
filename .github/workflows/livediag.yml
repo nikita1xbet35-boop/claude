@@ -274,7 +274,7 @@ jobs:
           echo "--- find-and-queue runs last 1h: analyzed/saved + 429 presence ---"
           q "SELECT count(*) AS runs, sum((regexp_match(message,'analyzed=([0-9]+)'))[1]::int) AS analyzed, sum((regexp_match(message,'saved=([0-9]+)'))[1]::int) AS saved, sum(CASE WHEN message LIKE '%429%' THEN 1 ELSE 0 END) AS runs_with_429 FROM error_log WHERE service='find-and-queue' AND message LIKE 'brand=%' AND created_at > now() - interval '1 hour';"; echo ""
           echo "--- last 12 find-and-queue completed runs (analyzed/saved/groqErr) ---"
-          q "SELECT to_char(created_at,'HH24:MI') AS t, (regexp_match(message,'found=([0-9]+)'))[1] AS found, (regexp_match(message,'analyzed=([0-9]+)'))[1] AS analyzed, (regexp_match(message,'saved=([0-9]+)'))[1] AS saved, (regexp_match(message,'groqErr=\"([^\"]{0,40})\"'))[1] AS groq_err FROM error_log WHERE service='find-and-queue' AND message LIKE 'brand=%' ORDER BY created_at DESC LIMIT 12;"; echo ""
+          q "SELECT to_char(created_at,'HH24:MI') AS t, (regexp_match(message,'found=([0-9]+)'))[1] AS found, (regexp_match(message,'analyzed=([0-9]+)'))[1] AS analyzed, (regexp_match(message,'saved=([0-9]+)'))[1] AS saved, substring(message from 'groqErr=(.{0,60})') AS groq_err FROM error_log WHERE service='find-and-queue' AND message LIKE 'brand=%' ORDER BY created_at DESC LIMIT 12;"; echo ""
 
           echo ""
           echo "=== LEAD-SAVE TREND (find-and-queue saved) ==="
@@ -311,7 +311,7 @@ jobs:
           # различить «модель снята», «слишком длинный запрос» и «неверный
           # формат» можно только по тексту.
           echo "=== ТЕКСТ ОШИБОК GROQ (последние 6, любой level) ==="
-          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, substring(message from 'groqErr=\"(.*)') AS groq_error FROM error_log WHERE service='find-and-queue' AND message LIKE '%groqErr%' ORDER BY created_at DESC LIMIT 6;"; echo ""
+          q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, substring(message from 'groqErr=(.*)$') AS groq_error FROM error_log WHERE service='find-and-queue' AND message LIKE '%groqErr%' ORDER BY created_at DESC LIMIT 6;"; echo ""
 
           echo "=== ПОСЛЕДНИЕ ПРОГОНЫ find-and-queue (сводка) ==="
           q "SELECT to_char(started_at,'MM-DD HH24:MI') AS t, keywords_used AS kw, urls_returned AS raw, urls_after_noise AS after_noise, urls_after_dedup AS new_urls, sent_to_llm, llm_ok, llm_429, leads_created, search_errors, left(coalesce(notes,''), 110) AS notes FROM funnel_stats WHERE pipeline = 'search' ORDER BY started_at DESC LIMIT 8;"; echo ""
@@ -394,3 +394,5 @@ jobs:
 # ping 1788347271
 
 # ping 1788347686
+
+# ping 1788348060
