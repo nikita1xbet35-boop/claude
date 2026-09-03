@@ -35,6 +35,9 @@ jobs:
       - name: Query live DB + evaluate health
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          GROQ_KEY_1: ${{ secrets.GROQ_KEY_1 }}
+          GROQ_KEY_2: ${{ secrets.GROQ_KEY_2 }}
+          GROQ_KEY_3: ${{ secrets.GROQ_KEY_3 }}
         run: |
           set +e
           ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4c3lyc2VyZnVpZ2h3eHV5bWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NDUwNDgsImV4cCI6MjA5MDUyMTA0OH0.6SgyPJZ_TKeKJoC_E4mIQhd373UMP8-K1VMSZJJacsM"
@@ -310,8 +313,44 @@ jobs:
           # выборку ошибок выше не попадает. Забираем её отдельно и целиком:
           # различить «модель снята», «слишком длинный запрос» и «неверный
           # формат» можно только по тексту.
+          # ── Живая проверка ключей Groq ─────────────────────────────────────
+          # Счётчик 429 не отвечает на главный вопрос: сколько ключей ВООБЩЕ
+          # рабочих. Три недействительных ключа и один живой дают ту же картину
+          # «упёрлись в лимиты», что и четыре живых под нагрузкой, а чинится это
+          # противоположно. Бьём по каждому ключу отдельно и печатаем статус —
+          # значения ключей не печатаются никогда.
+          echo "=== ЖИВАЯ ПРОВЕРКА КЛЮЧЕЙ GROQ ==="
+          for n in GROQ_KEY_1 GROQ_KEY_2 GROQ_KEY_3; do
+            v="${!n:-}"
+            if [ -z "$v" ]; then echo "   $n: не задан"; continue; fi
+            hdrs=$(curl -s -D - -o /tmp/gq.json -m 20 https://api.groq.com/openai/v1/chat/completions \
+              -H "Authorization: Bearer $v" -H 'Content-Type: application/json' \
+              -d '{"model":"openai/gpt-oss-20b","messages":[{"role":"user","content":"ping"}],"max_tokens":1}')
+            code=$(printf '%s' "$hdrs" | head -1 | awk '{print $2}')
+            rem=$(printf '%s' "$hdrs" | grep -i 'x-ratelimit-remaining-tokens' | tr -d '\r' | cut -d' ' -f2)
+            lim=$(printf '%s' "$hdrs" | grep -i 'x-ratelimit-limit-tokens'     | tr -d '\r' | cut -d' ' -f2)
+            err=$(head -c 120 /tmp/gq.json | tr -d '\n')
+            if [ "$code" = "200" ]; then
+              echo "   $n: OK   токенов в минуту ${rem:-?}/${lim:-?}"
+            else
+              echo "   $n: HTTP ${code:-нет ответа}  ${err}"
+            fi
+          done
+          echo ""
+
           echo "=== ТЕКСТ ОШИБОК GROQ (последние 6, любой level) ==="
           q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, substring(message from 'groqErr=(.*)$') AS groq_error FROM error_log WHERE service='find-and-queue' AND message LIKE '%groqErr%' ORDER BY created_at DESC LIMIT 6;"; echo ""
+
+          # Почему generate-queue пишет «added 0 new» при 251 готовом лиде.
+          # Резерв в шапке считается по трём условиям, а generate-queue берёт
+          # ещё три: exclude_reason, pipeline и таблицу отправленных. Разница
+          # между этими наборами и есть ответ, и увидеть её можно только рядом.
+          echo "=== КУДА ДЕВАЮТСЯ ЛИДЫ ПО ПУТИ В ОЧЕРЕДЬ ==="
+          q "SELECT count(*) AS s1_stage_i_email, count(*) FILTER (WHERE exclude_reason IS NULL) AS s2_ne_excluded, count(*) FILTER (WHERE exclude_reason IS NULL AND (pipeline = 'search' OR pipeline IS NULL)) AS s3_pipeline_ok, count(*) FILTER (WHERE exclude_reason IS NULL AND (pipeline = 'search' OR pipeline IS NULL) AND NOT EXISTS (SELECT 1 FROM email_log e WHERE lower(e.email) = lower(l.contact_email))) AS s4_never_emailed FROM leads l WHERE stage IN ('new','ready','researched','followup') AND contact_email IS NOT NULL AND contact_email <> '';"; echo ""
+          echo "--- причины исключения (топ-8) ---"
+          q "SELECT coalesce(exclude_reason, 'нет причины') AS reason, count(*) FROM leads WHERE stage IN ('new','ready','researched','followup') AND contact_email IS NOT NULL AND contact_email <> '' GROUP BY 1 ORDER BY 2 DESC LIMIT 8;"; echo ""
+          echo "--- по какому пайплайну пришли ---"
+          q "SELECT coalesce(pipeline, 'нет метки') AS pipeline, count(*) FROM leads WHERE stage IN ('new','ready','researched','followup') AND contact_email IS NOT NULL AND contact_email <> '' GROUP BY 1 ORDER BY 2 DESC LIMIT 6;"; echo ""
 
           echo "=== ПОСЛЕДНИЕ ПРОГОНЫ find-and-queue (сводка) ==="
           q "SELECT to_char(started_at,'MM-DD HH24:MI') AS t, keywords_used AS kw, urls_returned AS raw, urls_after_noise AS after_noise, urls_after_dedup AS new_urls, sent_to_llm, llm_ok, llm_429, leads_created, search_errors, left(coalesce(notes,''), 110) AS notes FROM funnel_stats WHERE pipeline = 'search' ORDER BY started_at DESC LIMIT 8;"; echo ""
@@ -402,3 +441,5 @@ jobs:
 # ping 1788352840
 
 # ping 1788353727
+
+# ping 1788423952
