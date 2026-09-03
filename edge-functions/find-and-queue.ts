@@ -999,7 +999,11 @@ async function groqChat(body: Record<string, unknown>): Promise<string | null> {
   // as before, only with `round 2` on the end — e.g. `found=20 analyzed=0
   // irrelevant=16 saved=0 groqCalls=12 groqErr="HTTP 429 (key 1, round 2)"`.
   // 25s of ladder fits inside the run budget and rides out the minute boundary.
-  const BACKOFF_MS = [0, 5_000, 20_000];
+  // Два круга вместо трёх. Круг — это перебор ВСЕХ ключей, то есть три круга
+  // дают до двенадцати запросов на одну партию. Когда все ключи упёрлись в
+  // минутный лимит, эти двенадцать не спасают партию, а добивают бюджет: в
+  // прогоне 00:29 на 16 сайтов пришлось 28 ответов 429.
+  const BACKOFF_MS = [0, 12_000];
   for (let round = 0; round < BACKOFF_MS.length; round++) {
     if (round) await new Promise(r => setTimeout(r, BACKOFF_MS[round]));
     for (let i = 0; i < n; i++) {
@@ -1249,12 +1253,16 @@ RULES for "priority":
       model: groqModel(),
       messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
       temperature: 0.1,
-      // 220, а не 130, на сайт. У ответа семь полей, включая summary до 400
-      // символов и monetization_evidence до 200 — на 130 токенов это не влезает,
-      // модель обрывает JSON на середине, и Groq возвращает 400
-      // «Failed to validate JSON», теряя ВСЮ партию из восьми сайтов.
-      // Найдено на живых данных 02.09: 66 новых URL за сутки, сохранено ноль.
-      max_tokens: 220 * cands.length + 200,
+      // 150 на сайт. Было 130 — не хватало, модель обрывала JSON и Groq терял
+      // всю партию (см. правку от 02.09). Тогда я поднял до 220, и это оказалось
+      // перебором: живая проверка ключей показала потолок 8000 токенов в минуту
+      // НА КЛЮЧ, а 220×8+200 = 1960 на вызов вместе с промптом съедали
+      // примерно треть минутного бюджета за один запрос. Ответов 429 стало 66 в
+      // сутки против прежних 17 — то есть лечение оказалось хуже болезни.
+      //
+      // 150 достаточно: summary просят «max 15 words», а на редкое переполнение
+      // теперь есть деление партии пополам, которого в тот момент ещё не было.
+      max_tokens: 150 * cands.length + 200,
       response_format: { type: 'json_object' },
     });
     if (!raw) {
