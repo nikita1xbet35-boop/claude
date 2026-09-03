@@ -354,6 +354,9 @@ jobs:
           echo "--- 129 прошедших базу: чем отсеиваются дальше ---"
           q "SELECT count(*) AS eligible, count(*) FILTER (WHERE EXISTS (SELECT 1 FROM send_queue sq WHERE sq.lead_id = l.id AND sq.status = 'sent')) AS has_sent_row, count(*) FILTER (WHERE EXISTS (SELECT 1 FROM send_queue sq WHERE sq.lead_id = l.id)) AS has_any_queue_row, count(*) FILTER (WHERE lower(split_part(contact_email,'@',1)) IN ('info','contact','admin','support','sales','office','hello','mail','team','marketing','partners')) AS role_address, count(*) FILTER (WHERE EXISTS (SELECT 1 FROM suppression_list sl WHERE lower(sl.email) = lower(l.contact_email))) AS suppressed FROM leads l WHERE stage IN ('new','ready','researched','followup') AND contact_email IS NOT NULL AND contact_email <> '' AND exclude_reason IS NULL AND (pipeline = 'search' OR pipeline IS NULL) AND NOT EXISTS (SELECT 1 FROM email_log e WHERE lower(e.email) = lower(l.contact_email));"; echo ""
 
+          echo "--- статус проверки адреса у этих 129 ---"
+          q "SELECT coalesce(email_status, 'не проверялся') AS email_status, count(*) FROM leads l WHERE stage IN ('new','ready','researched','followup') AND contact_email IS NOT NULL AND contact_email <> '' AND exclude_reason IS NULL AND (pipeline = 'search' OR pipeline IS NULL) AND NOT EXISTS (SELECT 1 FROM email_log e WHERE lower(e.email) = lower(l.contact_email)) GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+
           echo "--- причины исключения (топ-8) ---"
           q "SELECT coalesce(exclude_reason, 'нет причины') AS reason, count(*) FROM leads WHERE stage IN ('new','ready','researched','followup') AND contact_email IS NOT NULL AND contact_email <> '' GROUP BY 1 ORDER BY 2 DESC LIMIT 8;"; echo ""
           echo "--- по какому пайплайну пришли ---"
@@ -452,3 +455,5 @@ jobs:
 # ping 1788423952
 
 # ping 1788424483
+
+# ping 1788424958

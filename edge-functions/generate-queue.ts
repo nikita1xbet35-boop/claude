@@ -264,6 +264,8 @@ Deno.serve(async (req: Request) => {
     // Fill remaining capacity with new eligible leads
     const newQuota = Math.max(0, capacity - futurePending.length - overduePending.length);
     let newLeads: Array<{ id: string; brand: string; brand_id: string | null; source: string; contact_email: string; url: string }> = [];
+    // Куда делись кандидаты, не дошедшие до очереди. Печатается в лог всегда.
+    const drop = { queued: 0, sent: 0, bademail: 0, emailed: 0, suppressed: 0, status: 0, geo: 0 };
 
     // Кулдауны загружаются ЗДЕСЬ, а не внутри if (newQuota > 0) ниже.
     //
@@ -322,16 +324,20 @@ Deno.serve(async (req: Request) => {
         (a, b) => ((b.fit_score ?? 35) as number) - ((a.fit_score ?? 35) as number),
       );
 
+      // Счётчики отсева. Без них «added 0 new» — это тупик: восемь условий,
+      // и по логу не видно, какое из них съело всех кандидатов. Ровно на этом
+      // ушло полдня: 129 лидов проходили все условия базы и исчезали здесь,
+      // а понять где — было нечем.
       for (const l of ranked) {
         if (newLeads.length >= newQuota) break;
-        if (queuedLeadIds.has(l.id)) continue;
-        if (sentLeadIds.has(l.id)) continue;                          // dedup by lead_id
-        if (!isSendableEmail(l.contact_email)) continue;
-        if (emailedSet.has(l.contact_email.toLowerCase())) continue;  // dedup by email
-        if (suppressedSet.has(l.contact_email.toLowerCase())) continue;   // opted out
+        if (queuedLeadIds.has(l.id)) { drop.queued++; continue; }
+        if (sentLeadIds.has(l.id))   { drop.sent++;   continue; }     // dedup by lead_id
+        if (!isSendableEmail(l.contact_email)) { drop.bademail++; continue; }
+        if (emailedSet.has(l.contact_email.toLowerCase())) { drop.emailed++; continue; }
+        if (suppressedSet.has(l.contact_email.toLowerCase())) { drop.suppressed++; continue; }
         // P0.1 gate: anything proven undeliverable or throwaway never goes out.
-        if (l.email_status === 'invalid' || l.email_status === 'disposable') continue;
-        if (isGeoExcludedGQ(l.url || '', l.geo || '')) continue;     // geo blacklist
+        if (l.email_status === 'invalid' || l.email_status === 'disposable') { drop.status++; continue; }
+        if (isGeoExcludedGQ(l.url || '', l.geo || '')) { drop.geo++; continue; }
         // NB: the contact_registry gate is deliberately NOT here — see the
         // comment above the scheduling loop for why it moved.
         newLeads.push({
@@ -441,7 +447,10 @@ Deno.serve(async (req: Request) => {
       level: 'info', service: 'generate-queue',
       message: `Queue updated — kept ${futurePending.length} future, rescheduled ${updates.length} overdue, `
         + `added ${inserts.length} new (sent today ${sentToday ?? 0}/${dailyTarget})`
-        + (blockedByRotation ? `, ${blockedByRotation} blocked by rotation` : ''),
+        + (blockedByRotation ? `, ${blockedByRotation} blocked by rotation` : '')
+        + `; отсев: в очереди ${drop.queued}, уже отправляли ${drop.sent}, `
+        + `адрес не годится ${drop.bademail}, уже писали ${drop.emailed}, `
+        + `отписка ${drop.suppressed}, адрес невалиден ${drop.status}, гео ${drop.geo}`,
     }]);
 
     return new Response(JSON.stringify({
