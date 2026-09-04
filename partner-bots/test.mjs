@@ -23,6 +23,7 @@ function makeDb() {
     ],
     bot_leads: [],
     bot_user_prefs: [],
+    bot_user_events: [],
     system_config: [{ key: 'geo_pdf_url', value: '' }],
     // Вымышленные строки: проверяем механику, а не содержимое справочника —
     // настоящие данные приходят из PDF. Niger рядом с Nigeria здесь намеренно:
@@ -50,7 +51,15 @@ function makeDb() {
   };
 }
 
-const OPS = { eq: (a,b) => String(a) === b, lt: (a,b) => String(a) < b, gt: (a,b) => String(a) > b };
+const OPS = {
+  eq:  (a,b) => String(a) === b,
+  neq: (a,b) => String(a) !== b,
+  lt:  (a,b) => String(a) < b,
+  // gt сравнивает ЧИСЛА, когда обе стороны числовые: воркер фильтрует
+  // tg_user_id=gt.0, чтобы выкинуть из статистики самотест с id -1, а строковое
+  // сравнение '-1' > '0' даёт не тот ответ по случайности, а не по смыслу.
+  gt:  (a,b) => (isFinite(a) && isFinite(b) ? Number(a) > Number(b) : String(a) > String(b)),
+};
 
 function applyFilters(rows, params) {
   let out = rows;
@@ -69,6 +78,7 @@ function applyFilters(rows, params) {
 // lang, и /start молча падал у каждого, кто ещё не менял язык.
 const NOT_NULL = {
   bot_user_prefs: ['bot_slug','tg_user_id','lang'],
+  bot_user_events: ['bot_slug','tg_user_id','event'],
   bot_leads: ['bot_slug','tg_user_id','lang','ref_code'],
   geo_availability: ['geo_en','geo_ru','iso_code','region','availability'],
 };
@@ -79,6 +89,7 @@ const PK = {
   bot_user_prefs: ['bot_slug','tg_user_id'],
   bot_faq: ['lang','key'],
   bot_configs: ['slug'],
+  bot_user_events: ['id'],
   system_config: ['key'],
   geo_availability: ['id'],
   geo_aliases: ['alias'],
@@ -126,7 +137,19 @@ function fakeRpc(db, fn, body) {
       .sort((a,b) => (b.pref - a.pref) || (b.score - a.score))
       .slice(0, body.n || 3);
   }
-  throw new Error(`тест: RPC ${fn} не реализован`);
+  return null;   // не гео-RPC — разбирается ниже
+}
+
+function fakeFunnelRpc(db, body) {
+  const since = body.p_since ? new Date(body.p_since).getTime() : null;
+  return db.bot_configs.map(c => {
+    const ev = db.bot_user_events.filter(e =>
+      e.bot_slug === c.slug && e.tg_user_id > 0 &&
+      (since === null || new Date(e.created_at || Date.now()).getTime() >= since));
+    const uniq = (name) => new Set(ev.filter(e => e.event === name).map(e => e.tg_user_id)).size;
+    return { bot_slug: c.slug, geo_label: c.geo_label,
+             starts: uniq('start'), links: uniq('link_issued'), managers: uniq('manager_clicked') };
+  }).sort((a,b) => b.starts - a.starts);
 }
 
 function fakeSupabase(db, url, init) {
@@ -135,7 +158,10 @@ function fakeSupabase(db, url, init) {
   const params = [...u.searchParams.entries()];
   const method = init.method || 'GET';
   if (table.startsWith('rpc/')) {
-    const out = fakeRpc(db, table.slice(4), JSON.parse(init.body || '{}'));
+    const fn = table.slice(4);
+    const body = JSON.parse(init.body || '{}');
+    const out = fn === 'fn_bot_funnel' ? fakeFunnelRpc(db, body) : fakeRpc(db, fn, body);
+    if (out === null) throw new Error(`тест: RPC ${fn} не реализован`);
     return new Response(JSON.stringify(out), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
@@ -145,7 +171,14 @@ function fakeSupabase(db, url, init) {
   if (method === 'GET') {
     let out = applyFilters(rows, params);
     const order = u.searchParams.get('order');
-    if (order) out = [...out].sort((a,b) => (a[order] > b[order] ? 1 : -1));
+    if (order) {
+      // PostgREST пишет order=col.desc — без разбора суффикса заглушка
+      // сортировала по несуществующей колонке 'created_at.desc' и возвращала
+      // произвольный порядок, а /last именно порядком и ценен.
+      const [col, dir] = order.split('.');
+      const sign = dir === 'desc' ? -1 : 1;
+      out = [...out].sort((a,b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * sign);
+    }
     const limit = u.searchParams.get('limit');
     if (limit) out = out.slice(0, Number(limit));
     return new Response(JSON.stringify(out), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -172,6 +205,7 @@ function fakeSupabase(db, url, init) {
       Object.assign(existing, body);          // как ON CONFLICT DO UPDATE
     } else {
       rows.push({ id: db._seq++, reminder_sent: false, status: 'link_issued',
+                  admin_status: 'new', created_at: new Date().toISOString(),
                   link_issued_at: new Date().toISOString(), ...body });
     }
     // PostgREST на POST-upsert отвечает 201 и ПУСТЫМ телом, а не 204.
@@ -199,7 +233,7 @@ async function harness() {
     if (url.startsWith('https://api.telegram.org/')) {
       const method = url.split('/').pop();
       const payload = JSON.parse(init.body);
-      sent.push({ method, ...payload });
+      sent.push({ method, __admin: url.includes('/bottok-admin/'), ...payload });
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }
     throw new Error(`тест: неожиданный запрос ${url}`);
@@ -212,6 +246,7 @@ async function harness() {
     BOT_TOKEN_INDIA: 'tok-in', BOT_TOKEN_AFRIQUE: 'tok-fr',
     BOT_TOKEN_UZBEKISTAN: 'tok-uz', BOT_TOKEN_WORLDWIDE: 'tok-ww',
     BOT_TOKEN_RU: 'tok-ru', BOT_TOKEN_LATAM: 'tok-es',
+    ADMIN_BOT_TOKEN: 'tok-admin', ADMIN_CHAT_ID: '777', ADMIN_TZ_OFFSET: '2',
   };
 
   const post = (slug, update, secret = 'shh') =>
@@ -220,6 +255,15 @@ async function harness() {
       headers: secret === null ? {} : { 'X-Telegram-Bot-Api-Secret-Token': secret },
       body: JSON.stringify(update),
     }), env, { waitUntil: p => p });
+
+  // Апдейт админ-боту. from.id по умолчанию совпадает с ADMIN_CHAT_ID.
+  const admin = (update, secret = 'shh') =>
+    worker.fetch(new Request('https://x.test/admin-bot', {
+      method: 'POST',
+      headers: secret === null ? {} : { 'X-Telegram-Bot-Api-Secret-Token': secret },
+      body: JSON.stringify(update),
+    }), env, { waitUntil: p => p });
+  const acmd = (text, fromId = 777) => ({ message: { chat: { id: fromId }, from: { id: fromId }, text } });
 
   const msg = (text, userId = 42, username = 'nick') =>
     ({ message: { chat: { id: userId }, from: { id: userId, username }, text } });
@@ -236,7 +280,12 @@ async function harness() {
     await Promise.all(waits);
   };
 
-  return { db, sent, env, worker, post, msg, cb, runCron, last: () => sent[sent.length - 1] };
+  // Сообщения админ-бота отличаются по токену в адресе: в общий журнал sent
+  // они попадают вперемешку с пользовательскими, и без разделения проверки
+  // цеплялись бы не за те строки.
+  const adminSent = () => sent.filter(m => m.__admin);
+  return { db, sent, env, worker, post, msg, cb, runCron, admin, acmd, adminSent,
+           last: () => sent[sent.length - 1] };
 }
 
 // ── Проверки ────────────────────────────────────────────────────────────────
@@ -253,8 +302,11 @@ test('/start отвечает человеку, которого ещё нет �
   const h = await harness();
   assert.strictEqual(h.db.bot_user_prefs.length, 0, 'предпосылка: строки нет');
   await h.post('india', h.msg('/start'));
-  assert.strictEqual(h.sent.length, 1, '/start обязан ответить, а не молчать');
-  assert.match(h.last().text, /Welcome to the 1xBet/);
+  // Считать штуки больше нельзя: на /start теперь уходит ещё и уведомление
+  // админ-боту. Проверяем не количество, а факт — человек получил приветствие.
+  const toUser = h.sent.filter(m => !m.__admin);
+  assert.strictEqual(toUser.length, 1, '/start обязан ответить, а не молчать');
+  assert.match(toUser[0].text, /Welcome to the 1xBet/);
 });
 
 test('повторный /start работает и после диалога', async () => {
@@ -501,8 +553,11 @@ test('пустое тело ответа Supabase не роняет обрабо
     };
     h.sent.length = 0;
     await h.post('india', h.msg('/start'));
-    assert.strictEqual(h.sent.length, 1, `статус ${status}: бот обязан ответить`);
-    assert.match(h.last().text, /Welcome to the 1xBet/, `статус ${status}`);
+    // Считаем только адресованное человеку: рядом идёт уведомление админ-боту,
+    // и его наличие или отсутствие к этой регрессии отношения не имеет.
+    const toUser = h.sent.filter(m => !m.__admin);
+    assert.strictEqual(toUser.length, 1, `статус ${status}: бот обязан ответить`);
+    assert.match(toUser[0].text, /Welcome to the 1xBet/, `статус ${status}`);
   }
   globalThis.fetch = real;
 });
@@ -537,9 +592,12 @@ test('/selftest прогоняет настоящий /start и возвраща
   assert.strictEqual(res.status, 200);
   const j = await res.json();
   assert.strictEqual(j.ok, true, JSON.stringify(j));
-  assert.strictEqual(j.sent[0].method, 'sendMessage');
-  assert.match(j.sent[0].text, /Welcome to the 1xBet/);
-  assert.strictEqual(j.sent[0].reply_markup.keyboard.flat().length, 4, 'четыре кнопки');
+  // В приёмник попадает и уведомление админ-боту, поэтому ищем сообщение
+  // пользователю по признаку, а не по номеру.
+  const greet = j.sent.find(m => m.method === 'sendMessage' && !m.admin);
+  assert.ok(greet, 'приветствие пользователю не отправлено: ' + JSON.stringify(j.sent));
+  assert.match(greet.text, /Welcome to the 1xBet/);
+  assert.strictEqual(greet.reply_markup.keyboard.flat().length, 4, 'четыре кнопки');
 });
 
 test('/selftest НЕ отправляет ничего в Telegram по-настоящему', async () => {
@@ -889,6 +947,183 @@ test('ни один язык не даёт undefined в текстах и кно
     assert.ok(!dump.includes('undefined'), `${lang}: в ответах бота есть undefined`);
     assert.ok(!dump.includes('[object Object]'), `${lang}: в ответах бота есть [object Object]`);
   }
+});
+
+// ── Админ-бот ───────────────────────────────────────────────────────────────
+
+test('первый /start пишет событие и шлёт уведомление Нику', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/start'));
+  const ev = h.db.bot_user_events.filter(e => e.event === 'start');
+  assert.strictEqual(ev.length, 1, 'событие start не записано');
+  const a = h.adminSent();
+  assert.strictEqual(a.length, 1, 'уведомление не ушло');
+  assert.strictEqual(String(a[0].chat_id), '777', 'ушло не Нику');
+  assert.match(a[0].text, /Новый пользователь/);
+  assert.match(a[0].text, /@nick/);
+  assert.match(a[0].text, /India \(india\)/);
+});
+
+test('повторный /start в том же боте уведомления не шлёт', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/start'));
+  await h.post('india', h.msg('/start'));
+  assert.strictEqual(h.adminSent().length, 1, 'второе уведомление лишнее');
+  // Но событие пишется каждый раз: карточка /user должна показывать все заходы.
+  assert.strictEqual(h.db.bot_user_events.filter(e => e.event === 'start').length, 2);
+});
+
+test('тот же человек в другом боте — уведомление с пометкой о прежнем', async () => {
+  const h = await harness();
+  await h.post('ru', h.msg('/start'));
+  await h.post('india', h.msg('/start'));
+  const a = h.adminSent();
+  assert.strictEqual(a.length, 2);
+  assert.match(a[1].text, /уже был в/, 'нет пометки о прежнем боте');
+  assert.match(a[1].text, /Russian-speaking \(ru\)/);
+});
+
+test('кнопка «Написать»: t.me при юзернейме, tg://user без него', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/start', 42, 'nick'));
+  const withName = h.adminSent()[0].reply_markup.inline_keyboard[0][0];
+  assert.strictEqual(withName.url, 'https://t.me/nick');
+
+  const h2 = await harness();
+  await h2.post('india', { message: { chat: { id: 43 }, from: { id: 43 }, text: '/start' } });
+  const noName = h2.adminSent()[0].reply_markup.inline_keyboard[0][0];
+  assert.strictEqual(noName.url, 'tg://user?id=43');
+  assert.match(h2.adminSent()[0].text, /без username/);
+});
+
+test('кнопка статуса меняет статус и НЕ трогает выбранный язык', async () => {
+  const h = await harness();
+  await h.post('india', h.cb('lang:fr'));                      // человек выбрал французский
+  await h.post('india', h.msg('/start'));
+  await h.admin({ callback_query: { id: 'c1', from: { id: 777 }, data: 'st:in_work:india:42',
+                                    message: { chat: { id: 777 }, message_id: 5 } } });
+  const pref = h.db.bot_user_prefs.find(p => p.tg_user_id === 42 && p.bot_slug === 'india');
+  assert.strictEqual(pref.admin_status, 'in_work');
+  assert.strictEqual(pref.lang, 'fr', 'пометка статуса затёрла язык пользователя');
+  assert.ok(h.db.bot_user_events.some(e => e.event === 'status_changed' && e.detail === 'in_work'));
+  // Клавиатура перерисовывается на том же сообщении, а не шлётся новым.
+  assert.ok(h.adminSent().some(m => m.method === 'editMessageReplyMarkup' && m.message_id === 5));
+});
+
+test('/stats и /today считают по реальным событиям', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/start', 1, 'a'));
+  await h.post('india', h.msg('/start', 2, 'b'));
+  await h.post('ru',    h.msg('/start', 3, 'c'));
+  h.db.bot_configs.find(c => c.slug === 'india').signup_url_tpl = 'https://p.example/newreg';
+  await h.post('india', h.msg('🔗 Get Registration Link', 1, 'a'));
+  await h.post('india', h.msg('👤 Talk to Manager', 2, 'b'));
+
+  await h.admin(h.acmd('/stats'));
+  const t = h.adminSent().slice(-1)[0].text;
+  assert.match(t, /India \(india\)/);
+  assert.match(t, /2 новых · 1 ссылок · 1 менеджер/);
+  assert.match(t, /Итого:<\/b> 3 новых · 1 ссылок \(33%\) · 1 менеджер \(33%\)/);
+
+  await h.admin(h.acmd('/today'));
+  assert.match(h.adminSent().slice(-1)[0].text, /Сегодня/);
+});
+
+test('боты с нулём в сводку не попадают', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/start'));
+  await h.admin(h.acmd('/stats'));
+  const t = h.adminSent().slice(-1)[0].text;
+  assert.match(t, /India/);
+  assert.ok(!/Uzbekistan/.test(t), 'бот без событий не должен раздувать сводку');
+});
+
+test('/user находит и по юзернейму, и по id, показывает историю', async () => {
+  const h = await harness();
+  await h.post('india', h.msg('/start', 55, 'partner55'));
+  await h.post('india', h.msg('❓ FAQ', 55, 'partner55'));
+
+  await h.admin(h.acmd('/user @partner55'));
+  const byName = h.adminSent().slice(-1)[0].text;
+  assert.match(byName, /@partner55/);
+  assert.match(byName, /55/);
+  assert.match(byName, /открыл FAQ/);
+
+  await h.admin(h.acmd('/user 55'));
+  assert.match(h.adminSent().slice(-1)[0].text, /открыл FAQ/);
+
+  await h.admin(h.acmd('/user @нетутакого'));
+  assert.match(h.adminSent().slice(-1)[0].text, /Не нашёл/);
+});
+
+test('/last показывает последних в обратном порядке', async () => {
+  const h = await harness();
+  for (const [id, name] of [[1,'a'],[2,'b'],[3,'c']]) {
+    await h.post('india', h.msg('/start', id, name));
+    await new Promise(r => setTimeout(r, 2));   // чтобы created_at различались
+  }
+  await h.admin(h.acmd('/last 2'));
+  const t = h.adminSent().slice(-1)[0].text;
+  assert.match(t, /Последние 2/);
+  assert.ok(t.indexOf('@c') < t.indexOf('@b'), 'порядок не от новых к старым');
+  assert.ok(!/@a/.test(t), 'лимит не соблюдён');
+});
+
+test('посторонний chat_id игнорируется молча', async () => {
+  const h = await harness();
+  const res = await h.admin(h.acmd('/stats', 999999));
+  assert.strictEqual(res.status, 200, 'Telegram должен получить 200');
+  assert.strictEqual(h.adminSent().length, 0, 'постороннему нельзя отвечать ничем');
+});
+
+test('админ-роут без секрета — 401', async () => {
+  const h = await harness();
+  assert.strictEqual((await h.admin(h.acmd('/stats'), null)).status, 401);
+  assert.strictEqual((await h.admin(h.acmd('/stats'), 'wrong')).status, 401);
+});
+
+test('сбой записи события не ломает /start для человека', async () => {
+  const h = await harness();
+  const real = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const u = typeof input === 'string' ? input : input.url;
+    if (u.includes('/rest/v1/bot_user_events')) return new Response('boom', { status: 500 });
+    return real(input, init);
+  };
+  const res = await h.post('india', h.msg('/start'));
+  globalThis.fetch = real;
+  assert.strictEqual(res.status, 200);
+  const toUser = h.sent.filter(m => !m.__admin);
+  assert.strictEqual(toUser.length, 1, 'человек остался без приветствия из-за журнала');
+  assert.match(toUser[0].text, /Welcome to the 1xBet/);
+});
+
+test('события пишутся на все действия', async () => {
+  const h = await harness();
+  h.db.bot_configs[0].signup_url_tpl = 'https://p.example/newreg';
+  await h.post('india', h.msg('/start'));
+  await h.post('india', h.msg('🔗 Get Registration Link'));
+  await h.post('india', h.msg('❓ FAQ'));
+  await h.post('india', h.msg('🌍 Check GEO'));
+  await h.post('india', h.msg('👤 Talk to Manager'));
+  await h.post('india', h.cb('lang:ru'));
+  const kinds = new Set(h.db.bot_user_events.map(e => e.event));
+  for (const k of ['start','link_issued','faq_opened','geo_checked','manager_clicked','lang_changed']) {
+    assert.ok(kinds.has(k), `не записано событие ${k}`);
+  }
+});
+
+test('самотест деплоя не пишет Нику', async () => {
+  const h = await harness();
+  const res = await h.worker.fetch(new Request('https://x.test/selftest/india', {
+    method: 'POST', headers: { 'X-Telegram-Bot-Api-Secret-Token': 'shh' },
+    body: JSON.stringify({ text: '/start' }),
+  }), h.env, { waitUntil: p => p });
+  assert.strictEqual(res.status, 200);
+  // Ни одного реального обращения к Telegram: всё легло в приёмник самотеста.
+  assert.strictEqual(h.adminSent().length, 0, 'каждый деплой писал бы Нику восемь раз');
+  const j = await res.json();
+  assert.ok(j.sent.some(m => m.admin), 'уведомление должно попасть в приёмник, а не пропасть');
 });
 
 // ── Запуск ──────────────────────────────────────────────────────────────────

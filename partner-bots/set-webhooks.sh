@@ -73,6 +73,28 @@ for slug in "${present[@]}"; do
   fi
 done
 
+# Админ-бот регистрируется тем же способом, но отдельно от цикла: у него другой
+# роут (/admin-bot, а не /bot/{slug}), он не входит во флот из восьми и его
+# отсутствие не должно ни падать, ни считаться пропущенным ботом — партнёрские
+# боты работают и без него.
+if [[ -n "${ADMIN_BOT_TOKEN:-}" ]]; then
+  admin_url="${WORKER_URL%/}/admin-bot"
+  response=$(curl -sS --max-time 20 \
+    "https://api.telegram.org/bot${ADMIN_BOT_TOKEN}/setWebhook" \
+    -d "url=${admin_url}" \
+    -d "secret_token=${BOT_WEBHOOK_SECRET}" \
+    -d 'allowed_updates=["message","callback_query"]')
+
+  if echo "$response" | grep -q '"ok":true'; then
+    echo "  ok   admin-bot → ${admin_url}"
+  else
+    echo "  FAIL admin-bot: ${response}" >&2
+    fail=1
+  fi
+else
+  echo "  ─    admin-bot: пропущен, нет ADMIN_BOT_TOKEN"
+fi
+
 if (( ${#missing[@]} )); then
   echo "пропущены (токен не задан): ${missing[*]}" >&2
 fi
