@@ -33,8 +33,14 @@
   // руками, — а именно эти пункты и оказались узким местом.
   //
   // Секрет здесь ровно один и настоящий — SUPABASE_SERVICE_KEY.
+  //
+  // ADMIN_TZ_OFFSET — часовой пояс, в котором админ-бот печатает время (часы от
+  // UTC). Тоже не секрет: это настройка отображения, и её удобнее менять здесь,
+  // чем через wrangler secret. Токен админ-бота и ADMIN_CHAT_ID — наоборот,
+  // только в секретах.
   "vars": {
-    "SUPABASE_URL": "https://lxsyrserfuighwxuymgb.supabase.co"
+    "SUPABASE_URL": "https://lxsyrserfuighwxuymgb.supabase.co",
+    "ADMIN_TZ_OFFSET": "2"
   },
 
   // Один тик в сутки. Реминдер по ТЗ §3.5 уходит через 6 дней и ровно один

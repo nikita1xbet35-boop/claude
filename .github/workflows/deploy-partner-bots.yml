@@ -24,6 +24,17 @@ name: Deploy partner-bots worker
 #   BOT_TOKEN_RU, BOT_TOKEN_LATAM,
 #   BOT_WEBHOOK_SECRET, SUPABASE_SERVICE_KEY
 #
+# Отдельно — админ-бот (уведомления Нику о новых пользователях):
+#
+#   ADMIN_BOT_TOKEN        токен бота из BotFather. Только в секретах; в коде и
+#                          в базе его нет и быть не должно — репозиторий публичный.
+#   ADMIN_CHAT_ID          Telegram user_id Ника, единственный получатель.
+#                          Узнать: написать боту @userinfobot.
+#
+# Без этой пары воркер деплоится как раньше, роут /admin-bot просто молчит, а
+# партнёрские боты работают в полном объёме: уведомление обёрнуто в try/catch и
+# отсутствие токена для пользователя незаметно.
+#
 # SUPABASE_URL в этом списке нет намеренно: он не секрет и объявлен в
 # wrangler.jsonc как обычная переменная.
 #
@@ -90,6 +101,8 @@ jobs:
           BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
           BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
           BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
+          ADMIN_BOT_TOKEN: ${{ secrets.ADMIN_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           BOT_WEBHOOK_SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
@@ -99,6 +112,7 @@ jobs:
                       BOT_TOKEN_INDIA BOT_TOKEN_AFRICA BOT_TOKEN_BANGLADESH \
                       BOT_TOKEN_WORLDWIDE BOT_TOKEN_AFRIQUE BOT_TOKEN_UZBEKISTAN \
                       BOT_TOKEN_RU BOT_TOKEN_LATAM \
+                      ADMIN_BOT_TOKEN ADMIN_CHAT_ID \
                       BOT_WEBHOOK_SECRET SUPABASE_SERVICE_KEY; do
             if [ -n "${!name:-}" ]; then echo "  есть    $name"; have=$((have+1))
             else                         echo "  НЕТ     $name"; miss=$((miss+1)); fi
@@ -195,6 +209,8 @@ jobs:
           BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
           BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
           BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
+          ADMIN_BOT_TOKEN: ${{ secrets.ADMIN_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           BOT_WEBHOOK_SECRET: ${{ secrets.BOT_WEBHOOK_SECRET }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
@@ -203,6 +219,7 @@ jobs:
           for name in BOT_TOKEN_INDIA BOT_TOKEN_AFRICA BOT_TOKEN_BANGLADESH \
                       BOT_TOKEN_WORLDWIDE BOT_TOKEN_AFRIQUE BOT_TOKEN_UZBEKISTAN \
                       BOT_TOKEN_RU BOT_TOKEN_LATAM \
+                      ADMIN_BOT_TOKEN ADMIN_CHAT_ID \
                       BOT_WEBHOOK_SECRET SUPABASE_SERVICE_KEY; do
             value="${!name:-}"
             if [ -z "$value" ]; then
@@ -413,6 +430,7 @@ jobs:
           BOT_TOKEN_UZBEKISTAN: ${{ secrets.BOT_TOKEN_UZBEKISTAN }}
           BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
           BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
+          ADMIN_BOT_TOKEN: ${{ secrets.ADMIN_BOT_TOKEN }}
         run: ./set-webhooks.sh
 
       # Проверяем не свой же ответ, а состояние на стороне Telegram: адрес,
@@ -465,9 +483,24 @@ jobs:
         env:
           BOT_TOKEN_RU: ${{ secrets.BOT_TOKEN_RU }}
           BOT_TOKEN_LATAM: ${{ secrets.BOT_TOKEN_LATAM }}
+          ADMIN_BOT_TOKEN: ${{ secrets.ADMIN_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
         run: |
           set -u
           echo "Воркер: ${{ steps.deploy.outputs.url }}"
+
+          # Про админ-бота говорим отдельно и честно. Он не нужен для работы
+          # партнёрских ботов, поэтому его отсутствие — не ошибка; но и молчать
+          # нельзя: без ADMIN_CHAT_ID уведомления просто некуда слать, а внешне
+          # это выглядит как «бот есть, а сообщений нет».
+          if [ -z "${ADMIN_BOT_TOKEN:-}" ] || [ -z "${ADMIN_CHAT_ID:-}" ]; then
+            echo "::warning::админ-бот не настроен: нет ADMIN_BOT_TOKEN и/или ADMIN_CHAT_ID."
+            echo "Партнёрские боты от этого не страдают — уведомление обёрнуто в try/catch,"
+            echo "но Ник не увидит ни одного нового пользователя."
+          else
+            echo "Админ-бот настроен, уведомления уходят на ADMIN_CHAT_ID."
+          fi
+
           skipped=""
           [ -z "${BOT_TOKEN_RU:-}" ]    && skipped="$skipped ru"
           [ -z "${BOT_TOKEN_LATAM:-}" ] && skipped="$skipped latam"

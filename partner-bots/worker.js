@@ -14,7 +14,10 @@
 // ── Секреты (Cloudflare) ────────────────────────────────────────────────────
 //   BOT_TOKEN_INDIA / _AFRICA / _BANGLADESH / _WORLDWIDE / _AFRIQUE /
 //   _UZBEKISTAN / _RU / _LATAM
-//   BOT_WEBHOOK_SECRET   — общий для всех восьми, см. verifyWebhookSecret
+//   BOT_WEBHOOK_SECRET   — общий для всех восьми и для админ-бота
+//   ADMIN_BOT_TOKEN      — админ-бот уведомлений (роут /admin-bot)
+//   ADMIN_CHAT_ID        — единственный получатель уведомлений
+//   ADMIN_TZ_OFFSET      — необязательный, часовой пояс показа времени (по умолчанию +2)
 //   SUPABASE_URL, SUPABASE_SERVICE_KEY
 //
 // Токены в коде не лежат и лежать не могут: репозиторий публичный.
@@ -24,7 +27,7 @@ const SLUGS = ['india', 'africa', 'bangladesh', 'worldwide', 'afrique', 'uzbekis
 
 // Отметка сборки: по ней видно, какой код реально отвечает. Поднимать при
 // каждом изменении, которое надо уметь опознать на живом воркере.
-const BUILD = '2026-09-01.2';
+const BUILD = '2026-09-04.1';
 
 // Токен бота по slug. Имя секрета выводится, а не перечисляется таблицей —
 // иначе добавление бота требует правки в двух местах, и второе забывается.
@@ -471,11 +474,13 @@ async function onGetLink(env, cfg, chatId, user) {
     }),
   });
 
+  await logEvent(env, cfg.slug, user.id, 'link_issued', refCode);
   await send(env, cfg, chatId, t(lang).link(url), { reply_markup: mainKeyboard(lang) });
 }
 
 async function onFaq(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
+  await logEvent(env, cfg.slug, userId, 'faq_opened', null);
   const rows = await sb(env, `bot_faq?lang=eq.${lang}&select=key,question,sort_order&order=sort_order`);
   await send(env, cfg, chatId, t(lang).faqTitle, {
     reply_markup: {
@@ -520,6 +525,7 @@ async function setAwaiting(env, slug, userId, lang, value) {
 
 async function onGeoMenu(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
+  await logEvent(env, cfg.slug, userId, 'geo_checked', null);
   await setAwaiting(env, cfg.slug, userId, lang, null);
   await send(env, cfg, chatId, t(lang).geoIntro, {
     reply_markup: { inline_keyboard: [[
@@ -579,6 +585,7 @@ const geoAgainKeyboard = (lang) => ({
 
 async function onGeoLookup(env, cfg, chatId, userId, query) {
   const lang = await resolveLang(env, cfg, userId);
+  await logEvent(env, cfg.slug, userId, 'geo_checked', query);
 
   const hit = await sb(env, 'rpc/fn_find_geo', {
     method: 'POST', body: JSON.stringify({ q: query }),
@@ -628,6 +635,7 @@ async function onGeoById(env, cfg, chatId, userId, id) {
 
 async function onManager(env, cfg, chatId, userId) {
   const lang = await resolveLang(env, cfg, userId);
+  await logEvent(env, cfg.slug, userId, 'manager_clicked', null);
   await send(env, cfg, chatId, t(lang).manager(cfg.manager_contact));
 
   // Только UPDATE. ТЗ §3.4: записи нет — не создавать, нажатие на «связаться»
@@ -678,6 +686,7 @@ async function handleUpdate(env, cfg, update, origin) {
       const lang = data.slice(5);
       if (!T[lang]) return;
       await setLang(env, cfg.slug, userId, lang);
+      await logEvent(env, cfg.slug, userId, 'lang_changed', lang);
       await send(env, cfg, chatId, t(lang).langSet, { reply_markup: mainKeyboard(lang) });
       return;
     }
@@ -701,7 +710,14 @@ async function handleUpdate(env, cfg, update, origin) {
   const user = msg.from;
   const text = msg.text.trim();
 
-  if (text === '/start' || text.startsWith('/start ')) return onStart(env, cfg, chatId, user.id, true);
+  if (text === '/start' || text.startsWith('/start ')) {
+    // Учёт идёт ДО ответа и обёрнут так, чтобы не мешать ему: приветствие
+    // человеку важнее записи в журнал (ТЗ §4). cfg.__sink подставляется
+    // самотестом — в нём уведомления складываются в массив, а не летят Нику.
+    try { await trackStart(env, cfg, user, cfg.__sink); }
+    catch (e) { console.error('trackStart:', e && e.stack || e); }
+    return onStart(env, cfg, chatId, user.id, true);
+  }
   if (text === '/lang')       return onLang(env, cfg, chatId, user.id);
   if (text === '/check_geo')  return onGeoMenu(env, cfg, chatId, user.id);
 
@@ -728,6 +744,342 @@ async function handleUpdate(env, cfg, update, origin) {
   // Всё остальное — снова меню. Свободный текст боту не адресован: живой
   // диалог ведёт менеджер, и его контакт в приветствии.
   return onStart(env, cfg, chatId, user.id);
+}
+
+// ── Журнал действий ─────────────────────────────────────────────────────────
+// Пишется на каждое осмысленное действие. Из него считаются и воронка в
+// /stats, и карточка в /user — до 056 фиксировалась ровно одна вещь, выдача
+// ссылки, и то строкой в bot_leads.
+//
+// НИКОГДА не бросает. Журнал — это наблюдение за работой бота, а не сама
+// работа: упавшая запись события не должна лишить человека ответа. Ровно так
+// и ломался /start в своё время — ошибка в побочной записи съедала всё, что
+// шло после неё.
+async function logEvent(env, slug, userId, event, detail) {
+  try {
+    await sb(env, 'bot_user_events', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ bot_slug: slug, tg_user_id: userId, event,
+                             detail: detail == null ? null : String(detail).slice(0, 200) }),
+    });
+  } catch (e) {
+    console.error(`logEvent ${slug}/${event}:`, e && e.message);
+  }
+}
+
+// ── Админ-бот ───────────────────────────────────────────────────────────────
+// Живёт в ЭТОМ же воркере отдельным роутом (ТЗ §4): уведомление рождается
+// вплотную к обработке /start, разносить их по разным воркерам значило бы
+// гонять событие через сеть без причины.
+//
+// Получатель ровно один — ADMIN_CHAT_ID. Проверка стоит на каждом апдейте, и
+// постороннему НЕ отвечаем ничем: ответ подтвердил бы, что бот существует.
+const ADMIN_FLAGS = {
+  india: '🇮🇳', africa: '🌍', bangladesh: '🇧🇩', worldwide: '🌐',
+  afrique: '🇫🇷', uzbekistan: '🇺🇿', ru: '🇷🇺', latam: '🌎',
+};
+const botTitle = (slug, geoLabel) => `${ADMIN_FLAGS[slug] || '•'} ${geoLabel || slug} (${slug})`;
+
+// Смещение часового пояса для показа времени. ТЗ показывает UTC+2; вынесено в
+// переменную, чтобы поправить без правки кода.
+const adminTzOffset = (env) => parseInt(env.ADMIN_TZ_OFFSET || '2', 10) || 0;
+
+function fmtTime(iso, offsetH) {
+  const d = new Date(new Date(iso).getTime() + offsetH * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} `
+       + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())} (UTC${offsetH >= 0 ? '+' : ''}${offsetH})`;
+}
+
+// sink — тот же приём, что у tg(): в самотесте деплоя сообщения складываются в
+// массив вместо отправки. Без него каждый деплой писал бы Нику восемь раз.
+async function adminTg(env, method, payload, sink) {
+  if (sink) { sink.push({ admin: true, method, ...payload }); return null; }
+  const token = env.ADMIN_BOT_TOKEN;
+  if (!token) { console.error('ADMIN_BOT_TOKEN не задан — уведомление не ушло'); return null; }
+  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) console.error(`admin/${method} → ${res.status}: ${await res.text()}`);
+  return res;
+}
+
+const adminSay = (env, text, extra = {}, sink) =>
+  adminTg(env, 'sendMessage', {
+    chat_id: env.ADMIN_CHAT_ID, text, parse_mode: 'HTML',
+    disable_web_page_preview: true, ...extra,
+  }, sink);
+
+/** Кнопки под уведомлением. «Написать» — ссылка: у пользователя с юзернеймом
+ *  берём t.me (работает во всех клиентах), без юзернейма — tg://user?id=,
+ *  который открывается не везде, но другого способа нет. */
+function adminLeadKeyboard(slug, userId, username, status) {
+  const write = username
+    ? { text: '✍️ Написать', url: `https://t.me/${username}` }
+    : { text: '✍️ Написать', url: `tg://user?id=${userId}` };
+  return { inline_keyboard: [
+    [write, { text: status === 'in_work' ? '✅ В работе (отмечено)' : '✅ В работе',
+              callback_data: `st:in_work:${slug}:${userId}` }],
+    [{ text: status === 'spam' ? '🚫 Спам (отмечено)' : '🚫 Спам',
+       callback_data: `st:spam:${slug}:${userId}` },
+     { text: '📋 История', callback_data: `hist:${slug}:${userId}` }],
+  ] };
+}
+
+/** Первый ли это /start в этом боте. Проверяется ДО записи события — иначе
+ *  собственная запись и делала бы каждый старт «не первым». */
+async function isFirstStart(env, slug, userId) {
+  const rows = await sb(env,
+    `bot_user_events?bot_slug=eq.${slug}&tg_user_id=eq.${userId}&event=eq.start&select=id&limit=1`);
+  return !rows.length;
+}
+
+async function notifyAdminNewUser(env, cfg, user, sink) {
+  const off = adminTzOffset(env);
+  // Был ли уже в других ботах — это меняет смысл лида: человек ходит по
+  // нескольким гео, а не пришёл впервые.
+  let seenElsewhere = '';
+  try {
+    const prev = await sb(env,
+      `bot_user_events?tg_user_id=eq.${user.id}&event=eq.start&bot_slug=neq.${cfg.slug}` +
+      `&select=bot_slug,created_at&order=created_at.asc&limit=3`);
+    if (prev.length) {
+      const names = await sb(env, `bot_configs?select=slug,geo_label`);
+      const label = (sl) => {
+        const c = (names || []).find(x => x.slug === sl);
+        return botTitle(sl, c && c.geo_label);
+      };
+      seenElsewhere = '\n\n⚠️ Этот пользователь уже был в: '
+        + prev.map(p => `${label(p.bot_slug)} — ${fmtTime(p.created_at, off).split(' ')[0]}`).join(', ');
+    }
+  } catch (e) { console.error('notifyAdmin prev:', e && e.message); }
+
+  const uname = user.username ? '@' + user.username : 'без username';
+  const text =
+    `🆕 <b>Новый пользователь</b>\n\n` +
+    `Бот: ${botTitle(cfg.slug, cfg.geo_label)}\n` +
+    `Юзер: ${uname}\n` +
+    `ID: <code>${user.id}</code>\n` +
+    `Имя: ${(user.first_name || '—')}${user.last_name ? ' ' + user.last_name : ''}\n` +
+    `Язык TG: ${user.language_code || '—'}\n` +
+    `Время: ${fmtTime(new Date().toISOString(), off)}` + seenElsewhere;
+
+  await adminSay(env, text, { reply_markup: adminLeadKeyboard(cfg.slug, user.id, user.username, 'new') }, sink);
+}
+
+/** Обработка /start со стороны учёта: запись события и, если человек новый в
+ *  этом боте, уведомление. Ошибка здесь не должна отражаться на пользователе —
+ *  поэтому весь блок обёрнут вызывающим в try/catch (ТЗ §4). */
+async function trackStart(env, cfg, user, sink) {
+  let first = false;
+  try { first = await isFirstStart(env, cfg.slug, user.id); }
+  catch (e) { console.error('isFirstStart:', e && e.message); }
+
+  await logEvent(env, cfg.slug, user.id, 'start', user.username ? '@' + user.username : null);
+
+  // Юзернейм кладём в prefs, чтобы /user @name находил и тех, кто до ссылки не
+  // дошёл: в bot_leads такие не появляются вовсе.
+  //
+  // lang берётся РАЗРЕШЁННЫМ, а не умолчанием бота. Первая версия писала сюда
+  // cfg.default_lang, и это стирало выбор языка при каждом /start: человек
+  // переключался на русский, перезаходил — и снова видел английский. Поймал
+  // тест «/lang переживает следующий /start». Колонка объявлена NOT NULL без
+  // умолчания, поэтому просто не передать её нельзя — нужно именно правильное
+  // значение.
+  if (user.username) {
+    try {
+      const lang = await resolveLang(env, cfg, user.id);
+      await sb(env, 'bot_user_prefs?on_conflict=bot_slug,tg_user_id', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ bot_slug: cfg.slug, tg_user_id: user.id,
+                               lang, tg_username: user.username }),
+      });
+    } catch (e) { console.error('username upsert:', e && e.message); }
+  }
+
+  if (first) await notifyAdminNewUser(env, cfg, user, sink);
+}
+
+// ── Админ-бот: команды ──────────────────────────────────────────────────────
+const STATUS_RU = { new: 'новый', in_work: 'в работе', registered: 'зарегистрирован',
+                    lost: 'потерян', spam: 'спам' };
+
+const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
+
+/** Сводка по воронке. Считает база (fn_bot_funnel): PostgREST не умеет
+ *  GROUP BY, а тянуть все события в воркер и складывать в памяти — значит
+ *  делать тем медленнее, чем успешнее боты. */
+async function adminFunnel(env, sinceIso, title) {
+  const rows = await sb(env, 'rpc/fn_bot_funnel', {
+    method: 'POST', body: JSON.stringify({ p_since: sinceIso }),
+  });
+  const live = (rows || []).filter(r => Number(r.starts) > 0);   // ТЗ §2.3: нули не показываем
+  if (!live.length) return `${title}\n\nПока пусто.`;
+  const S = live.reduce((a, r) => a + Number(r.starts), 0);
+  const L = live.reduce((a, r) => a + Number(r.links), 0);
+  const M = live.reduce((a, r) => a + Number(r.managers), 0);
+  const lines = live.map(r =>
+    `${botTitle(r.bot_slug, r.geo_label)}\n` +
+    `   ${r.starts} новых · ${r.links} ссылок · ${r.managers} менеджер`);
+  return `${title}\n\n${lines.join('\n')}\n\n` +
+         `<b>Итого:</b> ${S} новых · ${L} ссылок (${pct(L, S)}%) · ${M} менеджер (${pct(M, S)}%)`;
+}
+
+async function adminLast(env, n) {
+  const rows = await sb(env,
+    `bot_user_events?event=eq.start&tg_user_id=gt.0&select=bot_slug,tg_user_id,detail,created_at` +
+    `&order=created_at.desc&limit=${Math.min(Math.max(n, 1), 50)}`);
+  if (!rows.length) return 'Пока никого.';
+  const off = adminTzOffset(env);
+  return `📋 <b>Последние ${rows.length}</b>\n\n` + rows.map(r =>
+    `${ADMIN_FLAGS[r.bot_slug] || '•'} <code>${r.tg_user_id}</code> ${r.detail || 'без username'}` +
+    ` — ${fmtTime(r.created_at, off)}`).join('\n');
+}
+
+/** Карточка пользователя. Ищем и по id, и по юзернейму: юзернейм лежит в
+ *  bot_user_prefs (пишется на каждом /start) и в bot_leads (только у дошедших
+ *  до ссылки) — смотрим оба, иначе половина людей не находится. */
+async function adminUserCard(env, query) {
+  const off = adminTzOffset(env);
+  let userId = null;
+  if (/^\d+$/.test(query)) {
+    userId = Number(query);
+  } else {
+    const uname = query.replace(/^@/, '');
+    const p = await sb(env, `bot_user_prefs?tg_username=eq.${encodeURIComponent(uname)}&select=tg_user_id&limit=1`);
+    if (p.length) userId = p[0].tg_user_id;
+    if (userId === null) {
+      const l = await sb(env, `bot_leads?tg_username=eq.${encodeURIComponent(uname)}&select=tg_user_id&limit=1`);
+      if (l.length) userId = l[0].tg_user_id;
+    }
+  }
+  if (userId === null) return `Не нашёл ${query}. Попробуй по ID.`;
+
+  const ev = await sb(env,
+    `bot_user_events?tg_user_id=eq.${userId}&select=bot_slug,event,detail,created_at&order=created_at.asc&limit=100`);
+  if (!ev.length) return `По ${query} (ID <code>${userId}</code>) событий нет.`;
+
+  const prefs = await sb(env, `bot_user_prefs?tg_user_id=eq.${userId}&select=bot_slug,lang,admin_status,tg_username`);
+  const uname = (prefs[0] && prefs[0].tg_username) ? '@' + prefs[0].tg_username : 'без username';
+  const bots = [...new Set(ev.map(e => e.bot_slug))];
+  const statuses = prefs.map(p => `${p.bot_slug}: ${STATUS_RU[p.admin_status] || p.admin_status}`).join(', ');
+
+  const EV_RU = { start: '/start', link_issued: 'взял ссылку', faq_opened: 'открыл FAQ',
+                  geo_checked: 'проверил ГЕО', manager_clicked: 'к менеджеру',
+                  lang_changed: 'сменил язык', reminder_sent: 'напоминание',
+                  status_changed: 'статус' };
+  const hist = ev.map(e =>
+    `${fmtTime(e.created_at, off)} · ${ADMIN_FLAGS[e.bot_slug] || '•'} ${EV_RU[e.event] || e.event}` +
+    (e.detail ? ` — ${e.detail}` : '')).join('\n');
+
+  return `👤 <b>${uname}</b>\nID: <code>${userId}</code>\n` +
+         `Боты: ${bots.join(', ')}\nСтатус: ${statuses || 'новый'}\n\n` +
+         `<b>История</b>\n${hist}`;
+}
+
+const ADMIN_HELP =
+  '🛠 <b>Команды</b>\n\n' +
+  '/today — сводка за сегодня\n' +
+  '/week — за 7 дней\n' +
+  '/stats — за всё время\n' +
+  '/last [N] — последние N пользователей (по умолчанию 10)\n' +
+  '/user @name или /user 123456789 — карточка и вся история\n' +
+  '/help — это сообщение';
+
+/** Пометка статуса из админ-бота.
+ *
+ *  Строка правится, а не перезаписывается: upsert со своим lang затёр бы язык,
+ *  выбранный самим человеком, — та же ловушка, что и в trackStart. Здесь она
+ *  опаснее, потому что срабатывала бы от действия Ника, а страдал бы
+ *  пользователь. */
+async function setLeadStatus(env, slug, userId, status) {
+  const rows = await sb(env,
+    `bot_user_prefs?bot_slug=eq.${slug}&tg_user_id=eq.${userId}&select=lang`);
+  if (rows.length) {
+    await sb(env, `bot_user_prefs?bot_slug=eq.${slug}&tg_user_id=eq.${userId}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ admin_status: status, updated_at: new Date().toISOString() }),
+    });
+  } else {
+    // Строки нет — человек в этом боте не появлялся, но пометить его всё равно
+    // можно (например из карточки). Язык берём умолчанием бота: своего у него
+    // ещё нет, а колонка NOT NULL.
+    const cfg = await loadConfig(env, slug);
+    await sb(env, 'bot_user_prefs', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ bot_slug: slug, tg_user_id: userId,
+                             lang: (cfg && cfg.default_lang) || 'en', admin_status: status }),
+    });
+  }
+  await logEvent(env, slug, userId, 'status_changed', status);
+}
+
+async function handleAdminUpdate(env, update, sink) {
+  const msg = update.message;
+  const cq  = update.callback_query;
+  const from = (msg && msg.from) || (cq && cq.from);
+  // Посторонним не отвечаем ВООБЩЕ (ТЗ §4): любой ответ подтвердил бы, что бот
+  // существует и слушает.
+  if (!from || String(from.id) !== String(env.ADMIN_CHAT_ID)) return;
+
+  if (cq) {
+    await adminTg(env, 'answerCallbackQuery', { callback_query_id: cq.id }, sink);
+    const d = String(cq.data || '');
+    const m = d.match(/^st:(in_work|spam):([a-z]+):(-?\d+)$/);
+    if (m) {
+      await setLeadStatus(env, m[2], Number(m[3]), m[1]);
+      // Перерисовываем ТУ ЖЕ клавиатуру с отметкой, а не шлём новое сообщение:
+      // иначе список уведомлений быстро превращается в кашу из дублей.
+      await adminTg(env, 'editMessageReplyMarkup', {
+        chat_id: cq.message.chat.id, message_id: cq.message.message_id,
+        reply_markup: adminLeadKeyboard(m[2], Number(m[3]), null, m[1]),
+      }, sink);
+      return;
+    }
+    const h = d.match(/^hist:([a-z]+):(-?\d+)$/);
+    if (h) { await adminSay(env, await adminUserCard(env, h[2]), {}, sink); return; }
+    return;
+  }
+
+  const text = String((msg && msg.text) || '').trim();
+  const off  = adminTzOffset(env);
+
+  if (text.startsWith('/today')) {
+    // Начало суток в часовом поясе Ника, а не в UTC: «сегодня» для человека
+    // начинается там, где он живёт.
+    const now = new Date(Date.now() + off * 3600 * 1000);
+    const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+                           - off * 3600 * 1000).toISOString();
+    const d = new Date(Date.now() + off * 3600 * 1000);
+    const title = `📊 <b>Сегодня, ${String(d.getUTCDate()).padStart(2,'0')}.`
+                + `${String(d.getUTCMonth()+1).padStart(2,'0')}.${d.getUTCFullYear()}</b>`;
+    return void await adminSay(env, await adminFunnel(env, since, title), {}, sink);
+  }
+  if (text.startsWith('/week')) {
+    const since = new Date(Date.now() - 7 * 86400e3).toISOString();
+    return void await adminSay(env, await adminFunnel(env, since, '📊 <b>За 7 дней</b>'), {}, sink);
+  }
+  if (text.startsWith('/stats')) {
+    return void await adminSay(env, await adminFunnel(env, null, '📊 <b>За всё время</b>'), {}, sink);
+  }
+  if (text.startsWith('/last')) {
+    const n = parseInt(text.split(/\s+/)[1], 10);
+    return void await adminSay(env, await adminLast(env, Number.isFinite(n) ? n : 10), {}, sink);
+  }
+  if (text.startsWith('/user')) {
+    const q = text.split(/\s+/)[1];
+    if (!q) return void await adminSay(env, 'Как пользоваться: /user @name или /user 123456789', {}, sink);
+    return void await adminSay(env, await adminUserCard(env, q), {}, sink);
+  }
+  // /help, /start и всё остальное — короткая справка. Админ-бот не ведёт
+  // диалогов: любое непонятое сообщение это промах по команде.
+  return void await adminSay(env, ADMIN_HELP, {}, sink);
 }
 
 // ── Проверка подписи вебхука ────────────────────────────────────────────────
@@ -777,6 +1129,7 @@ async function sendReminders(env) {
     try {
       const lang = T[lead.lang] ? lead.lang : cfg.default_lang;
       await send(env, cfg, lead.tg_user_id, t(lang).reminder(url, cfg.manager_contact));
+      await logEvent(env, cfg.slug, lead.tg_user_id, 'reminder_sent', null);
       await sb(env, `bot_leads?id=eq.${lead.id}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
@@ -892,6 +1245,22 @@ export default {
         status: out.ok ? 200 : 500,
         headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
       });
+    }
+
+    // ── Админ-бот ───────────────────────────────────────────────────────────
+    // Тот же секрет вебхука, что у партнёрских: Telegram присылает его
+    // заголовком, и без него роут не отвечает никому.
+    if (url.pathname === '/admin-bot' || url.pathname === '/admin-bot/') {
+      if (request.method !== 'POST') return new Response('method not allowed', { status: 405 });
+      const expected = env.BOT_WEBHOOK_SECRET;
+      if (!expected || request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== expected) {
+        return new Response('unauthorized', { status: 401 });
+      }
+      // 200 всегда, как и партнёрским: иначе Telegram уходит в бесконечные
+      // повторы одного и того же апдейта.
+      try { await handleAdminUpdate(env, await request.json(), null); }
+      catch (e) { console.error('admin-bot update failed:', e && e.stack || e); }
+      return new Response('OK');
     }
 
     if (!m) return new Response('not found', { status: 404 });
