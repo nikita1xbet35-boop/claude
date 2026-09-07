@@ -2,7 +2,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 // Stage 1 of the Telegram outreach pipeline: DISCOVERY.
 //
-// Rotates through public search queries (tg_search_queries), keeps only public
+// Rotates through public search queries (search_keywords, channel='telegram'), keeps only public
 // t.me channel URLs, scores them for partner fitness with Groq, and inserts the
 // survivors as status='new'. Nothing is messaged here — nothing is messaged
 // anywhere in this pipeline.
@@ -408,10 +408,17 @@ Deno.serve(async (req: Request) => {
 
     // Round-robin over the query pool: least-recently-used first, so every angle
     // gets its turn instead of random picks starving half the pool.
-    const { data: queries } = await supabase.from('tg_search_queries')
-      .select('id, query, runs, channels_found')
+    // Пул переехал из tg_search_queries в search_keywords: одна таблица на оба
+    // канала поиска, разделённая колонкой channel. Механика та же — запрос,
+    // выдача, кандидаты, — а вот телеметрия наконец лежит рядом с веб-ключами
+    // и сравнима с ней (раньше счётчики назывались channels_found против
+    // results_found, и посчитать выход по обоим каналам одним запросом было
+    // нечем).
+    const { data: queries } = await supabase.from('search_keywords')
+      .select('id, keyword, times_used, results_total')
+      .eq('channel', 'telegram')
       .eq('active', true)
-      .order('last_run_at', { ascending: true, nullsFirst: true })
+      .order('last_used_at', { ascending: true, nullsFirst: true })
       .limit(QUERIES_PER_RUN);
     if (!queries?.length) { stats.reason = 'no active queries'; return json(stats); }
 
@@ -434,14 +441,14 @@ Deno.serve(async (req: Request) => {
     for (const q of queries) {
       if (outOfTime()) break;
       if (emptyStreak >= 3) { stats.reason = 'search source returning nothing — backing off'; break; }
-      stats.queries.push(q.query);
+      stats.queries.push(q.keyword);
       // Walk pages 1→2→3 across successive runs of the same query, so a query
       // that has already given up its first page reaches further down instead of
       // returning the same URLs to be discarded as duplicates.
-      const page = 1 + ((q.runs ?? 0) % 3);
+      const page = 1 + ((q.times_used ?? 0) % 3);
       const hits = serpAcct
-        ? await searchSerp(q.query, RESULTS_PER_QUERY, serpAcct.key)
-        : await searchDdg(q.query, RESULTS_PER_QUERY, page);
+        ? await searchSerp(q.keyword, RESULTS_PER_QUERY, serpAcct.key)
+        : await searchDdg(q.keyword, RESULTS_PER_QUERY, page);
       if (serpAcct) {
         const { data: u } = await supabase.from('api_usage')
           .select('used').eq('service', serpAcct.service).single();
@@ -454,10 +461,10 @@ Deno.serve(async (req: Request) => {
         const url = normalizeTgUrl(h.link);
         if (!url || seen.has(url)) continue;
         seen.add(url);
-        cands.push({ ...h, url, query: q.query });
+        cands.push({ ...h, url, query: q.keyword });
       }
-      await supabase.from('tg_search_queries')
-        .update({ runs: (q.runs ?? 0) + 1, last_run_at: new Date().toISOString() })
+      await supabase.from('search_keywords')
+        .update({ times_used: (q.times_used ?? 0) + 1, last_used_at: new Date().toISOString() })
         .eq('id', q.id);
       // 2s between queries. At 700ms DuckDuckGo started returning empty pages
       // partway through a 6-query run — it throttles bursts from one IP, and the
@@ -528,10 +535,10 @@ Deno.serve(async (req: Request) => {
       }
       // Yield stats per query, so archive-style pruning is possible later.
       for (const q of queries) {
-        const n = rows.filter(r => r.found_query === q.query).length;
+        const n = rows.filter(r => r.found_query === q.keyword).length;
         if (n) {
-          await supabase.from('tg_search_queries')
-            .update({ channels_found: (q.channels_found ?? 0) + n }).eq('id', q.id);
+          await supabase.from('search_keywords')
+            .update({ results_total: (q.results_total ?? 0) + n }).eq('id', q.id);
         }
       }
     }

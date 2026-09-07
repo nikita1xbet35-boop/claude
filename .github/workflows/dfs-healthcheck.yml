@@ -103,7 +103,7 @@ jobs:
           q "SELECT pipeline, status, count(*) FROM public.send_queue GROUP BY 1,2 ORDER BY 1,3 DESC;"
           echo; echo
           echo "--- telegram pipeline ---"
-          q "SELECT (SELECT count(*) FROM public.tg_outreach_channels) AS channels, (SELECT count(*) FROM public.tg_outreach_channels WHERE owner_contact IS NOT NULL) AS with_contact, (SELECT count(*) FROM public.tg_outreach_channels WHERE found_at > now() - interval '24 hours') AS last_24h, (SELECT count(*) FROM public.tg_search_queries WHERE active) AS queries, (SELECT count(*) FROM public.tg_outreach_log) AS sent_cards;"
+          q "SELECT (SELECT count(*) FROM public.tg_outreach_channels) AS channels, (SELECT count(*) FROM public.tg_outreach_channels WHERE owner_contact IS NOT NULL) AS with_contact, (SELECT count(*) FROM public.tg_outreach_channels WHERE found_at > now() - interval '24 hours') AS last_24h, (SELECT count(*) FROM public.search_keywords WHERE channel = 'telegram' AND active) AS queries, (SELECT count(*) FROM public.tg_outreach_log) AS sent_cards;"
           echo; echo
           q "SELECT status, count(*) FROM public.tg_outreach_channels GROUP BY 1 ORDER BY 2 DESC;"
           echo; echo
