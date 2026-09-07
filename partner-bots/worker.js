@@ -321,9 +321,27 @@ const t = (lang) => T[lang] || T.en;
 // ── Supabase ────────────────────────────────────────────────────────────────
 // Через REST под service_role: воркер — сервер, RLS для него не барьер, а
 // bot_leads по 048 закрыта для всех остальных ролей.
+// Таймаут на каждый запрос к базе.
+//
+// Без него fetch ждёт ответа столько, сколько ждёт Cloudflare, а обработчик
+// апдейта ждёт fetch. Когда Supabase перестал принимать соединения, это
+// вылезло наружу так: человек жал кнопку, ответа не было, Telegram считал
+// доставку неудавшейся и складывал апдейт в очередь повторов — и ответ
+// приходил через несколько часов, когда база оживала и очередь разгребалась.
+//
+// Восемь секунд с запасом укладываются в отведённое вебхуку время и при этом
+// заведомо больше любого здорового запроса: PostgREST на этих таблицах
+// отвечает за десятки миллисекунд. То есть таймаут срабатывает только тогда,
+// когда база действительно не отвечает, — и тогда быстрый отказ честнее
+// молчания на часы.
+const SB_TIMEOUT_MS = 8000;
+
 async function sb(env, path, init = {}) {
   const url = `${env.SUPABASE_URL}/rest/v1/${path}`;
-  const res = await fetch(url, {
+  let res;
+  try {
+    res = await fetch(url, {
+    signal: AbortSignal.timeout(SB_TIMEOUT_MS),
     ...init,
     headers: {
       apikey: env.SUPABASE_SERVICE_KEY,
@@ -331,7 +349,15 @@ async function sb(env, path, init = {}) {
       'Content-Type': 'application/json',
       ...(init.headers || {}),
     },
-  });
+    });
+  } catch (e) {
+    // AbortError от таймаута отличаем от прочих сетевых сбоев: в логе это
+    // разные диагнозы — «база не отвечает» против «до базы не достучались».
+    const why = (e && e.name === 'TimeoutError') || (e && e.name === 'AbortError')
+      ? `база не ответила за ${SB_TIMEOUT_MS} мс`
+      : `сеть: ${e && e.message || e}`;
+    throw new Error(`supabase ${init.method || 'GET'} ${path} → ${why}`);
+  }
   if (!res.ok) {
     // Тело ответа PostgREST содержит причину; без него в логах остаётся голый
     // код и искать нечего.
@@ -1082,6 +1108,38 @@ async function handleAdminUpdate(env, update, sink) {
   return void await adminSay(env, ADMIN_HELP, {}, sink);
 }
 
+/** Короткий отказ человеку, когда обработка апдейта упала.
+ *
+ *  Стоит отдельно от tg(): та берёт токен по cfg, а сюда мы попадаем в том
+ *  числе тогда, когда cfg как раз и не загрузился. Язык — умолчание бота, а не
+ *  выбранный: узнать выбранный можно только из базы, а база и есть то, что
+ *  сейчас не отвечает.
+ *
+ *  Сама по себе не бросает: если и это не ушло, добавить всё равно нечего. */
+async function notifyBroken(env, slug, update) {
+  try {
+    const chatId = update?.message?.chat?.id
+                || update?.callback_query?.message?.chat?.id;
+    if (!chatId) return;
+    const token = tokenFor(env, slug);
+    if (!token) return;
+    const lang = (update?.message?.from?.language_code
+               || update?.callback_query?.from?.language_code || 'en').slice(0, 2);
+    const text = ({
+      ru: '⚠️ Сервис временно недоступен. Попробуйте через пару минут.',
+      es: '⚠️ Servicio temporalmente no disponible. Inténtalo en unos minutos.',
+      fr: '⚠️ Service temporairement indisponible. Réessayez dans quelques minutes.',
+      uz: '⚠️ Xizmat vaqtincha ishlamayapti. Bir necha daqiqadan so\'ng urinib ko\'ring.',
+    })[lang] || '⚠️ Service temporarily unavailable. Please try again in a few minutes.';
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(SB_TIMEOUT_MS),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch (_) { /* больше сказать нечего */ }
+}
+
 // ── Проверка подписи вебхука ────────────────────────────────────────────────
 // Один секрет на все шесть ботов. Раздельные были бы строже, но каждый секрет
 // — ещё одна ручная операция в панели Cloudflare, а роут и так не даёт ничего,
@@ -1147,7 +1205,7 @@ async function sendReminders(env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const m = url.pathname.match(/^\/bot\/([a-z]+)\/?$/);
 
@@ -1273,12 +1331,41 @@ export default {
     // ошибка при этом вернётся снова и снова тем же результатом, поэтому
     // отвечаем 200 всегда, а причину пишем в лог.
     try {
-      const cfg = await loadConfig(env, slug);
-      if (!cfg || !cfg.active) {
-        console.error(`bot/${slug}: конфига нет или бот выключен`);
-        return new Response('OK');
-      }
-      await handleUpdate(env, cfg, await request.json(), url.origin);
+      const update = await request.json();
+
+      // Telegram получает 200 СРАЗУ, обработка идёт в фоне.
+      //
+      // Раньше ответ ждал, пока отработает handleUpdate, а тот ждал базу. Пока
+      // база отвечает за десятки миллисекунд, разницы нет; когда она перестала
+      // отвечать вовсе, разница оказалась в часах: Telegram не дожидался
+      // ответа, считал доставку неудавшейся и складывал апдейт в очередь
+      // повторов. Человек жал кнопку, не получал ничего — и получал ответ
+      // через несколько часов, когда очередь разгребалась.
+      //
+      // waitUntil разрывает эту связь: очередь у Telegram не копится никогда,
+      // а медленная база теперь стоит одному человеку одного пропущенного
+      // ответа вместо лавины повторов на всех.
+      //
+      // Ошибки при этом не теряются в тишине: они и раньше не доходили до
+      // Telegram (обработчик всегда отвечал 200), а в лог пишутся так же.
+      const work = (async () => {
+        const cfg = await loadConfig(env, slug);
+        if (!cfg || !cfg.active) {
+          console.error(`bot/${slug}: конфига нет или бот выключен`);
+          return;
+        }
+        await handleUpdate(env, cfg, update, url.origin);
+      })().catch(async (e) => {
+        console.error(`bot/${slug} update failed:`, e && e.stack || e);
+        // Человеку лучше короткий отказ, чем молчание: молчащий бот
+        // неотличим от сломанного, и второй раз в него уже не приходят.
+        await notifyBroken(env, slug, update);
+      });
+
+      // ctx может не быть только в тестовой обвязке — там обработка идёт
+      // синхронно, и это ровно то, что тестам и нужно.
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(work);
+      else await work;
     } catch (e) {
       console.error(`bot/${slug} update failed:`, e && e.stack || e);
     }
