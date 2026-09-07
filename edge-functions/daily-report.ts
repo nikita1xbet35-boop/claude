@@ -94,6 +94,35 @@ Deno.serve(async (req: Request) => {
 📬 В очереди на сегодня: ${pendingCount} писем
 🔍 Контактный резерв: ${reserve} лидов`;
 
+    // ── Обслуживание пула отправителей (Блок C §3) ────────────────────────
+    // Едет на этом тике, а не отдельным крон-триггером: на бесплатном плане
+    // Cloudflare потолок в 5 триггеров, и все заняты. Постоянное место — в
+    // блоке «Крон-диспетчер», который идёт следующим.
+    //
+    // Вызывается ОТСЮДА, а не из воркера: воркер ходит с anon-ключом, а права
+    // на эти функции выданы только service_role. Иначе сбросить счётчики всего
+    // пула мог бы любой, у кого есть публичный ключ из index.html.
+    //
+    // ТЗ просит сброс в 00:00 UTC, тик идёт в 07:00 — это временное место, и
+    // разница безобидна: сброс обнуляет дневной счётчик, а не окно отправки.
+    // Единственный эффект — сутки лимита считаются от 07:00 до 07:00.
+    let poolNote = '';
+    try {
+      const [{ data: paused }, { data: ramped }] = await Promise.all([
+        supabase.rpc('fn_reset_smtp_daily'),
+        supabase.rpc('fn_ramp_smtp_accounts'),
+      ]);
+      const nPaused = Number(paused ?? 0);
+      const nRamped = Number(ramped ?? 0);
+      // В отчёт попадает только то, что произошло. Строка «на паузе: 0» в
+      // каждом утреннем отчёте перестаёт читаться ровно к тому дню, когда там
+      // появится единица.
+      if (nRamped) poolNote += `\n📈 Прогрев: у ${nRamped} аккаунтов вырос дневной лимит`;
+      if (nPaused) poolNote += `\n🚫 На паузе по отказам: ${nPaused} аккаунт(ов) — доля отказов выше 5%`;
+    } catch (e: any) {
+      poolNote = `\n⚠️ Обслуживание пула отправителей не отработало: ${e?.message ?? e}`;
+    }
+
     await fetch(FUNCTIONS_URL + '/send-alert', {
       method: 'POST',
       headers: {
@@ -101,7 +130,7 @@ Deno.serve(async (req: Request) => {
         'apikey': SUPABASE_KEY,
         'Authorization': 'Bearer ' + SUPABASE_KEY,
       },
-      body: JSON.stringify({ level: 'info', service: 'system', message: 'daily report', custom_text: text }),
+      body: JSON.stringify({ level: 'info', service: 'system', message: 'daily report', custom_text: text + poolNote }),
     });
 
     return new Response(JSON.stringify({ success: true }), {

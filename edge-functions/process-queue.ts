@@ -117,38 +117,78 @@ function geoName(geoCode: string): string {
 
 /** Build the outreach email body from a fixed template. No Groq needed.
  *  Soft intro — references the site name and (when known) its GEO. */
-function buildEmailBody(lead: Record<string, unknown>, _brand: string): string {
-  const name      = cleanSiteName(lead.name as string, lead.url as string || '');
-  const geoRaw    = geoName((lead.geo as string) || '');
-  const hasGeo    = !!geoRaw && geoRaw !== 'the region' && geoRaw !== 'your market';
-  const geoClause = hasGeo ? ` in ${geoRaw}` : '';
-  const source    = ((lead.source as string) || 'seo').toLowerCase();
+// ── Пул отправителей (Блок C) ───────────────────────────────────────────────
+interface Sender { id: string; credentials_ref: string; email: string }
 
-  // ── YouTube channel owner (source=youtube) — prepared, source not yet launched
-  if (source === 'youtube') {
-    return `Hi, I came across your channel ${name}${geoClause} — you've built a real, engaged audience, `
-      + `and that's worth more than most programs pay creators for it. I'm Nick from 1xPartners. `
-      + `You're already sending this audience somewhere; I can make it pay you more: clean RevShare on 1xBet, `
-      + `no admin fee, no hidden cuts, terms built around your actual numbers, plus creator-friendly promo codes and assets. `
-      + `You deal with me directly, not a support desk. Want me to send a short proposal? Or ping me on Telegram: @aff_manager_xbet`;
+// Кэш на прогон: несколько писем подряд обычно уходят с одного аккаунта, и
+// перезапрашивать его на каждое письмо незачем. Ключ — бренд, потому что
+// именно по бренду выбирается замена.
+const senderByBrand = new Map<string, Sender | null>();
+
+/** Годен ли записанный в очередь аккаунт прямо сейчас, и если нет — какой
+ *  взять вместо него. Возвращает null, когда у бренда нет ни одного свободного
+ *  отправителя: письмо тогда остаётся в очереди, а не теряется. */
+async function resolveSender(queuedId: string | null, brandId: string | null): Promise<Sender | null> {
+  if (!brandId) return null;
+
+  if (queuedId) {
+    const { data } = await supabase.from('smtp_accounts')
+      .select('id, credentials_ref, email, brand_id, status, daily_sent, daily_limit')
+      .eq('id', queuedId).maybeSingle();
+    // Бренд сверяется отдельно и намеренно: подмена brand_id у лида после
+    // постановки в очередь не должна приводить к отправке с чужого адреса.
+    if (data
+        && data.brand_id === brandId
+        && data.credentials_ref
+        && ['active', 'warming'].includes(String(data.status))
+        && (data.daily_sent ?? 0) < (data.daily_limit ?? 0)) {
+      return { id: data.id, credentials_ref: data.credentials_ref, email: data.email };
+    }
   }
 
-  // ── App developer (source=appstore) — Africa-focus week template
-  if (source === 'appstore') {
-    const geoWordApp = hasGeo ? geoRaw : 'your market';
-    return `Hi, I came by your app ${name} — strong work in ${geoWordApp}. `
-      + `I'm Nick from 1xPartners. 1xBet is the #1 betting brand across Africa, fully licensed in your market, `
-      + `and right now I've got an exclusive RevShare deal (up to 40%) for partners here. `
-      + `Clean share, no admin fee, weekly payouts, deep links and API integration, and you deal with me directly. `
-      + `Want me to send the offer?`;
-  }
+  if (senderByBrand.has(brandId)) return senderByBrand.get(brandId)!;
+  let next: Sender | null = null;
+  try {
+    const { data } = await supabase.rpc('fn_next_smtp_account', { p_brand_id: brandId });
+    const row = Array.isArray(data) ? data[0] : data;
+    if (row?.id && row?.credentials_ref) {
+      next = { id: row.id, credentials_ref: row.credentials_ref, email: row.email };
+    }
+  } catch (_) { next = null; }
+  senderByBrand.set(brandId, next);
+  return next;
+}
 
-  // ── SEO site owner (default) — Africa-focus week template
-  const geoWord = hasGeo ? geoRaw : 'your market';
-  return `Hi, I came by ${name} — strong work in ${geoWord}. `
-    + `I'm Nick from 1xPartners. 1xBet is the #1 betting brand across Africa, fully licensed in your market, `
-    + `and right now I've got an exclusive RevShare deal (up to 40%) for partners here. `
-    + `Clean share, no admin fee, weekly payouts, and you deal with me directly. Want me to send the offer?`;
+// ── Шаблоны писем из БД (Блок C §4) ─────────────────────────────────────────
+interface Tpl { subject: string; body: string }
+// brand_id → variant → language → attempt_no(1..3) → шаблон
+const tplCache = new Map<string, Map<string, Map<string, Tpl[]>>>();
+
+async function loadTemplates(brandId: string): Promise<Map<string, Map<string, Tpl[]>>> {
+  const cached = tplCache.get(brandId);
+  if (cached) return cached;
+  const byVariant = new Map<string, Map<string, Tpl[]>>();
+  try {
+    const { data } = await supabase.from('email_templates')
+      .select('variant, language, attempt_no, subject, body')
+      .eq('brand_id', brandId).eq('active', true)
+      .order('attempt_no', { ascending: true });
+    for (const r of data || []) {
+      if (!byVariant.has(r.variant)) byVariant.set(r.variant, new Map());
+      const byLang = byVariant.get(r.variant)!;
+      if (!byLang.has(r.language)) byLang.set(r.language, []);
+      byLang.get(r.language)!.push({ subject: r.subject, body: r.body });
+    }
+  } catch (_) { /* пустая карта = нет шаблонов, обрабатывается вызывающим */ }
+  tplCache.set(brandId, byVariant);
+  return byVariant;
+}
+
+/** Подстановка плейсхолдеров. Значения подставляются как есть — тексты писем
+ *  уходят обычным текстом, экранировать нечего. */
+function render(t: Tpl, vars: Record<string, string>): Tpl {
+  const fill = (x: string) => x.replace(/\{([a-z_]+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+  return { subject: fill(t.subject), body: fill(t.body) };
 }
 
 // Decode HTML entities so site names never show raw "&amp;" / "&#x27;" etc.
@@ -251,70 +291,6 @@ function brandSiteOf(lead: Record<string, unknown>): string {
   } catch { return String(lead.name || 'your site'); }
 }
 
-function buildBrandEmail(lead: Record<string, unknown>): { subject: string; body: string } | null {
-  const site    = brandSiteOf(lead);
-  const keyword = brandKeywordOf(lead);
-  // Without a query there is no letter worth sending here — the whole opening
-  // is built on naming it. Better to skip the lead than to mangle the copy.
-  if (!site || !keyword) return null;
-
-  const uz = String(lead.geo || '').trim().toUpperCase() === 'UZ';
-
-  // Subject picked by lead id, not at random: a retry must not arrive under a
-  // different subject line than the attempt before it.
-  //
-  // Subjects use an ASCII hyphen where the brief writes an em dash: headers go
-  // through toAsciiSafe, which deletes the dash outright and leaves
-  // "site.com a partnership worth 5 minutes". The body keeps the em dashes —
-  // it is sent as UTF-8 base64 and arrives exactly as written.
-  const idx = Math.abs(Number(lead.id) || 0) % 3;
-
-  if (uz) {
-    const subjects = [
-      `${site} haqida qisqa savol`,
-      `${keyword} bo'yicha o'rningizni ko'rdim`,
-      `${site} - 5 daqiqaga arziydigan hamkorlik`,
-    ];
-    const body =
-      `Salom, ${site} saytingizga kirdim — ${keyword} bo'yicha yaxshi o'rinda turibsiz, zo'r ish. `
-      + `Bu o'rinni ushlab turish oson emas.\n\n`
-      + `Men Nikman, 1xBet'da hamkorlik yo'nalishida ishlayman. Biz shunday brend-trafik yuboradigan `
-      + `odamlar bilan ishlaymiz va shartlar odatda ikkala tomon uchun ham qulay chiqadi — toza RevShare, `
-      + `admin to'lovisiz, haftalik to'lovlar.\n\n`
-      + `Hozir sizga hech narsa sotmoqchi emasman — shunchaki raqamlarni eshitishga qiziqasizmi, `
-      + `bilmoqchiman. Ikki daqiqa vaqt oladi.\n\n`
-      + `Telegram: @aff_manager_xbet`;
-    return { subject: toAsciiSafe(subjects[idx]), body };
-  }
-
-  const subjects = [
-    `Quick one about ${site}`,
-    `Saw your ranking for ${keyword}`,
-    `${site} - a partnership worth 5 minutes`,
-  ];
-  const body =
-    `Hey, I came by ${site} — you're ranking for ${keyword}, solid work. That's not easy to hold.\n\n`
-    + `I'm Nick, I work with 1xBet on the partnerships side. We work with people who send us `
-    + `brand-intent traffic like this, and the terms tend to work out well for both sides — `
-    + `clean RevShare, no admin fee, weekly payouts.\n\n`
-    + `Not trying to sell you anything right now — just curious if you're open to hearing the numbers. `
-    + `Takes two minutes.\n\n`
-    + `Telegram: @aff_manager_xbet`;
-  return { subject: toAsciiSafe(subjects[idx]), body };
-}
-
-function buildSubject(leadName: string, leadUrl: string, _brand: string, leadGeo?: string): string {
-  const geo  = geoName(leadGeo || '');
-  const hasGeo = !!geo && geo !== 'the region' && geo !== 'your market';
-  const geoWord = hasGeo ? geo : 'your market';
-  const SUBJECTS = [
-    `Exclusive 1xBet deal for ${geoWord}`,
-    `Your ${geoWord} traffic — up to 40%`,
-    `#1 in Africa, licensed in ${geoWord}`,
-  ];
-  return SUBJECTS[Math.floor(Math.random() * SUBJECTS.length)];
-}
-
 async function markFailed(item: Record<string, unknown>, errMsg: string, forceSkip = false): Promise<boolean> {
   // 5xx SMTP errors (550/551/552/553) are permanent rejections — retrying wastes
   // 6 minutes per item and blocks valid emails behind it in the queue.
@@ -332,7 +308,17 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   const stats = { processed: 0, sent: 0, failed: 0, skipped: 0, reason: '',
+                  // Отдельно от skipped: «некому отправить» и «лид не подошёл»
+                  // требуют разных действий — первое чинится добавлением
+                  // аккаунта, второе не чинится вообще. В общей куче они
+                  // неразличимы, и очередь, вставшая из-за лимитов, выглядела
+                  // бы как нормальная работа.
+                  no_sender: 0,
                   blocked_pipelines: [] as string[] };
+  let noSenderAvailable = 0;
+  // Множество, а не счётчик: важно не сколько писем не ушло, а КАКОГО шаблона
+  // не хватает — это одна строка в таблице, и её надо назвать.
+  const missingTemplate = new Set<string>();
 
   try {
     const now = new Date();
@@ -435,12 +421,28 @@ Deno.serve(async (req: Request) => {
         continue;   // ceiling hit; the row waits for tomorrow
       }
 
-      // Unified 1xPartners campaign — every lead (regardless of which brand-search
-      // found it) is a valid affiliate target. All sends go through the main account
-      // with the brand-neutral template, so no brand is skipped anymore.
-
-      // LP account disabled — route everything through main
-      const account    = 'main';
+      // ── Отправитель (Блок C §2.3) ───────────────────────────────────────
+      // generate-queue уже выбрал аккаунт и записал его в строку. Но выбирал он
+      // по daily_sent на момент постановки в очередь, а строка может уйти через
+      // сутки — к тому времени аккаунт мог выбрать лимит, встать на паузу по
+      // отказам или сгореть. Поэтому записанный аккаунт здесь ПЕРЕПРОВЕРЯЕТСЯ,
+      // и при негодности берётся следующий свободный аккаунт того же бренда.
+      //
+      // Бренд обязателен и фолбэка на «любой свободный» нет: письмо LuckyPari,
+      // ушедшее с адреса 1xBet, вскрывает связку брендов на стороне получателя.
+      const sender = await resolveSender(
+        item.smtp_account_id as string | null,
+        (lead.brand_id ?? item.brand_id) as string | null,
+      );
+      if (!sender) {
+        // Не ошибка и не потеря: строка остаётся pending и уедет, когда лимиты
+        // обновятся. markFailed здесь наращивал бы retry_count и через три
+        // прогона выбросил бы лид насовсем из-за занятого отправителя.
+        stats.skipped++;
+        noSenderAvailable++;
+        continue;
+      }
+      const account      = 'main';   // legacy-поле email_log и send-email
       const usageService = 'gmail_main';
 
       // Per-account daily quota
@@ -567,24 +569,70 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      let subject = buildSubject(lead.name, lead.url || '', item.brand, lead.geo as string);
-      let body    = buildEmailBody(lead, item.brand);
-      let inReplyTo: string | undefined;
-
-      // Brand-traffic leads get their own letter. Checked on the queue row
-      // first because that is what routing and the daily ceiling key on; the
-      // lead is the fallback for rows written before pipeline was stamped.
+      // ── Текст письма из БД (Блок C §4) ──────────────────────────────────
+      // Раньше тексты лежали в этом файле, и правка одного слова требовала
+      // деплоя всего конвейера отправки.
+      //
+      // Какой вариант письма брать, по-прежнему решает код: это зависит от
+      // источника лида и конвейера, а не от текста. В базе лежат сами тексты.
       const pipelineOf = String(item.pipeline || lead.pipeline || 'search');
-      if (pipelineOf === 'brand') {
-        const t = buildBrandEmail(lead);
-        if (!t) {
-          await markFailed(item, 'brand lead has no keyword to write about', true);
-          stats.skipped++;
-          continue;
-        }
-        subject = t.subject;
-        body    = t.body;
+      const source     = String(lead.source || 'seo').toLowerCase();
+      const brandIdOf  = String(lead.brand_id ?? item.brand_id ?? '');
+
+      const variant = pipelineOf === 'brand' ? 'brand_intent'
+                    : source === 'youtube'   ? 'cold_youtube'
+                    : source === 'appstore'  ? 'cold_appstore'
+                    :                          'cold_geo';
+      // Узбекский только у брендового письма — других переводов нет, и
+      // подставлять английский текст под UZ-лид пришлось бы молча.
+      const langOf = (variant === 'brand_intent'
+                      && String(lead.geo || '').trim().toUpperCase() === 'UZ') ? 'UZ' : 'EN';
+
+      const tpls = (await loadTemplates(brandIdOf)).get(variant)?.get(langOf) || [];
+      if (!tpls.length) {
+        // Чужой шаблон НЕ подставляется: письмо про 1xBet, ушедшее партнёру
+        // LuckyPari, вскрывает связку брендов. Лид остаётся в очереди —
+        // markFailed через три прогона выбросил бы его насовсем из-за
+        // отсутствия текста, который заводится одной строкой в таблице.
+        stats.skipped++;
+        missingTemplate.add(`${brandIdOf || '<без бренда>'}/${variant}/${langOf}`);
+        continue;
       }
+
+      const geoRawOf  = geoName(String(lead.geo || ''));
+      const hasGeoOf  = !!geoRawOf && geoRawOf !== 'the region' && geoRawOf !== 'your market';
+      const keywordOf = brandKeywordOf(lead);
+
+      // Брендовое письмо всё построено на назывании запроса: без него текст
+      // разваливается, и лид лучше пропустить, чем отправить покалеченным.
+      if (variant === 'brand_intent' && (!brandSiteOf(lead) || !keywordOf)) {
+        await markFailed(item, 'brand lead has no keyword to write about', true);
+        stats.skipped++;
+        continue;
+      }
+
+      // Выбор темы сохранён ровно тот, что был: брендовое письмо — по id лида,
+      // чтобы повторная попытка пришла под той же темой, что и первая;
+      // холодное — случайно, как и раньше. Это поведение, а не текст, и ТЗ
+      // просит перенести тексты, не переписывая поведение.
+      const idx = variant === 'brand_intent'
+        ? Math.abs(Number(lead.id) || 0) % tpls.length
+        : Math.floor(Math.random() * tpls.length);
+
+      const rendered = render(tpls[idx], {
+        site:       variant === 'brand_intent'
+                      ? brandSiteOf(lead)
+                      : cleanSiteName(lead.name as string, (lead.url as string) || ''),
+        geo_word:   hasGeoOf ? geoRawOf : 'your market',
+        geo_clause: hasGeoOf ? ` in ${geoRawOf}` : '',
+        keyword:    keywordOf,
+      });
+
+      // toAsciiSafe остаётся на теме: заголовки письма уходят не UTF-8, и
+      // длинное тире там превращается в пропажу символа, а не в тире.
+      let subject = toAsciiSafe(rendered.subject);
+      let body    = rendered.body;
+      let inReplyTo: string | undefined;
 
       // ── Follow-up steps (P0.3) ────────────────────────────────────────────
       // A queue row carrying step_no >= 2 is a sequence touch, not a cold email:
@@ -620,6 +668,7 @@ Deno.serve(async (req: Request) => {
       try {
         sendResult = await callFunction('send-email', {
           to: lead.contact_email, subject, body, account,
+          credentials_ref: sender.credentials_ref,
           ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
         });
       } catch (e: any) {
@@ -636,7 +685,17 @@ Deno.serve(async (req: Request) => {
         const gmailMessageId = responseData?.gmail_message_id as string | undefined;
 
         await supabase.from('send_queue')
-          .update({ status: 'sent', sent_at: sentAt }).eq('id', item.id);
+          .update({ status: 'sent', sent_at: sentAt, smtp_account_id: sender.id }).eq('id', item.id);
+
+        // Счётчики пула. Без этого вызова daily_sent не растёт, лимит никогда
+        // не достигается, и весь прогрев остаётся декорацией: функция выбора
+        // всегда возвращает первый же аккаунт.
+        try {
+          await supabase.rpc('fn_record_smtp_send', { p_account_id: sender.id, p_bounced: false });
+        } catch (e: any) {
+          await logError('error', 'process-queue',
+            `fn_record_smtp_send failed for ${sender.id}: ${e?.message ?? e}`, item.lead_id);
+        }
 
         await supabase.from('email_log').insert([{
           lead_id:       item.lead_id,
@@ -728,7 +787,28 @@ Deno.serve(async (req: Request) => {
 
     if (stats.reason === '') delete (stats as any).reason;
 
+    stats.no_sender = noSenderAvailable;
+
+    // Отсутствие шаблона — это не «лид не подошёл», а незаведённая строка в
+    // email_templates, из-за которой бренд не может отправить вообще ничего.
+    // Молча пропустить такое значит получить бренд, который годами стоит с
+    // полной очередью и нулём отправок.
+    if (missingTemplate.size) {
+      await logError('error', 'process-queue',
+        `нет шаблона письма: ${[...missingTemplate].join(', ')} — письма этих брендов не уходят. `
+        + `Завести строки в email_templates (brand_id, variant, language, attempt_no 1..3)`);
+    }
+
     const summaryParts = [`sent=${stats.sent}`, `failed=${stats.failed}`, `skipped=${stats.skipped}`];
+    // Печатаем только когда есть что печатать: строка no_sender=0 в каждом
+    // логе приучает глаз её пропускать, а нужна она ровно тогда, когда
+    // очередь встала из-за отправителей.
+    if (noSenderAvailable) {
+      summaryParts.push(`no_sender=${noSenderAvailable}`);
+      await logError('warn', 'process-queue',
+        `${noSenderAvailable} писем осталось в очереди: у их бренда нет свободного отправителя `
+        + `(дневной лимит выбран, пауза по отказам или аккаунт не заведён)`);
+    }
     if (stats.reason) summaryParts.push(`reason=${stats.reason}`);
     await logError('info', 'process-queue', summaryParts.join(' '));
 
