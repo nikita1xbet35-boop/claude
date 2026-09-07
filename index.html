@@ -7294,7 +7294,7 @@ function initTG(){
 }
 
 async function loadSavedTGChannels(){
-  const {data} = await sb.from('telegram_channels').select('*').order('created_at', {ascending:false}).limit(50);
+  const {data} = await sb.from('youtube_channels').select('*').order('created_at', {ascending:false}).limit(50);
   if(data && data.length > 0){
     const channels = data.map(ch => ({
       name: ch.name, url: ch.url, username: ch.username,
@@ -7465,9 +7465,9 @@ async function tgAnalyzeResult(item){
     chType = ai.type || 'other';
   } catch(e) { /* use defaults */ }
 
-  // Save to telegram_channels table
+  // Save to youtube_channels table
   try {
-    await sb.from('telegram_channels').upsert([{
+    await sb.from('youtube_channels').upsert([{
       name, username, url: channelUrl,
       description, score, priority,
       has_1xbet: has1xbet,
@@ -7984,7 +7984,7 @@ async function loadSavedYTChannels(){
   // Page through the whole base (Supabase caps a single select at 1000 rows).
   let all = [], from = 0, PAGE = 1000;
   while(true){
-    const {data, error} = await sb.from('telegram_channels')
+    const {data, error} = await sb.from('youtube_channels')
       .select('*')
       .eq('partner_type','youtube')
       .order('subscribers',{ascending:false})
@@ -8137,7 +8137,7 @@ async function ytSetStatus(id, status){
   const ch = ytChannels.find(c => String(c.id) === String(id));
   if(!ch) return;
   ch.yt_status = status;
-  await sb.from('telegram_channels').update({ yt_status: status }).eq('id', id);
+  await sb.from('youtube_channels').update({ yt_status: status }).eq('id', id);
   renderYTBoard();
   openYTChannel(id);
 }
@@ -8291,7 +8291,7 @@ function renderYTContacts(ch){
     : `<div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);padding:3px 0;">контактов в описании не найдено</div>`;
   return `<div style="margin:8px 0;padding:8px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;">${body}</div>`;
 }
-// YouTube is a standalone base — channels are stored in telegram_channels
+// YouTube is a standalone base — channels are stored in youtube_channels
 // (partner_type='youtube') and worked by hand. No push into the send pipeline.
 
 // ══════════════════════════════════════════

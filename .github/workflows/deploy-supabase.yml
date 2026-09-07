@@ -137,7 +137,6 @@ jobs:
             process-queue
             find-and-queue
             send-email
-            send-email-outlook
             process-queue-lp
             admin-reset
             find-contact-form

@@ -394,10 +394,10 @@ jobs:
 
           echo ""
           echo "=== YOUTUBE base ==="
-          q "SELECT count(*) AS total_youtube FROM telegram_channels WHERE partner_type='youtube';"; echo ""
-          q "SELECT count(*) AS added_24h FROM telegram_channels WHERE partner_type='youtube' AND created_at > now() - interval '24 hours';"; echo ""
+          q "SELECT count(*) AS total_youtube FROM youtube_channels WHERE partner_type='youtube';"; echo ""
+          q "SELECT count(*) AS added_24h FROM youtube_channels WHERE partner_type='youtube' AND created_at > now() - interval '24 hours';"; echo ""
           echo "--- youtube subs distribution ---"
-          q "SELECT CASE WHEN subscribers>=1000 THEN '1k+' WHEN subscribers>0 THEN '<1k' ELSE '0/hidden' END AS bucket, count(*) FROM telegram_channels WHERE partner_type='youtube' GROUP BY 1 ORDER BY 2 DESC;"; echo ""
+          q "SELECT CASE WHEN subscribers>=1000 THEN '1k+' WHEN subscribers>0 THEN '<1k' ELSE '0/hidden' END AS bucket, count(*) FROM youtube_channels WHERE partner_type='youtube' GROUP BY 1 ORDER BY 2 DESC;"; echo ""
           echo "--- last 12 youtube-search runs ---"
           q "SELECT to_char(created_at,'MM-DD HH24:MI') AS t, level, left(message,180) AS msg FROM error_log WHERE service='youtube-search' ORDER BY created_at DESC LIMIT 12;"; echo ""
           echo "=== PROBE: youtube-search cron invoke (live) ==="

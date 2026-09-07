@@ -1,27 +1,42 @@
 # Деплой AffiliateOS Telegram Bot
 
+> ⚠️ **Токен этого бота был скомпрометирован.** До 07.09.2026 он лежал в этом
+> файле открытым текстом, а репозиторий публичный. Токен остаётся в истории
+> коммитов (`7baea5f` и далее) — удаление из файла историю не чистит, и
+> переписывать её смысла нет: форки, зеркала и кэши уже разошлись.
+>
+> Единственное настоящее лечение — **отозвать токен в @BotFather** (`/revoke`)
+> или удалить бота целиком (`/deletebot`), если он больше не нужен.
+> Пока это не сделано, любой, кто видел репозиторий, может управлять ботом.
+>
+> Ни один токен, ключ или пароль в этот файл больше не вписывается. Значения
+> живут только в Cloudflare Secrets.
+
 ## 1. Установить секреты (один раз)
+
+Значения не хранятся в репозитории. `wrangler secret put` спросит их
+интерактивно — вставлять из менеджера паролей, не из этого файла.
 
 ```bash
 cd telegram-bot
 
 wrangler secret put TELEGRAM_TOKEN
-# вставить: 8825294806:AAGMo0C0T8TkkFBI2GS_0eR5PF0vXQBGFyc
+# <TOKEN_FROM_SECRETS> — новый токен из @BotFather после /revoke
 
 wrangler secret put MY_USER_ID
-# вставить: 8403573669
+# <ADMIN_USER_ID> — Telegram user_id единственного получателя (узнать: @userinfobot)
 
 wrangler secret put SUPABASE_URL
-# вставить: https://lxsyrserfuighwxuymgb.supabase.co
+# https://lxsyrserfuighwxuymgb.supabase.co — не секрет, открыто лежит в index.html
 
 wrangler secret put SUPABASE_KEY
-# вставить: eyJhbGci... (service_role ключ)
+# <SERVICE_ROLE_KEY> — Supabase → Settings → API → service_role
 
 wrangler secret put GROQ_API_KEY
-# вставить: gsk_KuBNWdk3...
+# <GROQ_API_KEY> — console.groq.com → API Keys
 
 wrangler secret put AFFILIATEOS_URL
-# вставить: https://claude.nikita1xbet35.workers.dev/
+# https://claude.nikita1xbet35.workers.dev/ — не секрет, публичный адрес дашборда
 ```
 
 ## 2. Задеплоить Worker
@@ -36,10 +51,15 @@ wrangler deploy
 
 ## 3. Установить Webhook
 
-Подставь свой URL и выполни в браузере или curl:
+Токен подставляется из окружения, а не пишется в командную строку: команды с
+секретом в аргументах оседают в истории оболочки и в логах CI.
 
 ```bash
-curl "https://api.telegram.org/bot8825294806:AAGMo0C0T8TkkFBI2GS_0eR5PF0vXQBGFyc/setWebhook?url=https://affiliateos-bot.<subdomain>.workers.dev"
+export TELEGRAM_TOKEN="<токен из менеджера паролей>"
+export WORKER_URL="https://affiliateos-bot.<subdomain>.workers.dev"
+
+curl "https://api.telegram.org/bot${TELEGRAM_TOKEN}/setWebhook" \
+  -d "url=${WORKER_URL}"
 ```
 
 Ответ должен быть: `{"ok":true,"result":true}`
@@ -47,7 +67,7 @@ curl "https://api.telegram.org/bot8825294806:AAGMo0C0T8TkkFBI2GS_0eR5PF0vXQBGFyc
 ## 4. Проверить Webhook
 
 ```bash
-curl "https://api.telegram.org/bot8825294806:AAGMo0C0T8TkkFBI2GS_0eR5PF0vXQBGFyc/getWebhookInfo"
+curl "https://api.telegram.org/bot${TELEGRAM_TOKEN}/getWebhookInfo"
 ```
 
 ## 5. Настроить меню бота (опционально)
