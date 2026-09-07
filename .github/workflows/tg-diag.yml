@@ -38,7 +38,7 @@ jobs:
           echo "████ 1. DO THE TABLES EXIST AND WHAT IS IN THEM ████"
           q "SELECT status, count(*) FROM tg_outreach_channels GROUP BY 1 ORDER BY 2 DESC;"; echo ""
           q "SELECT count(*) AS total_channels FROM tg_outreach_channels;"; echo ""
-          q "SELECT count(*) AS total_queries, count(*) FILTER (WHERE runs > 0) AS queries_run, sum(runs) AS total_runs, sum(channels_found) AS channels_found FROM tg_search_queries;"; echo ""
+          q "SELECT count(*) AS total_queries, count(*) FILTER (WHERE times_used > 0) AS queries_run, sum(times_used) AS total_runs, sum(results_total) AS channels_found FROM search_keywords WHERE channel = 'telegram';"; echo ""
 
           echo ""
           echo "████ 2. DID THE CRON EVER CALL THEM (worker deployed?) ████"

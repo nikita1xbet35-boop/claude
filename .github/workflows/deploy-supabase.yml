@@ -296,7 +296,7 @@ jobs:
           }
 
           echo "── Таблицы мультибренда ──"
-          q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('brands','contact_registry','contact_touches','api_keys','system_config','multibrand_keywords','smtp_accounts','brand_keywords') ORDER BY table_name;"
+          q "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('brands','contact_registry','contact_touches','api_keys','system_config','search_keywords','multibrand_keywords','smtp_accounts','brand_keywords') ORDER BY table_name;"
           echo; echo "── brand_id: где ещё NOT NULL (должно быть пусто) ──"
           # После 044 картина обратная: на leads/send_queue/email_log/funnel_stats
           # NOT NULL — это ЦЕЛЬ, а не авария. Ломает прод обратный случай — если
@@ -319,7 +319,7 @@ jobs:
           echo; echo "── Функции ──"
           q "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'fn_%' ORDER BY 1;"
           echo; echo "── Наполнение ──"
-          q "SELECT (SELECT count(*) FROM public.brands) AS brands, (SELECT count(*) FROM public.contact_registry) AS registry, (SELECT count(*) FROM public.multibrand_keywords) AS mb_keywords, (SELECT count(*) FROM public.smtp_accounts) AS smtp;"
+          q "SELECT (SELECT count(*) FROM public.brands) AS brands, (SELECT count(*) FROM public.contact_registry) AS registry, (SELECT count(*) FROM public.search_keywords WHERE channel = 'web') AS kw_web, (SELECT count(*) FROM public.search_keywords WHERE channel = 'telegram') AS kw_tg, (SELECT count(*) FROM public.smtp_accounts) AS smtp;"
           echo; echo "── Пауза + признаки активности пайплайна ──"
           q "SELECT (SELECT bool_and(paused) FROM public.pipeline_limits) AS all_paused, (SELECT max(started_at) FROM public.funnel_stats) AS last_run, (SELECT count(*) FROM public.funnel_stats WHERE started_at > now() - interval '30 minutes') AS runs_30min;"
 

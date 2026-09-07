@@ -108,14 +108,6 @@ const DDG_MINUS = '-forum -reddit -wikipedia -score -livescore -results -fixture
   + ' -quora -facebook -twitter -tiktok -youtube'
   + ' -"terms and conditions" -"privacy policy"'
   + ' -lyrics -movie -song';
-// Layer B hunts for ad inventory, so agencies SELLING marketing services are noise.
-//
-// Applies to the LEGACY pool only. In the brand pool (multibrand_keywords) the
-// letters mean something else entirely — there B is player intent without a
-// GEO ('free bet no deposit offers'), and excluding marketing agencies from it
-// filters nothing useful. See the layer table in the run body.
-const LAYER_B_MINUS = ' -"marketing agency" -"seo services" -"web design"';
-
 // Pre-filter: drop results whose title/snippet/URL contain these strings (catches what DDG misses).
 // v6.1: added wrong-target categories that were slipping through and getting emailed —
 // banks / payment providers, academic & research sites, government, and pure news wires.
@@ -151,46 +143,11 @@ const cors = {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ── Brand preset definitions (mirrors BRAND_PRESETS in index.html) ────────
+// Гео-группа прогона. Раньше группы были захардкожены здесь списком
+// DEFAULT_PRESETS — пятнадцать пресетов, все только под 1xbet. Теперь они
+// выводятся из самого пула search_keywords, то есть добавление страны это
+// строка в таблице, а не правка кода и деплой.
 interface Preset { id: string; name: string; geo: string; keywords: string[]; brand?: string | null }
-
-// Africa-focus week — keyword presets narrowed to African GEOs.
-const DEFAULT_PRESETS: Record<string, Preset[]> = {
-  '1xbet': [
-    { id:'1xb-ng', name:'Nigeria', geo:'NG',
-      keywords:["opay betting nigeria","how to cash out bet naija","naira betting bonus","super eagles betting preview","moniepoint betting deposit","aviator cash out trick nigeria","npfl betting odds","palmpay betting site","weekend accumulator naija","how to withdraw betting winnings nigeria"] },
-    { id:'1xb-ke', name:'Kenya', geo:'KE',
-      keywords:["mpesa deposit betting kenya","harambee stars betting","how to win aviator kenya","kplc betting jackpot","mpesa withdrawal betting","kenya premier league odds","safaricom betting deposit","midweek jackpot prediction","aviator cash out kenya","betting bonus kenya today"] },
-    { id:'1xb-gh', name:'Ghana', geo:'GH',
-      keywords:["mtn momo betting ghana","black stars betting preview","how to win aviator ghana","ghana premier league odds","telecel cash betting","vodafone cash betting ghana","weekend jackpot ghana","betting bonus ghana today","aviator prediction ghana"] },
-    { id:'1xb-tz', name:'Tanzania', geo:'TZ',
-      keywords:["mpesa tigo betting tanzania","jinsi ya kushinda kubet","tanzania premier league betting","azam fc betting","kamusi ya kubet","aviator tanzania mbinu","tigopesa betting deposit","ligi kuu bara odds"] },
-    { id:'1xb-ug', name:'Uganda', geo:'UG',
-      keywords:["mtn momo betting uganda","uganda cranes betting","how to win aviator uganda","airtel money betting uganda","upl betting odds","jackpot prediction uganda","betpawa alternative uganda"] },
-    { id:'1xb-cm', name:'Cameroun', geo:'CM',
-      keywords:["om mobile money paris cameroun","comment gagner aviator cameroun","pronostic elite one","mtn momo paris cameroun","lions indomptables paris","orange money pari cameroun","astuce cash out cameroun"] },
-    { id:'1xb-ci', name:'Côte d\'Ivoire', geo:'CI',
-      keywords:["wave paris sportif civ","comment retirer gain 1x","pronostic ligue 1 ivoirienne","orange money pari abidjan","elephants paris preview","moov money paris civ","astuce aviator abidjan"] },
-    { id:'1xb-sn', name:'Senegal', geo:'SN',
-      keywords:["wave paris senegal","comment gagner au pari senegal","lions teranga pari","orange money pari dakar","free money pari senegal","ligue 1 senegalaise cotes","astuce aviator dakar"] },
-    { id:'1xb-bf', name:'Burkina Faso', geo:'BF',
-      keywords:["orange money pari burkina","comment gagner pari ouaga","etalons pari preview","moov money pari burkina","coupon pari burkina","astuce aviator ouaga"] },
-    { id:'1xb-zm', name:'Zambia', geo:'ZM',
-      keywords:["airtel money betting zambia","chipolopolo betting","how to win aviator zambia","mtn momo betting zambia","zambia super league odds","jackpot prediction zambia"] },
-    { id:'1xb-cd', name:'DR Congo', geo:'CD',
-      keywords:["mpesa airtel pari rdc","comment gagner pari kinshasa","leopards pari preview","orange money pari rdc","ligue 1 rdc cotes","astuce aviator kinshasa"] },
-    { id:'1xb-et', name:'Ethiopia', geo:'ET',
-      keywords:["telebirr betting ethiopia","how to win aviator ethiopia","ethiopia premier league odds","cbe birr betting deposit","jackpot prediction ethiopia","ethiopia betting bonus"] },
-    { id:'1xb-mz', name:'Mozambique', geo:'MZ',
-      keywords:["mpesa aposta mocambique","como ganhar aviator mocambique","mocambola apostas","emola aposta deposito","palancas apostas","dicas apostas mocambique"] },
-    { id:'1xb-ml', name:'Mali', geo:'ML',
-      keywords:["orange money pari mali","comment gagner pari bamako","aigles pari preview","moov money pari mali","astuce aviator bamako"] },
-    { id:'1xb-agency', name:'Africa / Agencies', geo:'Global',
-      keywords:["africa betting traffic revshare","igaming africa media buyer","aviator africa signals","mobile money betting africa","afcon betting preview","african football prediction site","sports betting affiliate africa","casino traffic west africa"] },
-  ],
-  '1xcasino': [],
-  'luckypari': [],
-};
 
 // Cities per preset — appended to keywords on rotation so we surface local affiliate sites
 // that don't appear in country-level top results (which are dominated by operators).
@@ -213,7 +170,7 @@ const PRESET_CITIES: Record<string, string[]> = {
 };
 
 // ── GEO slugs of the brand pool → what we already know about that country ───
-// multibrand_keywords stores a geo slug ('nigeria', 'cote_divoire', 'global').
+// search_keywords stores a geo slug ('nigeria', 'cote_divoire', 'global').
 // Two things downstream are keyed by country: the city list above and the
 // DataForSEO location code. Both exist for exactly the fourteen African GEOs
 // this project has been running — so the slug maps onto the legacy preset id
@@ -1616,14 +1573,9 @@ Deno.serve(async (req: Request) => {
     // RPC errors or every brand's weight sums to zero — a lookup failure must
     // degrade to the one brand with a proven keyword pool, not stop the run.
     //
-    // BRAND_DIVISOR replaces the old `BRANDS.length` in the preset/visit-cycle
-    // arithmetic below. That arithmetic was tuned around a length-1 array —
-    // keeping the divisor at 1 preserves 1xBet's exact cycling behaviour.
-    // Brands other than 1xbet have no entry in DEFAULT_PRESETS yet (§7.9 ТЗ:
-    // their brand_keywords pool is not populated), so allPresets comes back
-    // empty and the run skips cleanly below — the weighted pick itself is
-    // still real and observable in stats.brand/funnel_stats even while the
-    // picked brand has nothing to search yet.
+    // BRAND_DIVISOR держит цикл посещений там же, где он был при единственном
+    // бренде. Гео-арифметика на него больше не опирается — она делит slotIndex
+    // на 10, чтобы каждая страна получала полный блок слоёв A/B/C/D.
     const BRAND_DIVISOR = 1;
     const FALLBACK_BRAND = '1xbet';
     let brand = FALLBACK_BRAND;
@@ -1633,24 +1585,20 @@ Deno.serve(async (req: Request) => {
       if (row?.slug) brand = row.slug;
     } catch (_) { /* keep 1xbet default */ }
 
-    // Presets for whichever brand came out of the weighted pick.
-    const { data: customRaw } = await supabase
-      .from('search_presets').select('*').eq('is_default', false).order('created_at');
-    // ── Keyword pool: the brand pool first, the legacy path as a fallback ──
-    // Until now find-and-queue took its GEO groups from DEFAULT_PRESETS in this
-    // file and its keywords from the `keywords` table keyed by preset id. The
-    // brand pools Nick supplies live in multibrand_keywords (brand_id, geo,
-    // language, keyword, layer) and NOTHING read them — migration 040 said so
-    // in as many words, and 1464 new keywords would have landed in the same
-    // silence. This is the wire-up.
+    // ── Пул ключей: единственный источник — search_keywords ───────────────
+    // До Блока B ключи лежали в пяти таблицах плюс хардкод в этом файле, и
+    // читались они по-разному. Цена известна: 1464 ключа пролежали полтора
+    // месяца, потому что таблицу, куда их залили, не читал никто — миграция
+    // 040 предупреждала об этом прямым текстом.
+    //
+    // Теперь таблица одна, и веб-ветка берёт из неё channel='web'.
     //
     // GEO groups are derived from the pool itself, so adding a country is a row
     // in the table, not an edit here.
-    let poolSource: 'multibrand' | 'legacy' = 'legacy';
     const geoPresetsFor = async (brandId: string): Promise<Preset[]> => {
       try {
-        const { data } = await supabase.from('multibrand_keywords')
-          .select('geo').eq('brand_id', brandId).eq('active', true);
+        const { data } = await supabase.from('search_keywords')
+          .select('geo').eq('channel', 'web').eq('brand_id', brandId).eq('active', true);
         // 'global' is NOT a GEO group. Layers B and D live there and are reached
         // regardless of which GEO the tick picked (see the pool query below);
         // leaving it in the rotation only produces ticks that ask for
@@ -1669,21 +1617,6 @@ Deno.serve(async (req: Request) => {
       } catch (_) { return []; }
     };
 
-    const legacyPresetsFor = (b: string): Preset[] => [
-      ...(DEFAULT_PRESETS[b] || []),
-      ...(customRaw || [])
-        // A preset with no brand set belongs to nobody in particular, so it
-        // must NOT be handed to a brand it was not written for: its keywords
-        // would produce leads tagged 1xcasino/luckypari that the send path
-        // then mails the 1xBet letter to. Default-brand only.
-        .filter((p: any) => (p.brand || FALLBACK_BRAND) === b)
-        .map((p: any) => ({
-          id: `custom-${p.id}`, name: p.name, geo: p.geo || '',
-          keywords: Array.isArray(p.keywords) ? p.keywords : [],
-        }))
-        .filter((p: Preset) => p.keywords.length > 0),
-    ];
-
     // A brand with no keyword pool cannot be searched — and cron_weight for
     // 1xcasino/luckypari is 25 each out of 100 (migration 035), so honouring
     // the pick blindly would turn HALF of every heavy run into an immediate
@@ -1692,12 +1625,8 @@ Deno.serve(async (req: Request) => {
     // Fall back to the brand that does have a pool instead of wasting the tick.
     // brandCfg is resolved BEFORE the presets now: the brand pool is keyed by
     // brand_id, so there is nothing to look up without it.
-    const presetsFor = async (b: string, brandId: string): Promise<Preset[]> => {
-      const geo = await geoPresetsFor(brandId);
-      if (geo.length) { poolSource = 'multibrand'; return geo; }
-      poolSource = 'legacy';
-      return legacyPresetsFor(b);
-    };
+    const presetsFor = async (_b: string, brandId: string): Promise<Preset[]> =>
+      geoPresetsFor(brandId);
 
     let brandCfg   = await loadBrandConfig(brand);
     let allPresets = await presetsFor(brand, brandCfg.id);
@@ -1710,7 +1639,7 @@ Deno.serve(async (req: Request) => {
 
     stats.brand = brand;
     stats.brand_id = brandCfg.id;
-    (stats as any).pool = poolSource;
+    (stats as any).pool = 'search_keywords';
 
     if (allPresets.length === 0) {
       return new Response(JSON.stringify({ ...stats, skipped: true, reason: 'no presets' }),
@@ -1730,14 +1659,9 @@ Deno.serve(async (req: Request) => {
     // then takes ~2 days at the 3-minute cron, which is the intended cadence
     // for a pool this size.
     //
-    // The legacy branch keeps its own arithmetic untouched. It has the same
-    // flaw (15 presets against 10 layers also share 5), but it is a dormant
-    // path once a brand pool exists, and changing tuned behaviour on the way
-    // past is how regressions get smuggled in. Written down, not silently
-    // inherited.
-    const presetIndex = poolSource === 'multibrand'
-      ? Math.floor(slotIndex / 10) % allPresets.length
-      : Math.floor(slotIndex / BRAND_DIVISOR) % allPresets.length;
+    // Ветвление по источнику пула отсюда ушло вместе с legacy-веткой: пул
+    // теперь ровно один, и второй арифметики для него не существует.
+    const presetIndex = Math.floor(slotIndex / 10) % allPresets.length;
     const preset      = allPresets[presetIndex];
     stats.preset      = preset.name;
 
@@ -1745,65 +1669,45 @@ Deno.serve(async (req: Request) => {
     // A single intent vector only ever surfaced audience owners. Layers B and C
     // reach segments layer A structurally cannot see: publishers with ad
     // inventory, and sites already running a competitor's affiliate deal.
-    //   0-6 → A (70%) player intent — the core of the base
-    //   7-8 → B (20%) publisher / monetisation intent
-    //   9   → C (10%) competitor footprints — the warmest, they already get it
-    // The brand pool uses the SAME letters for DIFFERENT things, so the split
-    // depends on which pool is in play. Mixing the two meanings would be
-    // invisible: every query still runs, just aimed at the wrong audience.
+    // Раньше буквы означали разное в двух пулах, и перепутать их было нечем
+    // заметить: каждый запрос всё равно выполняется, просто целится не в ту
+    // аудиторию. Пул теперь один, и значение у букв одно:
     //
-    //   legacy pool          brand pool (multibrand_keywords)
-    //   A player intent      A player intent + GEO      60%   608/148/156 keys
-    //   B publisher intent   B player intent, no GEO    20%    62/23/62
-    //   C competitor prints  C brand queries            10%   251/84/46
-    //   —                    D structural footprints    10%     8/8/8
+    //   0-5 → A (60%) игровой интент + гео     608/148/156 ключей
+    //   7   → B (20%) игровой интент без гео    62/23/62
+    //   8   → C (10%) брендовые запросы        251/84/46
+    //   9   → D (10%) структурные футпринты      8/8/8
     const layerSlot = slotIndex % 10;
-    const layer: 'A' | 'B' | 'C' | 'D' = poolSource === 'multibrand'
-      ? (layerSlot <= 5 ? 'A' : layerSlot <= 7 ? 'B' : layerSlot === 8 ? 'C' : 'D')
-      : (layerSlot <= 6 ? 'A' : layerSlot <= 8 ? 'B' : 'C');
+    const layer: 'A' | 'B' | 'C' | 'D' =
+      layerSlot <= 5 ? 'A' : layerSlot <= 7 ? 'B' : layerSlot === 8 ? 'C' : 'D';
     stats.layer = layer;
 
-    // Keywords now live in the DB so their yield can be measured and burnt-out
-    // ones retired automatically. The hardcoded preset list stays as a fallback
-    // for the window before migration 016 lands.
     let poolRows: Array<{ id: number; keyword: string; source_pref?: string; lang?: string }> = [];
-    // Which table the yield write-back at the end of the run must update.
-    let poolTable: 'keywords' | 'multibrand_keywords' = 'keywords';
 
-    if (poolSource === 'multibrand') {
-      poolTable = 'multibrand_keywords';
-      // Layers A and C are per-GEO; B and D are global — that is a property of
-      // the pool, not an assumption: every B and D row in all three brands
-      // carries geo='global', every A and C row carries a real country.
-      // Filtering B/D by the picked GEO would therefore return nothing and
-      // silently burn 30% of all ticks on "no keywords".
-      const perGeo = layer === 'A' || layer === 'C';
-      try {
-        let q = supabase.from('multibrand_keywords')
-          .select('id, keyword, language')
-          .eq('brand_id', brandCfg.id).eq('layer', layer).eq('active', true);
-        q = perGeo ? q.eq('geo', preset.name) : q.eq('geo', 'global');
-        // Least-recently-used first: with 1464 keywords a slot-arithmetic
-        // window would take days to come back round to any given key, and a key
-        // that never runs cannot be judged by yield (ТЗ §5). The partial index
-        // multibrand_kw_rotation serves exactly this order.
-        const { data } = await q
-          .order('last_run_at', { ascending: true, nullsFirst: true })
-          .order('id', { ascending: true })
-          .limit(KW_PER_RUN);
-        poolRows = (data || []).map((r: any) => ({
-          id: r.id, keyword: r.keyword, lang: (r.language || '').toLowerCase(),
-        }));
-      } catch (_) { poolRows = []; }
-    } else {
-      try {
-        const { data } = await supabase.from('keywords')
-          .select('id, keyword, source_pref, lang')
-          .eq('preset', preset.id).eq('layer', layer).eq('active', true)
-          .order('id');
-        poolRows = data || [];
-      } catch (_) { poolRows = []; }
-    }
+    // Слои A и C — по гео, B и D — глобальные. Это свойство самого пула, а не
+    // предположение: каждая строка B и D во всех трёх брендах несёт
+    // geo='global', каждая строка A и C — настоящую страну. Фильтровать B/D по
+    // выбранному гео значит гарантированно не найти ничего и сжечь на этом 30%
+    // всех тиков.
+    const perGeo = layer === 'A' || layer === 'C';
+    try {
+      let q = supabase.from('search_keywords')
+        .select('id, keyword, language')
+        .eq('channel', 'web')
+        .eq('brand_id', brandCfg.id).eq('layer', layer).eq('active', true);
+      q = perGeo ? q.eq('geo', preset.name) : q.eq('geo', 'global');
+      // Least-recently-used первым: с полутора тысячами ключей окно по
+      // арифметике слота возвращалось бы к конкретному ключу днями, а ключ,
+      // который ни разу не запускался, нельзя судить по выходу. Этот порядок
+      // обслуживает индекс idx_search_keywords_geo.
+      const { data } = await q
+        .order('last_used_at', { ascending: true, nullsFirst: true })
+        .order('id', { ascending: true })
+        .limit(KW_PER_RUN);
+      poolRows = (data || []).map((r: any) => ({
+        id: r.id, keyword: r.keyword, lang: (r.language || '').toLowerCase(),
+      }));
+    } catch (_) { poolRows = []; }
 
     // Layer A can fall back to the in-code pool; B and C exist only in the DB, so
     // an empty pool there means "nothing to do this tick", not "use layer A keys".
@@ -1913,11 +1817,11 @@ Deno.serve(async (req: Request) => {
     // they are actively harmful — those keywords ARE search operators
     // (`inurl:casino-review "bonus"`, `site:blogspot.com "betting tips"`), and
     // bolting a wall of -terms onto one leaves almost nothing to match.
-    // LAYER_B_MINUS stays on the legacy pool only, where B still means
-    // publisher intent; see the constant's comment.
-    const minusWords = layer === 'D'
-      ? ''
-      : DDG_MINUS + (poolSource === 'legacy' && layer === 'B' ? LAYER_B_MINUS : '');
+    // Прежняя константа LAYER_B_MINUS относилась к legacy-пулу, где B означал
+    // издательский интент. Того пула больше нет, и константа удалена вместе с
+    // ним: в текущем пуле B — это игровой интент без гео, и стена минус-слов
+    // резала бы его так же вслепую, как слой D.
+    const minusWords = layer === 'D' ? '' : DDG_MINUS;
 
     // Five simultaneous requests is a burst, and a burst is what a bot looks
     // like. Concurrency 2 with 2-6s of jitter between launches spreads the same
@@ -2297,32 +2201,18 @@ Deno.serve(async (req: Request) => {
     for (const [kw, s] of kwStats) {
       const id = keywordIds.get(kw);
       if (!id) continue;
-      if (poolTable === 'multibrand_keywords') {
-        // Same purpose, different columns: multibrand_keywords has no
-        // hot_leads, and its results counter is results_found. Without this
-        // write-back ТЗ §5 is unenforceable — "результатов на запрос в разрезе
-        // языка" has nothing to divide by, and a keyword generated from a
-        // template for a language nobody checked keeps burning a tick forever.
-        const { data: cur } = await supabase.from('multibrand_keywords')
-          .select('runs, results_found, leads_created').eq('id', id).maybeSingle();
-        if (!cur) continue;
-        await supabase.from('multibrand_keywords').update({
-          runs:          (cur.runs ?? 0) + 1,
-          results_found: (cur.results_found ?? 0) + s.urls,
-          leads_created: (cur.leads_created ?? 0) + s.leads,
-          last_run_at:   new Date().toISOString(),
-        }).eq('id', id);
-        continue;
-      }
-      const { data: cur } = await supabase.from('keywords')
-        .select('runs, urls_found, leads_created, hot_leads').eq('id', id).maybeSingle();
+      // Без этой записи пул выгорает молча, и падение выхода замечают неделями
+      // позже — ровно то, что случилось с пулом v5. Считать есть по чему:
+      // times_used/results_total/leads_total лежат в той же строке, что и сам
+      // ключ, и отбраковка выгоревших становится обычным запросом.
+      const { data: cur } = await supabase.from('search_keywords')
+        .select('times_used, results_total, leads_total').eq('id', id).maybeSingle();
       if (!cur) continue;
-      await supabase.from('keywords').update({
-        runs:          (cur.runs ?? 0) + 1,
-        urls_found:    (cur.urls_found ?? 0) + s.urls,
-        leads_created: (cur.leads_created ?? 0) + s.leads,
-        hot_leads:     (cur.hot_leads ?? 0) + s.hot,
-        last_run_at:   new Date().toISOString(),
+      await supabase.from('search_keywords').update({
+        times_used:    (cur.times_used ?? 0) + 1,
+        results_total: (cur.results_total ?? 0) + s.urls,
+        leads_total:   (cur.leads_total ?? 0) + s.leads,
+        last_used_at:  new Date().toISOString(),
       }).eq('id', id);
     }
 
