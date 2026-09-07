@@ -249,20 +249,40 @@ async function harness() {
     ADMIN_BOT_TOKEN: 'tok-admin', ADMIN_CHAT_ID: '777', ADMIN_TZ_OFFSET: '2',
   };
 
-  const post = (slug, update, secret = 'shh') =>
-    worker.fetch(new Request(`https://x.test/bot/${slug}`, {
+  // Вебхук отдаёт Telegram 200 сразу, а обработку — в waitUntil: так очередь
+  // повторов у Telegram не копится, даже когда база отвечает медленно.
+  //
+  // Для теста это значит, что проверять состояние сразу после fetch нельзя —
+  // работа ещё идёт. Раньше здесь стояло `waitUntil: p => p`, которое ничего
+  // не ждёт, и все проверки читали состояние ДО обработки апдейта. Собираем
+  // отданные промисы и дожидаемся их, как это делает сам Cloudflare, прежде
+  // чем считать запрос обработанным.
+  const pending = [];
+  const ctx = { waitUntil: p => { pending.push(p); return p; } };
+  const settle = async () => {
+    while (pending.length) await Promise.all(pending.splice(0));
+  };
+
+  const post = async (slug, update, secret = 'shh') => {
+    const res = await worker.fetch(new Request(`https://x.test/bot/${slug}`, {
       method: 'POST',
       headers: secret === null ? {} : { 'X-Telegram-Bot-Api-Secret-Token': secret },
       body: JSON.stringify(update),
-    }), env, { waitUntil: p => p });
+    }), env, ctx);
+    await settle();
+    return res;
+  };
 
   // Апдейт админ-боту. from.id по умолчанию совпадает с ADMIN_CHAT_ID.
-  const admin = (update, secret = 'shh') =>
-    worker.fetch(new Request('https://x.test/admin-bot', {
+  const admin = async (update, secret = 'shh') => {
+    const res = await worker.fetch(new Request('https://x.test/admin-bot', {
       method: 'POST',
       headers: secret === null ? {} : { 'X-Telegram-Bot-Api-Secret-Token': secret },
       body: JSON.stringify(update),
-    }), env, { waitUntil: p => p });
+    }), env, ctx);
+    await settle();
+    return res;
+  };
   const acmd = (text, fromId = 777) => ({ message: { chat: { id: fromId }, from: { id: fromId }, text } });
 
   const msg = (text, userId = 42, username = 'nick') =>
@@ -560,6 +580,42 @@ test('пустое тело ответа Supabase не роняет обрабо
     assert.match(toUser[0].text, /Welcome to the 1xBet/, `статус ${status}`);
   }
   globalThis.fetch = real;
+});
+
+// Регрессия на «нажал кнопку — ответ пришёл через несколько часов».
+//
+// Когда Supabase перестал принимать соединения, sb() ждал ответа без таймаута,
+// а ответ Telegram ждал sb(). Telegram не дожидался, считал доставку
+// неудавшейся и складывал апдейт в очередь повторов — ответ приходил тогда,
+// когда база оживала.
+//
+// Здесь проверяется обе половины лечения: вебхук отвечает 200 несмотря на
+// мёртвую базу, и человек получает короткий отказ вместо молчания.
+test('база не отвечает: 200 Telegram и внятный отказ человеку', async () => {
+  const h = await harness();
+  const real = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const u = typeof input === 'string' ? input : input.url;
+    if (u.startsWith(SUPA)) {
+      // Именно так выглядит сработавший AbortSignal.timeout.
+      const e = new Error('The operation was aborted due to timeout');
+      e.name = 'TimeoutError';
+      throw e;
+    }
+    return real(input, init);
+  };
+  h.sent.length = 0;
+  const res = await h.post('india', h.msg('/start'));
+  globalThis.fetch = real;
+
+  // 200 обязателен: на любом другом коде Telegram уходит в повторы, а это и
+  // есть та самая очередь, из-за которой ответ приезжал часами.
+  assert.strictEqual(res.status, 200, 'Telegram обязан получить 200');
+
+  const toUser = h.sent.filter(m => !m.__admin);
+  assert.strictEqual(toUser.length, 1, 'человеку обязан уйти ровно один отказ');
+  assert.match(toUser[0].text, /temporarily unavailable/i,
+    'отказ должен быть понятным, а не молчанием');
 });
 
 test('нечитаемое тело даёт понятную ошибку, а не «Unexpected end of JSON»', async () => {
