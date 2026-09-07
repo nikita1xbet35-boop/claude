@@ -33,6 +33,33 @@ const cors = {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ── Выбор отправителя (Блок C §2.3) ─────────────────────────────────────────
+// Раньше здесь стояла константа 'main', и весь пул отправителей вместе с
+// четырьмя функциями вокруг него не использовался ничем. Пока писем мало, это
+// незаметно; на 250 письмах в сутки с одного непрогретого адреса домен уезжает
+// в спам за неделю.
+//
+// Кэш на прогон, а не запрос на каждый лид: fn_next_smtp_account выбирает по
+// daily_sent, а тот при формировании очереди не меняется — счётчик растёт в
+// момент отправки. Сто одинаковых запросов дали бы сто одинаковых ответов.
+//
+// Аккаунт, записанный здесь, — это НАМЕРЕНИЕ, а не окончательное решение:
+// строка может отправиться через сутки, когда лимиты уже другие. process-queue
+// перепроверяет его перед отправкой и при необходимости берёт следующий.
+const senderCache = new Map<string, string | null>();
+async function senderFor(brandId: string | null): Promise<string | null> {
+  if (!brandId) return null;
+  if (senderCache.has(brandId)) return senderCache.get(brandId)!;
+  let id: string | null = null;
+  try {
+    const { data } = await supabase.rpc('fn_next_smtp_account', { p_brand_id: brandId });
+    const row = Array.isArray(data) ? data[0] : data;
+    id = row?.id ?? null;
+  } catch (_) { id = null; }
+  senderCache.set(brandId, id);
+  return id;
+}
+
 const EMAIL_RE   = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
 const DISPOSABLE = ['mailinator.com', 'guerrillamail.com', '10minutemail.com', 'tempmail', 'throwaway'];
 const PLACEHOLDERS = [
@@ -422,7 +449,8 @@ Deno.serve(async (req: Request) => {
         lead_id:       l.id,
         brand:         l.brand,
         brand_id:      l.brand_id,
-        gmail_account: 'main', // LP account disabled — all sends via main
+        gmail_account:   'main',   // legacy-поле: по нему ещё работают run-sequences и process-partner-queue
+        smtp_account_id: await senderFor(l.brand_id),
         scheduled_at:  new Date(cursor).toISOString(),
         status:        'pending',
         source:        l.source,

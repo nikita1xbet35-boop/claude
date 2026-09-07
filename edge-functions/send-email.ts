@@ -5,8 +5,9 @@
 //   - Subject: RFC 2047 base64 encoded-word only when non-ASCII is present
 //   - From name: ASCII only
 //
-// Called by process-queue with: { to, subject, body, account }
-// account = 'lp' → LuckyPari Gmail; anything else → main Gmail
+// Called by process-queue with: { to, subject, body, account, credentials_ref }
+// credentials_ref — имя секрета с логином и паролем ('GMAIL_MAIN', 'SMTP_ACC_2').
+// account — legacy-поле, влияет только на отображаемое имя отправителя.
 //
 // Required secrets (set in Supabase dashboard → Settings → Edge Functions):
 //   GMAIL_USER_MAIN  — Gmail address for 1xBet/1xCasino outreach
@@ -184,8 +185,8 @@ Deno.serve(async (req: Request) => {
       { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  const { to, subject, body: emailBody, account, in_reply_to, references } = body as {
-    to: string; subject: string; body: string; account: string;
+  const { to, subject, body: emailBody, account, credentials_ref, in_reply_to, references } = body as {
+    to: string; subject: string; body: string; account: string; credentials_ref?: string;
     in_reply_to?: string; references?: string;
   };
 
@@ -200,12 +201,30 @@ Deno.serve(async (req: Request) => {
   // (e.g. a non-app password → Gmail 534 "Application-specific password required")
   // would silently block every LuckyPari send while 1xBet keeps working.
   const useLp = account === 'lp';
-  const gmailUser = Deno.env.get('GMAIL_USER_MAIN');
-  const gmailPass = Deno.env.get('GMAIL_PASS_MAIN');
+
+  // ── Креды по ссылке на секрет (Блок C §2.1) ───────────────────────────────
+  // В smtp_accounts.credentials_ref лежит ИМЯ секрета, а не сам пароль: пароль
+  // в таблице утекал бы в каждый бэкап, в каждый SELECT * из дашборда и в
+  // каждый лог запроса — тем более что права anon на эту таблицу выданы ещё
+  // миграцией 038.
+  //
+  // Правило имён: ref 'SMTP_ACC_2' → переменные SMTP_ACC_2_USER и
+  // SMTP_ACC_2_PASS. Исторический аккаунт назван 'GMAIL_MAIN', и под него
+  // оставлен запасной путь к GMAIL_USER_MAIN/GMAIL_PASS_MAIN — переименовывать
+  // работающие секреты ради единообразия значит уронить отправку на ровном
+  // месте.
+  const ref = credentials_ref || 'GMAIL_MAIN';
+  const gmailUser = Deno.env.get(`${ref}_USER`)
+    || (ref === 'GMAIL_MAIN' ? Deno.env.get('GMAIL_USER_MAIN') : undefined);
+  const gmailPass = Deno.env.get(`${ref}_PASS`)
+    || (ref === 'GMAIL_MAIN' ? Deno.env.get('GMAIL_PASS_MAIN') : undefined);
 
   if (!gmailUser || !gmailPass) {
-    return new Response(JSON.stringify({ error: 'GMAIL_USER_MAIN or GMAIL_PASS_MAIN is not set in Supabase Secrets' }),
-      { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
+    // Имя секрета в ответе — не утечка: это имя переменной, а не её значение.
+    // Без него «письма не уходят» не отличить от «не тот аккаунт настроен».
+    return new Response(JSON.stringify({
+      error: `credentials for ${ref} are not set in Supabase Secrets (${ref}_USER / ${ref}_PASS)`,
+    }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
   if (gmailPass === 'default' || gmailPass.length < 8) {
