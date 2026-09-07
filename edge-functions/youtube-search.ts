@@ -2,7 +2,7 @@
 // On-demand YouTube channel finder for the dashboard "YouTube" tab. Unlike the
 // email/form pipeline, this NEVER auto-sends: it just builds a searchable base of
 // betting/tipster channels with every contact we can pull (email / Telegram /
-// WhatsApp / links), stored in telegram_channels (partner_type='youtube'). The
+// WhatsApp / links), stored in youtube_channels (partner_type='youtube'). The
 // operator works the base by hand and can push a channel into the send pipeline
 // later from the UI.
 //
@@ -219,7 +219,7 @@ Deno.serve(async (req: Request) => {
     const pages     = isCron ? 1  : Math.min(5, Math.max(1, parseInt(String(body.pages ?? 3)) || 3));
 
     // Existing YouTube channel URLs — de-dupe so re-runs don't pile up rows.
-    const { data: existing } = await supabase.from('telegram_channels')
+    const { data: existing } = await supabase.from('youtube_channels')
       .select('id,url,email,telegram,whatsapp').eq('partner_type', 'youtube').limit(10000);
     const byUrl = new Map<string, any>();
     for (const r of (existing || [])) if (r.url) byUrl.set(r.url.toLowerCase(), r);
@@ -306,13 +306,13 @@ Deno.serve(async (req: Request) => {
           if (!prev.telegram && contacts.telegram) patch.telegram = contacts.telegram;
           if (!prev.whatsapp && contacts.whatsapp) patch.whatsapp = contacts.whatsapp;
           if (Object.keys(patch).length) {
-            await supabase.from('telegram_channels').update(patch).eq('id', prev.id);
+            await supabase.from('youtube_channels').update(patch).eq('id', prev.id);
             updated++;
           }
           continue;
         }
 
-        const { error } = await supabase.from('telegram_channels').insert([row]);
+        const { error } = await supabase.from('youtube_channels').insert([row]);
         if (!error) { byUrl.set(url.toLowerCase(), { id: null, url, ...contacts }); saved++; perGeo[geo]++; }
       }
      } catch (geoErr: any) {
