@@ -861,123 +861,235 @@ async function scheduledHandler(event, env, ctx) {
       }
     };
 
-    const cron = event.cron;
+    // ── Диспетчер расписания (Блок D) ──────────────────────────────────────
+    //
+    // Раньше здесь было пять веток по строке крона. Расписание жило в
+    // wrangler.jsonc, обработчики — тут, и синхронизировать их было нечем:
+    // триггер */12 стоял без обработчика, а ветки */3 и "0 7 * * *" — без
+    // триггеров. Поиск и суточные задачи не запускались вообще, и заметить
+    // это можно было только сверив два файла глазами.
+    //
+    // Теперь триггер один (* * * * *), а что запускать — решает таблица
+    // scheduled_tasks. Расхождение стало невозможным: обработчик берёт имя
+    // функции из той же строки, что задаёт интервал.
+    const sbHeaders = {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_KEY,
+      Authorization: 'Bearer ' + SUPABASE_KEY,
+      Prefer: 'return=representation',
+    };
+    const rest = async (path, init = {}) => {
+      const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+        // Тик длится минуту; запрос к базе, висящий дольше, гарантированно
+        // бесполезен — следующий тик уже на подходе.
+        signal: AbortSignal.timeout(10_000),
+        ...init,
+        headers: { ...sbHeaders, ...(init.headers || {}) },
+      });
+      if (!res.ok) throw new Error(`${init.method || 'GET'} ${path} → ${res.status}: ${await res.text()}`);
+      const body = await res.text();
+      return body ? JSON.parse(body) : null;
+    };
 
-    if (cron === '*/2 * * * *') {
-      // Fast tick — send emails + top-up queue + extract contacts near-continuously.
-      // PARALLEL: sequential awaits starved extract-contacts whenever process-queue
-      // ran long (it produced zero run logs for weeks until this was caught).
-      await Promise.all([
-        call('process-queue', {}),
-        call('generate-queue', {}),
-        call('extract-contacts', {}),
-        // Partner bases: per-base auto-send (own template + own daily limit + own
-        // toggle). Sends nothing unless a base has sending_enabled = true.
-        call('process-partner-queue', {}),
-        // DataForSEO pipeline queue filler. Separate function, disjoint lead set,
-        // own ceiling in pipeline_limits — process-queue drains both queues but
-        // enforces each pipeline's limit and pause switch independently.
-        call('generate-queue-dfs', {}),
-      ]);
-      return;
-    }
+    const nowIso = () => new Date().toISOString();
 
-    if (cron === '*/3 * * * *') {
-      // Search pipeline + form channel, all in parallel (independent Supabase fns).
-      // The form functions used to live on a dedicated */10 trigger, but Cloudflare's
-      // free plan caps cron triggers at 5 — the 6th silently never fired, so
-      // find-contact-form never ran and no forms were ever submitted. Folding them
-      // into this proven tick guarantees they run (and detection is now 3x faster).
-      //   find-contact-form  — detect + classify contact forms (read-only)
-      //   process-form-queue — submit simple forms (armed via FORM_SENDING_ENABLED)
+    try {
+      // 1. Снять протухшие блокировки.
       //
-      // DataForSEO pipeline stages 2 and 3 ride this tick too. Stage 1
-      // (dfs-harvest) is deliberately NOT scheduled: every call costs real money
-      // and it is meant to run in large, infrequent batches, fired by hand from
-      // the DataForSEO tab.
-      //   dfs-qualify — judges raw domains from the link graph, LLM-batched
-      //   dfs-enrich  — fetches contacts + analytics ids for promoted leads
-      await Promise.all([
-        call('find-and-queue', {}),
-        call('find-contact-form', {}),
-        call('process-form-queue', {}),
-        call('dfs-qualify', {}),
-        call('dfs-enrich', {}),
-      ]);
-      return;
-    }
+      // Задача, чей воркер умер посреди работы, осталась бы залоченной
+      // навсегда — и молча перестала бы запускаться. Это ровно тот класс
+      // поломки, ради которого блок затевался, поэтому снятие идёт первым и
+      // помечается timeout, а не просто разлочивается: отличие «упало по
+      // таймауту» от «ни разу не запускалось» видно в last_status.
+      const stale = await rest(
+        `scheduled_tasks?locked_at=not.is.null&select=id,name,locked_at,lock_ttl_sec`);
+      const staleIds = (stale || [])
+        .filter(t => Date.parse(t.locked_at) + t.lock_ttl_sec * 1000 < Date.now())
+        .map(t => t.id);
+      if (staleIds.length) {
+        await rest(`scheduled_tasks?id=in.(${staleIds.join(',')})`, {
+          method: 'PATCH',
+          body: JSON.stringify({ locked_at: null, last_status: 'timeout' }),
+        });
+        console.warn('dispatcher: снял протухшие блокировки:', staleIds.length);
+      }
 
-    if (cron === '*/15 * * * *') {
-      // Quota checks + the v5 background brains. (Watchdog agent disabled — no
-      // Anthropic key; the function stays deployed but is not scheduled.)
-      //   run-sequences   — P0.3 follow-up engine. Enqueues the next touch for
-      //                     leads whose next_action_at is due. Safe to run more
-      //                     often than hourly: it only acts on due rows and drops
-      //                     anyone who replied/bounced/unsubscribed.
-      //   validate-emails — P0.1 gate. Verifies addresses in bulk BEFORE they can
-      //                     reach send_queue, so dead ones never burn domain rep.
-      //   score-leads     — P1.1. Scores + hard-filters new leads so the queue
-      //                     goes out best-first instead of in import order.
+      // 2. Кого пора запускать.
+      const tasks = await rest(
+        'scheduled_tasks?enabled=eq.true&locked_at=is.null' +
+        '&select=id,name,handler,interval_sec,priority,pipeline,last_run_at,consecutive_errors' +
+        '&order=priority.asc');
+
+      // 3. Пайплайны на паузе. pipeline_limits остаётся хозяином этой
+      //    настройки — диспетчер её читает, а не заменяет.
+      const limits = await rest('pipeline_limits?select=pipeline,paused');
+      const paused = new Set((limits || []).filter(l => l.paused).map(l => l.pipeline));
+
+      const due = (tasks || [])
+        .filter(t => !t.pipeline || !paused.has(t.pipeline))
+        .filter(t => !t.last_run_at
+                  || Date.parse(t.last_run_at) + t.interval_sec * 1000 <= Date.now())
+        // При нехватке слотов важнее не только приоритет, но и насколько
+        // задача просрочена: иначе низкоприоритетная задача, обойдённая один
+        // раз, будет обойдена и во все следующие тики.
+        .map(t => ({
+          ...t,
+          overdue: t.last_run_at
+            ? (Date.now() - Date.parse(t.last_run_at)) / (t.interval_sec * 1000)
+            : Infinity,
+        }))
+        .sort((a, b) => a.priority - b.priority || b.overdue - a.overdue);
+
+      // Сколько задач за тик. Строгое «одна за тик» из ТЗ §2 не выдерживает
+      // арифметики: текущему набору нужно ~7800 запусков в сутки при 1440
+      // тиках. Значение живёт в system_config, чтобы менять его без деплоя.
+      let maxPerTick = 8;
+      try {
+        const cfg = await rest(
+          `system_config?key=eq.dispatcher_max_per_tick&select=value`);
+        const v = parseInt(cfg?.[0]?.value, 10);
+        if (Number.isFinite(v) && v > 0) maxPerTick = v;
+      } catch (_) { /* умолчания достаточно */ }
+
+      const batch = due.slice(0, maxPerTick);
+      if (!batch.length) return;
+
+      // 4. Забрать задачи под блокировку ДО запуска.
       //
-      // Telegram outreach agent (discovery only — nothing is ever sent to a
-      // channel owner automatically). All four stages ride this tick because the
-      // free plan caps cron triggers at 5 and all 5 are taken:
-      //   scan-tg-channels   — 6 queries/run, rotating pages, every tick
-      //   extract-tg-contact — reads public channel pages for an owner contact
-      //   draft-tg-message   — writes the message the operator will paste
-      //   send-tg-leads      — delivers lead cards to the operator's own chat
-      // All four run round the clock: this is search, and the operator works the
-      // resulting base by hand. Each self-limits on a ~110s internal deadline so
-      // a long run ends cleanly instead of being killed mid-batch.
-      await Promise.all([
-        call('check-limits', { cron }),
-        call('run-sequences', {}),
-        call('validate-emails', {}),
-        call('score-leads', {}),
-        call('scan-tg-channels', {}),
-        call('extract-tg-contact', {}),
-        call('draft-tg-message', {}),
-        call('send-tg-leads', {}),
-      ]);
-      return;
-    }
+      // Условие locked_at=is.null в самом PATCH — это и есть защита от
+      // двойного запуска: если параллельный тик успел забрать задачу, наш
+      // PATCH не тронет ни строки, и мы её пропустим.
+      const claimed = [];
+      for (const t of batch) {
+        try {
+          const rows = await rest(`scheduled_tasks?id=eq.${t.id}&locked_at=is.null`, {
+            method: 'PATCH',
+            body: JSON.stringify({ locked_at: nowIso() }),
+          });
+          if (rows && rows.length) claimed.push(t);
+        } catch (e) {
+          console.error('dispatcher: не удалось занять', t.name, e && e.message);
+        }
+      }
 
-    if (cron === '0 7 * * *') {
-      // 10:00 MSK — one morning report per day.
-      // archive-keywords rides this tick and self-gates to Mondays: it retires
-      // keywords whose yield died and alerts when a preset's pool runs thin, so
-      // the search pool can't silently burn out the way the v5 one did.
-      await Promise.all([
-        call('daily-report', {}),
-        call('archive-keywords', {}),
-      ]);
-      return;
-    }
+      // 5. Выполнить и записать результат.
+      await Promise.all(claimed.map(async (t) => {
+        const started = Date.now();
+        let status = 'ok', errText = null;
+        try {
+          const res = await fetch(FUNCTIONS_URL + '/' + t.handler, {
+            method: 'POST',
+            headers: sbHeaders,
+            body: JSON.stringify({ cron: true }),
+            // Потолок Cloudflare на подзапрос всё равно ниже, но явный предел
+            // гарантирует, что блокировка снимется в этом же тике.
+            signal: AbortSignal.timeout(110_000),
+          });
+          if (!res.ok) {
+            status = 'error';
+            errText = `HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`;
+          }
+        } catch (e) {
+          status = (e && (e.name === 'TimeoutError' || e.name === 'AbortError'))
+            ? 'timeout' : 'error';
+          errText = String(e && e.message || e).slice(0, 300);
+        }
 
-    if (cron === '*/7 * * * *') {
-      // LuckyPari outreach — separate brand, own quota. Fires ~9x/hour and sends
-      // one email per tick, spreading 100/day evenly across working hours (no bursts).
-      // find-appstore rides this tick too (Africa-focus week): armed via APPSTORE_ENABLED,
-      // it mines one African store slot per run for app-developer leads (new source, no
-      // extra cron trigger — free plan caps at 5).
-      await Promise.all([
-        call('process-queue-lp', {}),
-        call('find-appstore', {}),
-        // YouTube base auto-fill — one rotating African GEO per tick, self-capped at
-        // 72 searches/day (7200 quota units) so it never burns the 10k/day budget.
-        call('youtube-search', { cron: true }),
-        // Salvage pass over the ~4000 qualified leads that came back with no
-        // contact: archive.org snapshots, open WordPress author endpoints, and
-        // footer socials. Rides this slower tick because archive.org is donated
-        // infrastructure and is polled at ~1 req/s out of courtesy.
-        call('recover-contacts', {}),
-        // Reply listening (P0.2). Every 7 min matches the 5–10 min target and
-        // reuses this tick because the free plan caps cron triggers at 5.
-        // Reads INBOX over IMAP, classifies, and drops a Telegram alert on a
-        // hot lead. Idempotent — it advances a UID cursor in app_state.
-        call('poll-replies', {}),
-      ]);
-      return;
+        const errs = status === 'ok' ? 0 : (t.consecutive_errors || 0) + 1;
+        const patch = {
+          last_run_at: nowIso(),
+          last_status: status,
+          last_error: errText,
+          last_duration_ms: Date.now() - started,
+          consecutive_errors: errs,
+          locked_at: null,
+        };
+
+        // Десять падений подряд — это не случайность, а сломанная задача,
+        // которая жжёт слоты у работающих. Одна ошибка при этом ничего не
+        // выключает: временный сбой сети не должен останавливать конвейер.
+        if (errs >= 10) {
+          patch.enabled = false;
+          console.error(`dispatcher: ${t.name} отключена после ${errs} ошибок подряд`);
+          await call('send-alert', {
+            level: 'error', service: 'dispatcher',
+            message: `${t.name}: ${errs} ошибок подряд, задача отключена`,
+            custom_text: `🔴 <b>Задача отключена</b>\n\n<code>${t.name}</code> упала ${errs} раз подряд `
+              + `и снята с расписания.\n\nПоследняя ошибка:\n<code>${(errText || '').slice(0, 200)}</code>\n\n`
+              + `Включить обратно:\n<code>UPDATE scheduled_tasks SET enabled=true, consecutive_errors=0 `
+              + `WHERE name='${t.name}';</code>`,
+          });
+        }
+
+        try {
+          await rest(`scheduled_tasks?id=eq.${t.id}`, {
+            method: 'PATCH', body: JSON.stringify(patch),
+          });
+        } catch (e) {
+          // Блокировка не снялась — её подберёт шаг 1 следующего тика по TTL.
+          console.error('dispatcher: не записал результат', t.name, e && e.message);
+        }
+      }));
+
+      // 6. Задача, отставшая больше чем на пять своих интервалов.
+      //
+      // Это тот самый сценарий, который полтора месяца никто не замечал:
+      // задача не падает, не ругается — её просто никто не запускает. Ошибок
+      // нет, значит и алертов по ошибкам нет. Ловится только по времени.
+      //
+      // Проверяется по ВСЕМУ списку, включая выключенные: задача, снятая с
+      // расписания счётчиком ошибок, тоже должна попасть на глаза.
+      const all = await rest(
+        'scheduled_tasks?select=name,enabled,interval_sec,last_run_at,last_status,consecutive_errors');
+      const lagging = (all || []).filter(t => {
+        if (!t.enabled) return true;
+        if (!t.last_run_at) return false;   // ещё ни разу — разберётся сам
+        return Date.now() - Date.parse(t.last_run_at) > t.interval_sec * 5000;
+      });
+      if (lagging.length) {
+        // Раз в час, а не на каждом тике: иначе за сутки набежит 1440
+        // одинаковых сообщений, и читать их перестанут в первый же день.
+        const hourSlot = Math.floor(Date.now() / 3_600_000);
+        const marker = `dispatcher_lag_alert_${hourSlot}`;
+        let firstThisHour = false;
+        try {
+          const rows = await rest('system_config', {
+            method: 'POST',
+            headers: { Prefer: 'return=representation,resolution=ignore-duplicates' },
+            body: JSON.stringify({ key: marker, value: JSON.stringify(lagging.length) }),
+          });
+          firstThisHour = !!(rows && rows.length);
+        } catch (_) { /* не смогли отметиться — молчим, чтобы не спамить */ }
+
+        if (firstThisHour) {
+          // Маркер на каждый час иначе копился бы по 24 строки в сутки.
+          // Чистим прошлые сразу же: пусть в таблице живёт ровно текущий.
+          try {
+            await rest(`system_config?key=like.dispatcher_lag_alert_*&key=neq.${marker}`,
+                       { method: 'DELETE' });
+          } catch (_) { /* мусор не критичен */ }
+
+          const lines = lagging.slice(0, 12).map(t => {
+            const mins = t.last_run_at
+              ? Math.round((Date.now() - Date.parse(t.last_run_at)) / 60000)
+              : null;
+            if (!t.enabled) return `• <code>${t.name}</code> — выключена (${t.consecutive_errors} ошибок)`;
+            return `• <code>${t.name}</code> — ${mins} мин назад, ждём каждые ${Math.round(t.interval_sec / 60)} мин`;
+          }).join('\n');
+          await call('send-alert', {
+            level: 'warning', service: 'dispatcher',
+            message: `${lagging.length} задач отстают от расписания`,
+            custom_text: `⏱ <b>Задачи отстают от расписания</b>\n\n${lines}\n\n`
+              + `Состояние целиком:\n<code>SELECT name, enabled, last_run_at, last_status, `
+              + `consecutive_errors FROM scheduled_tasks ORDER BY priority;</code>`,
+          });
+        }
+      }
+
+      console.log(`dispatcher: выполнено ${claimed.length} из ${due.length} готовых`
+        + (lagging.length ? `, отстают ${lagging.length}` : ''));
+    } catch (e) {
+      console.error('dispatcher failed:', e && e.stack || e);
     }
 }
 

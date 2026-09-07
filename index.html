@@ -15111,6 +15111,77 @@ function diagStage(label, value, prevValue, hint){
   </div>`;
 }
 
+// ── Состояние планировщика (Блок D §5) ──────────────────────────────────────
+// Ровно та проблема из аудита: «семь поломок одновременно, каждая маскирует
+// остальные». Задача, которую никто не запускает, не падает и не ругается —
+// увидеть её можно только по времени последнего запуска, и до сих пор такого
+// места в интерфейсе не было.
+//
+// Никаких изысков: одна таблица, отсортированная по приоритету, с явной
+// пометкой тех, кто отстал больше чем на пять своих интервалов.
+async function schedulerPanel(){
+  let rows = [];
+  try {
+    const r = await sb.from('scheduled_tasks')
+      .select('name, enabled, interval_sec, priority, last_run_at, last_status, last_error, consecutive_errors, pipeline')
+      .order('priority');
+    if (r.error) throw r.error;
+    rows = r.data || [];
+  } catch (e) {
+    return `<div style="margin-bottom:24px;padding:16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text2);">
+      Планировщик недоступен: ${e.message || e}
+      <div style="color:var(--text3);margin-top:6px;font-size:12px;">Если таблицы scheduled_tasks ещё нет — миграция 062 не применилась.</div></div>`;
+  }
+  if (!rows.length) return '';
+
+  const now = Date.now();
+  const cell = (v, style='') => `<td style="padding:6px 10px;border-bottom:1px solid var(--border);${style}">${v}</td>`;
+  const body = rows.map(t => {
+    const ranMs  = t.last_run_at ? now - Date.parse(t.last_run_at) : null;
+    const mins   = ranMs === null ? null : Math.round(ranMs / 60000);
+    // Отставание считаем тем же правилом, что и алерт в диспетчере: пять
+    // интервалов. Иначе экран и уведомление говорили бы разное про одно и то же.
+    const lagging = t.enabled && ranMs !== null && ranMs > t.interval_sec * 5000;
+    const dead    = t.enabled && ranMs === null;
+    const colour  = !t.enabled ? 'var(--text3)' : lagging ? 'var(--red)' : 'inherit';
+    const when    = mins === null ? 'ни разу'
+                  : mins < 60 ? `${mins} мин назад`
+                  : `${Math.round(mins / 60)} ч назад`;
+    const status  = !t.enabled ? '⏸ выключена'
+                  : lagging    ? '🔴 отстаёт'
+                  : dead       ? '⏳ ждёт первого запуска'
+                  : ({ ok: '✅', error: '⚠️', timeout: '⏱', skipped: '➖' }[t.last_status] || '·')
+                    + ' ' + (t.last_status || '—');
+    return `<tr style="color:${colour};">
+      ${cell(`<code>${t.name}</code>`)}
+      ${cell(t.interval_sec >= 86400 ? 'раз в сутки' : `каждые ${Math.round(t.interval_sec/60)} мин`, 'color:var(--text3);')}
+      ${cell(when, 'font-variant-numeric:tabular-nums;')}
+      ${cell(status)}
+      ${cell(t.consecutive_errors || '', 'text-align:right;font-variant-numeric:tabular-nums;')}
+      ${cell(t.last_error ? `<span title="${String(t.last_error).replace(/"/g,'&quot;')}">${String(t.last_error).slice(0,60)}</span>` : '', 'color:var(--text3);font-size:11px;')}
+    </tr>`;
+  }).join('');
+
+  const bad = rows.filter(t => !t.enabled
+    || (t.last_run_at && now - Date.parse(t.last_run_at) > t.interval_sec * 5000)).length;
+
+  return `<div style="margin-bottom:28px;padding:20px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+    <div style="font-weight:600;margin-bottom:4px;">Планировщик — ${rows.length} задач${bad ? `, <span style="color:var(--red);">проблемных ${bad}</span>` : ', все по расписанию'}</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px;">Расписание живёт в таблице scheduled_tasks. Пауза задачи — <code>UPDATE scheduled_tasks SET enabled=false WHERE name='...'</code></div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead><tr style="color:var(--text3);text-align:left;">
+        <th style="padding:6px 10px;font-weight:500;">Задача</th>
+        <th style="padding:6px 10px;font-weight:500;">Темп</th>
+        <th style="padding:6px 10px;font-weight:500;">Последний запуск</th>
+        <th style="padding:6px 10px;font-weight:500;">Статус</th>
+        <th style="padding:6px 10px;font-weight:500;text-align:right;">Ошибок</th>
+        <th style="padding:6px 10px;font-weight:500;">Последняя ошибка</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`;
+}
+
 async function initDiag(){
   const box = document.getElementById('diag-content');
   if(!box) return;
@@ -15631,7 +15702,7 @@ const MB = (() => {
         <div class="mb-label" style="margin-bottom:10px;">Ответов по дням (7 дней, все бренды)</div>
         <div style="font-size:12px;color:var(--text3);">Подневный график — следующий проход (нужна отдельная агрегация funnel_stats по датам); цифры выше уже реальные, не заглушка.</div>
       </div>`;
-      box.innerHTML = html;
+      box.innerHTML = await schedulerPanel() + html;
     } catch(e){
       box.innerHTML = `<div class="mb-card"><div style="color:var(--red);font-size:13px;">Не удалось загрузить обзор: ${esc(e.message||e)}</div></div>`;
     }
