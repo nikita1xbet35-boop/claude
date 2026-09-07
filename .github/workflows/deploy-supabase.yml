@@ -80,8 +80,24 @@ jobs:
           }
 
           # ledger table
+          # Эта строка — первое обращение к базе за весь прогон, и именно она
+          # ловит недоступность Supabase. 07.09.2026 она падала три раза подряд
+          # на протяжении пяти часов: пять попыток, каждая HTTP 544, затем
+          # "Connection terminated due to connection timeout".
+          #
+          # 544 здесь означает не "миграция плохая", а "до базы не достучаться":
+          # ни одна миграция при этом даже не запускалась. Отличать эти два
+          # случая важно — во втором чинить надо не SQL, а проект в Supabase
+          # (в тот раз помог Restart project: кончились соединения в пуле).
           run_sql "CREATE TABLE IF NOT EXISTS public.schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now());" \
-            || { echo "::error::could not create schema_migrations"; cat /tmp/mig_out.txt; exit 1; }
+            || {
+              echo "::error::не удалось создать schema_migrations — база недоступна, миграции НЕ применялись"
+              echo "::error::HTTP 544 или connection timeout означает исчерпанный пул соединений Supabase,"
+              echo "::error::а не ошибку в SQL. Дашборд Supabase → Database → Connection pooling,"
+              echo "::error::при необходимости Settings → General → Restart project, затем Re-run."
+              cat /tmp/mig_out.txt
+              exit 1
+            }
 
           # Historical one-shot migrations that must NEVER be replayed. 001 deletes
           # duplicate leads by domain and rebuilds a UNIQUE constraint; it was applied
