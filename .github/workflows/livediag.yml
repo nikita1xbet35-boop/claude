@@ -68,6 +68,23 @@ jobs:
             esac
           }
 
+          # ── Планировщик идёт ПЕРВЫМ ────────────────────────────────────────
+          # Если диспетчер не работает, все цифры ниже бессмысленны: они
+          # описывают систему, которую никто не запускал. Именно так и вышло
+          # 07-09.09 — диспетчер молча падал на правах, конвейер стоял 41 час,
+          # а вся диагностика ниже честно показывала нули, не объясняя причину.
+          echo "=== ПЛАНИРОВЩИК: что реально запускалось ==="
+          q "SELECT name, enabled, to_char(last_run_at, 'MM-DD HH24:MI') AS last_run, round(extract(epoch from (now()-last_run_at))/60) AS mins_ago, last_status, consecutive_errors AS errs, left(coalesce(last_error,''), 60) AS err FROM scheduled_tasks ORDER BY priority LIMIT 30;"; echo ""
+
+          echo "--- задачи, отставшие больше чем на 5 своих интервалов ---"
+          q "SELECT name, round(extract(epoch from (now()-last_run_at))/60) AS mins_ago, round(interval_sec/60.0) AS every_min, last_status FROM scheduled_tasks WHERE enabled AND last_run_at IS NOT NULL AND now()-last_run_at > (interval_sec*5) * interval '1 second' ORDER BY priority;"; echo ""
+
+          echo "--- задачи, не запускавшиеся НИ РАЗУ ---"
+          q "SELECT name, round(interval_sec/60.0) AS every_min, enabled FROM scheduled_tasks WHERE last_run_at IS NULL ORDER BY priority;"; echo ""
+
+          echo "--- тики диспетчера за последний час ---"
+          q "SELECT count(*) AS ticks, max(created_at) AS last_tick FROM error_log WHERE service='dispatch-tasks' AND created_at > now() - interval '1 hour';"; echo ""
+
           echo "=== SEND_QUEUE BY STATUS ==="
           q "SELECT status, count(*) FROM send_queue GROUP BY status ORDER BY count DESC;"; echo ""
 
