@@ -166,10 +166,22 @@ Deno.serve(async (req: Request) => {
         .eq('service', 'millionverifier');
     }
 
-    await supabase.from('error_log').insert([{
-      level: 'info', service: 'validate-emails',
-      message: `checked=${stats.checked} valid=${stats.valid} role=${stats.role} invalid=${stats.invalid} disposable=${stats.disposable} unknown=${stats.unknown} provider=${MV_KEY ? 'millionverifier' : 'builtin'}`,
-    }]).catch(() => {});
+    // try/catch, а НЕ .catch() на билдере.
+    //
+    // Билдер Supabase — thenable БЕЗ метода .catch: обращение к нему бросает
+    // TypeError вместо того, чтобы проглотить ошибку. Строка стояла последней
+    // в функции, поэтому падала она уже после того, как вся работа сделана —
+    // и функция отдавала HTTP 500 с телом успешного результата.
+    //
+    // Пока эти функции не запускались по расписанию, никто этого не видел.
+    // Диспетчер их разбудил и сразу начал считать ошибками: десять подряд — и
+    // задача снимается с расписания сама.
+    try {
+      await supabase.from('error_log').insert([{
+        level: 'info', service: 'validate-emails',
+        message: `checked=${stats.checked} valid=${stats.valid} role=${stats.role} invalid=${stats.invalid} disposable=${stats.disposable} unknown=${stats.unknown} provider=${MV_KEY ? 'millionverifier' : 'builtin'}`,
+      }]);
+    } catch (_) { /* журнал — не критичный путь */ }
 
     return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
   } catch (e: any) {

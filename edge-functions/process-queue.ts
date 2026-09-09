@@ -421,27 +421,6 @@ Deno.serve(async (req: Request) => {
         continue;   // ceiling hit; the row waits for tomorrow
       }
 
-      // ── Отправитель (Блок C §2.3) ───────────────────────────────────────
-      // generate-queue уже выбрал аккаунт и записал его в строку. Но выбирал он
-      // по daily_sent на момент постановки в очередь, а строка может уйти через
-      // сутки — к тому времени аккаунт мог выбрать лимит, встать на паузу по
-      // отказам или сгореть. Поэтому записанный аккаунт здесь ПЕРЕПРОВЕРЯЕТСЯ,
-      // и при негодности берётся следующий свободный аккаунт того же бренда.
-      //
-      // Бренд обязателен и фолбэка на «любой свободный» нет: письмо LuckyPari,
-      // ушедшее с адреса 1xBet, вскрывает связку брендов на стороне получателя.
-      const sender = await resolveSender(
-        item.smtp_account_id as string | null,
-        (lead.brand_id ?? item.brand_id) as string | null,
-      );
-      if (!sender) {
-        // Не ошибка и не потеря: строка остаётся pending и уедет, когда лимиты
-        // обновятся. markFailed здесь наращивал бы retry_count и через три
-        // прогона выбросил бы лид насовсем из-за занятого отправителя.
-        stats.skipped++;
-        noSenderAvailable++;
-        continue;
-      }
       const account      = 'main';   // legacy-поле email_log и send-email
       const usageService = 'gmail_main';
 
@@ -470,6 +449,34 @@ Deno.serve(async (req: Request) => {
         await logError('error', 'process-queue', `Lead ${item.lead_id} not found: ${msg}`, item.lead_id);
         await markFailed(item, msg);
         stats.failed++;
+        continue;
+      }
+
+      // ── Отправитель (Блок C §2.3) ───────────────────────────────────────
+      // Стоит СТРОГО после загрузки лида: бренд берётся у него, и раньше этот
+      // блок стоял выше запроса. Обращение к lead в мёртвой зоне давало
+      // ReferenceError на первом же элементе очереди — то есть отправка не
+      // работала вообще, а снаружи это выглядело как HTTP 500 с телом
+      // успешного результата.
+      //
+      // generate-queue уже выбрал аккаунт и записал его в строку, но выбирал по
+      // daily_sent на момент постановки в очередь. Строка может уйти через
+      // сутки — к тому времени аккаунт мог выбрать лимит, встать на паузу по
+      // отказам или сгореть. Поэтому записанный аккаунт ПЕРЕПРОВЕРЯЕТСЯ, и при
+      // негодности берётся следующий свободный аккаунт того же бренда.
+      //
+      // Бренд обязателен и фолбэка на «любой свободный» нет: письмо LuckyPari,
+      // ушедшее с адреса 1xBet, вскрывает связку брендов на стороне получателя.
+      const sender = await resolveSender(
+        item.smtp_account_id as string | null,
+        (lead.brand_id ?? item.brand_id) as string | null,
+      );
+      if (!sender) {
+        // Не ошибка и не потеря: строка остаётся pending и уедет, когда лимиты
+        // обновятся. markFailed здесь наращивал бы retry_count и через три
+        // прогона выбросил бы лид насовсем из-за занятого отправителя.
+        stats.skipped++;
+        noSenderAvailable++;
         continue;
       }
 
@@ -805,7 +812,7 @@ Deno.serve(async (req: Request) => {
     // очередь встала из-за отправителей.
     if (noSenderAvailable) {
       summaryParts.push(`no_sender=${noSenderAvailable}`);
-      await logError('warn', 'process-queue',
+      await logError('warning', 'process-queue',
         `${noSenderAvailable} писем осталось в очереди: у их бренда нет свободного отправителя `
         + `(дневной лимит выбран, пауза по отказам или аккаунт не заведён)`);
     }

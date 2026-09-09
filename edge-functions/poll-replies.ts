@@ -434,8 +434,20 @@ async function tg(text: string) {
   } catch { /* alerting is best-effort */ }
 }
 
+// then(ok, err), а НЕ .catch().
+//
+// Билдер Supabase — thenable БЕЗ метода .catch: обращение к нему бросает
+// TypeError вместо того, чтобы проглотить ошибку. Здесь это стоило дорого:
+// строка стояла последней в нескольких функциях, падала уже ПОСЛЕ того, как вся
+// работа сделана, и функция отдавала HTTP 500 с телом успешного результата.
+// Пока эти функции не запускались по расписанию, никто этого не видел; крон-
+// диспетчер их разбудил и начал считать ошибками — десять подряд, и задача
+// снимается с расписания сама.
+//
+// then с двумя аргументами поддерживает любой thenable и делает ровно то, что
+// здесь задумано.
 async function logInfo(message: string, level = 'info') {
-  await supabase.from('error_log').insert([{ level, service: 'poll-replies', message }]).catch(() => {});
+  await supabase.from('error_log').insert([{ level, service: 'poll-replies', message }]).then(() => {}, () => {});
 }
 
 // ── Handler ─────────────────────────────────────────────────────────────────
@@ -607,7 +619,7 @@ Deno.serve(async (req: Request) => {
             subject: mail.subject.toLowerCase().startsWith('re:') ? mail.subject : `Re: ${mail.subject}`,
             lang: cls.lang,
             status: 'pending',
-          }]).catch(() => {});
+          }]).then(() => {}, () => {});
           stats.drafted++;
           draftMade = true;
         }

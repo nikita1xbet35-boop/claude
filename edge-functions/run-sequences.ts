@@ -185,10 +185,22 @@ Deno.serve(async (req: Request) => {
       if (!after) stats.completed++;
     }
 
-    await supabase.from('error_log').insert([{
-      level: 'info', service: 'run-sequences',
-      message: `enrolled=${stats.enrolled} queued=${stats.queued} completed=${stats.completed} stopped=${stats.stopped} skipped=${stats.skipped}`,
-    }]).catch(() => {});
+    // try/catch, а НЕ .catch() на билдере.
+    //
+    // Билдер Supabase — thenable БЕЗ метода .catch: обращение к нему бросает
+    // TypeError вместо того, чтобы проглотить ошибку. Строка стояла последней
+    // в функции, поэтому падала она уже после того, как вся работа сделана —
+    // и функция отдавала HTTP 500 с телом успешного результата.
+    //
+    // Пока эти функции не запускались по расписанию, никто этого не видел.
+    // Диспетчер их разбудил и сразу начал считать ошибками: десять подряд — и
+    // задача снимается с расписания сама.
+    try {
+      await supabase.from('error_log').insert([{
+        level: 'info', service: 'run-sequences',
+        message: `enrolled=${stats.enrolled} queued=${stats.queued} completed=${stats.completed} stopped=${stats.stopped} skipped=${stats.skipped}`,
+      }]);
+    } catch (_) { /* журнал — не критичный путь */ }
 
     return new Response(JSON.stringify(stats), { headers: { ...cors, 'Content-Type': 'application/json' } });
   } catch (e: any) {

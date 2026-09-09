@@ -160,13 +160,13 @@ Deno.serve(async (req: Request) => {
             gmail_account: 'main', sent_at: sentAt, bounced: false,
             source: 'partner:' + base.name,
             ...(msgId ? { gmail_message_id: msgId } : {}),
-          }]).catch(() => {});
+          }]).then(() => {}, () => {});
           stats.sent++; sentThisRun++;
         } else {
           await supabase.from('error_log').insert([{
             level: 'warning', service: 'process-partner-queue',
             message: `send failed base=${base.name} lead=${lead.id} ${lead.email}`,
-          }]).catch(() => {});
+          }]).then(() => {}, () => {});
           stats.skipped++;
         }
       }
