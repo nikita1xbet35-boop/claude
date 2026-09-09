@@ -319,7 +319,7 @@ Deno.serve(async (req: Request) => {
        // One GEO failing (quota spike, transient API error) must not sink the rest.
        await supabase.from('error_log').insert([{
          level: 'warning', service: 'youtube-search', message: `geo=${geo}: ${geoErr.message}`,
-       }]).catch(() => {});
+       }]).then(() => {}, () => {});
      }
     }
 
@@ -334,7 +334,7 @@ Deno.serve(async (req: Request) => {
     runErr = String(e?.message || e);
     await supabase.from('error_log').insert([{
       level: 'warning', service: 'youtube-search', message: e.message,
-    }]).catch(() => {});
+    }]).then(() => {}, () => {});
     return new Response(JSON.stringify({ success: false, error: e.message }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } });
 
