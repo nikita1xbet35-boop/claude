@@ -182,6 +182,7 @@ jobs:
             brand-search
             brand-enrich
             generate-queue-brand
+            dispatch-tasks
           "
           for fn in $FUNCTIONS; do
             mkdir -p "supabase/functions/$fn"
